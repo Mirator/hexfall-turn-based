@@ -39,6 +39,26 @@ window.__hexfallTest = {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.getEndTurnButtonCenter() : null;
   },
+  openRestartConfirm() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testOpenRestartConfirm() : false;
+  },
+  cancelRestartConfirm() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testCancelRestartConfirm() : false;
+  },
+  confirmRestartConfirm() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testConfirmRestartConfirm() : false;
+  },
+  getRestartModalState() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testGetRestartModalState() : null;
+  },
+  getCityResolutionModalState() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testGetCityResolutionModalState() : null;
+  },
   selectUnit(unitId) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testSelectUnit(unitId) : false;
@@ -51,9 +71,21 @@ window.__hexfallTest = {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testAttackTarget(targetId) : false;
   },
+  attackCity(cityId) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testAttackCity(cityId) : false;
+  },
   foundCity() {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testFoundCity() : false;
+  },
+  chooseCityOutcome(choice) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testChooseCityOutcome(choice) : false;
+  },
+  cycleCityFocus() {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testCycleCityFocus() : null;
   },
   cycleResearch() {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
@@ -66,6 +98,14 @@ window.__hexfallTest = {
   endTurnImmediate() {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testEndTurnImmediate() : false;
+  },
+  setUnitPosition(unitId, q, r) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testSetUnitPosition(unitId, q, r) : false;
+  },
+  arrangeCombatSkirmish(playerUnitId, enemyUnitId) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testArrangeCombatSkirmish(playerUnitId, enemyUnitId) : false;
   },
 };
 

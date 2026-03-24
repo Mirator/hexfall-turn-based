@@ -30,3 +30,125 @@ Original prompt: I want to make civilization like easy game in JS. Let's init th
 - Added integration suites: combat, terrainMovement, citySystem, researchSystem, victorySystem.
 - Reworked e2e smoke test to validate move -> attack -> found city -> produce unit -> complete tech -> victory.
 - Added docs/spec-005 through docs/spec-009 and updated docs index + README.
+## 2026-03-24 (UX/UI refinement)
+- Added centralized city-founding reason messaging and UI-surface derivation (uiHints/uiActions).
+- Refined HUD to compact persistent chips (turn/selection/research) and dynamic contextual hint panel.
+- Added transient toast channel for short-lived warning/info feedback.
+- Added Found City keyboard shortcut (F) with shared validator/feedback path.
+- Added always-visible restart button with confirm/cancel modal; kept result-screen restart as secondary path.
+- Extended test hooks with restart confirm controls for deterministic e2e coverage.
+- Added integration test for UI hint/action mapping and updated e2e for invalid founding + restart cancel/confirm.
+- Updated specs: spec-003, spec-007, spec-009 for UX alignment.
+## 2026-03-24 (Restart reliability + fresh match generation)
+- Fixed restart modal layering and interaction lock:
+  - added modal backdrop blocker, ESC close, outside-click close, and button depth fix (`confirm/cancel` now above panel).
+  - synchronized modal state through `ui-modal-state-changed` so world commands are blocked while modal is open.
+  - ensured UIScene hydrates from WorldScene snapshot on create so restart is available immediately on first frame.
+- Reworked restart flow to always start a fresh match with a new runtime seed:
+  - introduced `WorldScene.startNewMatch()` with seed regeneration and anti-repeat layout fingerprint checks.
+  - restart confirm now generates a new seeded map/spawn layout instead of reusing fixed positions.
+- Added seeded procedural generation + spawn spacing constraints:
+  - new RNG utilities in `src/core/random.js`.
+  - `createInitialGameState({ seed, minFactionDistance })` now builds map + spawns from seed.
+  - enforced nearest player/enemy spawn distance floor (default 7), bounded retries, and deterministic fallback.
+  - added `map.seed` and `map.spawnMetadata` for test visibility.
+- Expanded testability + automation surface:
+  - `render_game_to_text` now includes `map.seed`, `map.terrainHash`, `map.spawnMetadata`, and `uiModalOpen`.
+  - added hooks: `getRestartModalState`, `arrangeCombatSkirmish`, `setUnitPosition`.
+- Updated test coverage:
+  - new integration suite `tests/integration/matchGeneration.test.js`.
+  - updated `tests/integration/terrainMovement.test.js` for randomized starts.
+  - updated e2e scenario to assert modal visibility/depth, cancel preservation, restart regeneration, spacing floor, and full gameplay chain.
+- Updated docs specs for alignment:
+  - `docs/spec-003-testability.md`
+  - `docs/spec-006-terrain-costs-and-obstacles.md`
+  - `docs/spec-009-victory-conditions-and-scenario-loop.md`
+- Verification complete:
+  - `npm run lint`
+  - `npm test`
+  - `npm run build`
+  - `npm run test:e2e`
+  - inspected `tests/e2e/artifacts/smoke.png` and `tests/e2e/artifacts/restart-modal.png`.
+## 2026-03-24 (Domination-only victory)
+- Removed hold-turn victory path; match now wins only when all enemy units/cities are eliminated.
+- Removed `holdTurnsTarget` from runtime match state and from render payload.
+- Updated result UI copy to remove endurance-based wording.
+- Updated integration + e2e tests so victory is explicitly asserted as `reason: "elimination"`.
+- Updated spec alignment in `docs/spec-009-victory-conditions-and-scenario-loop.md`.
+## 2026-03-24 (Spec-010 revised to empire-wide economy)
+- Implemented empire-wide `food/production/science` stockpiles under `gameState.economy` and updated city economy flow to pool income by owner.
+- Added terrain yields on tiles and city identity/focus loop (`balanced/food/production/science`) with deterministic worked-tile assignment.
+- Reworked city turn processing:
+  - aggregate per-city yields into `economy[owner].lastTurnIncome`,
+  - fund growth from empire `foodStock` with threshold `8 + (population - 1) * 4`,
+  - fund queue production from empire `productionStock` in deterministic city-id order.
+- Updated research loop to consume empire science stock with carryover and leftover preservation (`consumeScienceStock`).
+- Extended UI/test surface:
+  - city chip now includes identity,
+  - added cycle-focus action hook via `window.__hexfallTest.cycleCityFocus()`,
+  - expanded `render_game_to_text` payload economy/city detail fields.
+- Added and aligned docs:
+  - new `docs/spec-010-economy-and-city-identity-lite.md`
+  - updated `docs/spec-003-testability.md`
+  - updated `docs/spec-007-city-founding-and-production-lite.md`
+  - updated `docs/spec-008-tech-tree-lite-and-unlocks.md`
+  - updated `docs/README.md` spec index
+- Refreshed tests:
+  - rewrote `tests/integration/citySystem.test.js` for empire stock growth/production/focus behavior,
+  - rewrote `tests/integration/researchSystem.test.js` for science stock carryover,
+  - updated `tests/integration/uiSurface.test.js` for cycle-focus action availability,
+  - extended `tests/e2e/smoke.mjs` to verify focus cycling, economy progression, growth, and domination victory.
+- Verification run:
+  - `npm run lint`
+  - `npm test`
+  - `npm run build`
+  - `npm run test:e2e`
+  - inspected screenshots:
+    - `tests/e2e/artifacts/smoke.png`
+    - `tests/e2e/artifacts/restart-modal.png`
+- Note: running the standalone skill Playwright client with a background dev-server orchestration was blocked by local execution policy; retained standard e2e + screenshot validation.
+## 2026-03-24 (Settler-only starts + city siege/capture flow)
+- Switched match initialization to settler-only opening:
+  - player starts with one settler,
+  - enemy starts with one settler,
+  - removed starting warriors from initial state and updated id counter baseline.
+- Updated seeded spawn generation metadata and safe-terrain normalization for settler anchors (`playerSettler`, `enemySettler`).
+- Added city durability and siege mechanics:
+  - city fields `health/maxHealth` (default `12/12`),
+  - unit-vs-city attack flow in combat system (`canAttackCity`, `resolveCityAttack`, `resolveCityOutcome`),
+  - player city defeat resolution via modal choice (`capture` or `raze`),
+  - AI deterministic city outcome policy (`capture if no AI cities, else raze`).
+- Added enemy opening behavior for settler starts:
+  - enemy auto-founds first city when valid before normal chase/attack logic.
+- Expanded world/UI interaction model:
+  - enemy city attack targeting + overlays,
+  - city HP rendering on map and in selected-city chip,
+  - city-resolution modal in UIScene with shared interaction lock/backdrop semantics.
+- Extended test hooks and text surface:
+  - new hooks: `attackCity`, `chooseCityOutcome`, `getCityResolutionModalState`,
+  - `render_game_to_text` now includes attackable cities, city HP fields, and `pendingCityResolution`.
+- Updated tests for new baseline and flow:
+  - refreshed integration assumptions for settler-only starts,
+  - added city siege/capture/raze assertions,
+  - added enemy auto-founding assertion,
+  - rewrote e2e smoke path for settler-only -> found -> auto-found -> produce -> city assault -> outcome -> domination.
+- Stabilized e2e teardown:
+  - ensured Playwright browser closes in `finally` even on assertion failure (prevents lingering headless CPU spikes).
+- Updated docs/spec alignment:
+  - new `docs/spec-011-city-siege-and-capture-lite.md`,
+  - updated specs: `spec-003`, `spec-006`, `spec-007`, `spec-009`, `spec-010`,
+  - updated `docs/README.md` index.
+- Verification complete:
+  - `npm run lint`
+  - `npm test`
+  - `npm run test:e2e`
+  - `npm run build`
+  - artifact reviewed: `tests/e2e/artifacts/smoke.png`.
+## 2026-03-24 (E2E headless cleanup hardening)
+- Hardened `tests/e2e/smoke.mjs` teardown to reduce CPU runaway incidents from orphaned headless browser processes.
+- Added signal-aware cleanup (`SIGINT`/`SIGTERM`) so interrupted runs still close browser/server.
+- Added best-effort forced cleanup fallback for `chrome-headless-shell` on Windows when graceful close fails.
+- Verification:
+  - `npm run test:e2e`
+  - `npm run lint`
+  - post-run process check returns zero `chrome-headless-shell` processes.

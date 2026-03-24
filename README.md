@@ -46,9 +46,10 @@ npm run dev
 - Left click highlighted hex to move
 - Left click red-highlighted enemy to attack
 - Left click `End Turn` in top-right UI
-- Select a settler and press `Found City` button
+- Select a settler and press `Found City` (or key `F`)
 - Use `Research` label to cycle active research
 - Use `Cycle Queue` on selected city to switch production target
+- `Restart` is always available in HUD and asks for confirmation
 
 ## Loading + Bundling
 

@@ -1,31 +1,218 @@
 import { describe, expect, it } from "vitest";
-import { createInitialGameState } from "../../src/core/gameState.js";
-import { foundCity, processTurn } from "../../src/systems/citySystem.js";
+import { createInitialGameState, getTileAt } from "../../src/core/gameState.js";
+import { distance } from "../../src/core/hexGrid.js";
+import { applyTerrainDefinition } from "../../src/core/terrainData.js";
+import { assignWorkedHexes, foundCity, processTurn } from "../../src/systems/citySystem.js";
 
-describe("city founding and production", () => {
-  it("settler can found city and city accumulates/uses production", () => {
-    const gameState = createInitialGameState();
+describe("city economy and identity", () => {
+  it("founding initializes city identity fields and removes local stockpiles", () => {
+    const gameState = createInitialGameState({ seed: 11 });
     const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
     expect(settler).toBeTruthy();
     if (!settler) {
       return;
     }
 
-    const foundResult = foundCity(settler.id, gameState);
-    expect(foundResult.ok).toBe(true);
+    const result = foundCity(settler.id, gameState);
+    expect(result.ok).toBe(true);
     expect(gameState.cities.length).toBe(1);
 
     const city = gameState.cities[0];
-    expect(city.storedProduction).toBe(0);
+    expect(city.focus).toBe("balanced");
+    expect(city.workedHexes.length).toBeGreaterThan(0);
+    expect(city.yieldLastTurn).toEqual(expect.objectContaining({ food: expect.any(Number), production: expect.any(Number) }));
+    expect(["agricultural", "industrial", "scholarly", "balanced"]).toContain(city.identity);
+    expect("storedProduction" in city).toBe(false);
+    expect("storedFood" in city).toBe(false);
+  });
 
-    processTurn(gameState, "player");
-    expect(city.storedProduction).toBe(2);
+  it("assigns worked tiles deterministically by focus weights", () => {
+    const gameState = createInitialGameState({ seed: 22 });
+    const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
+    expect(settler).toBeTruthy();
+    if (!settler) {
+      return;
+    }
+    const found = foundCity(settler.id, gameState);
+    expect(found.ok).toBe(true);
+    if (!found.cityId) {
+      return;
+    }
 
-    processTurn(gameState, "player");
-    processTurn(gameState, "player");
+    const city = gameState.cities[0];
+    city.population = 2;
 
-    const producedUnit = gameState.units.find((unit) => unit.owner === "player" && unit.id.startsWith("player-"));
+    const ringOne = getRingOneNeighbors(city, gameState);
+    expect(ringOne.length).toBeGreaterThanOrEqual(3);
+    if (ringOne.length < 3) {
+      return;
+    }
+
+    const [foodHex, productionHex, scienceHex] = ringOne;
+    for (const hex of ringOne) {
+      setTerrain(gameState, hex.q, hex.r, "water");
+    }
+    setTerrain(gameState, city.q, city.r, "plains");
+    setTerrain(gameState, foodHex.q, foodHex.r, "plains");
+    setTerrain(gameState, productionHex.q, productionHex.r, "forest");
+    setTerrain(gameState, scienceHex.q, scienceHex.r, "hill");
+
+    city.focus = "food";
+    assignWorkedHexes(city.id, gameState);
+    expect(hasHex(city.workedHexes, foodHex)).toBe(true);
+
+    city.focus = "production";
+    assignWorkedHexes(city.id, gameState);
+    expect(hasHex(city.workedHexes, productionHex)).toBe(true);
+
+    city.focus = "science";
+    assignWorkedHexes(city.id, gameState);
+    expect(hasHex(city.workedHexes, scienceHex)).toBe(true);
+  });
+
+  it("uses empire food stock for growth and records last-turn yields", () => {
+    const gameState = createInitialGameState({ seed: 33 });
+    const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
+    expect(settler).toBeTruthy();
+    if (!settler) {
+      return;
+    }
+    const founded = foundCity(settler.id, gameState);
+    expect(founded.ok).toBe(true);
+
+    const city = gameState.cities[0];
+    setTerrain(gameState, city.q, city.r, "plains");
+    city.population = 1;
+    city.growthProgress = 0;
+    city.focus = "food";
+
+    gameState.economy.player.foodStock = 6;
+    gameState.economy.player.productionStock = 0;
+    gameState.economy.player.scienceStock = 0;
+
+    const result = processTurn(gameState, "player");
+    expect(result.grew).toContain(city.id);
+    expect(city.population).toBe(2);
+    expect(city.growthProgress).toBe(0);
+    expect(gameState.economy.player.foodStock).toBe(0);
+    expect(gameState.economy.player.lastTurnIncome.food).toBeGreaterThan(0);
+    expect(gameState.economy.player.lastTurnIncome.production).toBeGreaterThanOrEqual(0);
+    expect(result.researchIncome).toBe(gameState.economy.player.lastTurnIncome.science);
+    expect(city.identity).toBe("agricultural");
+  });
+
+  it("spends empire production in deterministic city-id order", () => {
+    const gameState = createInitialGameState({ seed: 44 });
+    gameState.units = [];
+    gameState.cities = [
+      createCity("player-city-1", "player", 2, 2),
+      createCity("player-city-9", "player", 8, 8),
+    ];
+
+    ensureLocalPassableArea(gameState, 2, 2);
+    ensureLocalPassableArea(gameState, 8, 8);
+
+    gameState.economy.player.foodStock = 0;
+    gameState.economy.player.productionStock = 5;
+    gameState.economy.player.scienceStock = 0;
+
+    const result = processTurn(gameState, "player");
+    expect(result.produced.length).toBe(1);
+    expect(gameState.economy.player.productionStock).toBe(1);
+
+    const producedUnit = gameState.units.find((unit) => unit.owner === "player");
     expect(producedUnit).toBeTruthy();
-    expect(gameState.units.some((unit) => unit.type === "warrior")).toBe(true);
+    if (!producedUnit) {
+      return;
+    }
+    expect(distance(producedUnit, { q: 2, r: 2 })).toBeLessThanOrEqual(1);
+  });
+
+  it("does not spend production when a city has no valid spawn hex", () => {
+    const gameState = createInitialGameState({ seed: 55 });
+    gameState.units = [];
+    gameState.cities = [
+      createCity("player-city-1", "player", 2, 2),
+      createCity("player-city-2", "player", 6, 6),
+    ];
+
+    ensureLocalPassableArea(gameState, 2, 2);
+    setTerrain(gameState, 6, 6, "plains");
+    for (const neighbor of [
+      { q: 7, r: 6 },
+      { q: 7, r: 5 },
+      { q: 6, r: 5 },
+      { q: 5, r: 6 },
+      { q: 5, r: 7 },
+      { q: 6, r: 7 },
+    ]) {
+      setTerrain(gameState, neighbor.q, neighbor.r, "water");
+    }
+
+    gameState.economy.player.foodStock = 0;
+    gameState.economy.player.productionStock = 10;
+    gameState.economy.player.scienceStock = 0;
+
+    const result = processTurn(gameState, "player");
+    expect(result.produced.length).toBe(1);
+    expect(gameState.economy.player.productionStock).toBe(6);
   });
 });
+
+function createCity(id, owner, q, r) {
+  return {
+    id,
+    owner,
+    q,
+    r,
+    population: 1,
+    focus: "balanced",
+    workedHexes: [{ q, r }],
+    yieldLastTurn: { food: 0, production: 0, science: 0 },
+    identity: "balanced",
+    growthProgress: 0,
+    health: 12,
+    maxHealth: 12,
+    queue: ["warrior"],
+  };
+}
+
+function getRingOneNeighbors(city, gameState) {
+  const candidates = [
+    { q: city.q + 1, r: city.r },
+    { q: city.q + 1, r: city.r - 1 },
+    { q: city.q, r: city.r - 1 },
+    { q: city.q - 1, r: city.r },
+    { q: city.q - 1, r: city.r + 1 },
+    { q: city.q, r: city.r + 1 },
+  ];
+
+  return candidates.filter((hex) => !!getTileAt(gameState.map, hex.q, hex.r));
+}
+
+function setTerrain(gameState, q, r, terrainType) {
+  const tile = getTileAt(gameState.map, q, r);
+  if (!tile) {
+    return;
+  }
+  applyTerrainDefinition(tile, terrainType);
+}
+
+function ensureLocalPassableArea(gameState, q, r) {
+  setTerrain(gameState, q, r, "plains");
+  const neighbors = [
+    { q: q + 1, r },
+    { q: q + 1, r: r - 1 },
+    { q, r: r - 1 },
+    { q: q - 1, r },
+    { q: q - 1, r: r + 1 },
+    { q, r: r + 1 },
+  ];
+  for (const neighbor of neighbors) {
+    setTerrain(gameState, neighbor.q, neighbor.r, "plains");
+  }
+}
+
+function hasHex(hexes, target) {
+  return hexes.some((hex) => hex.q === target.q && hex.r === target.r);
+}

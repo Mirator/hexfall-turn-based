@@ -2,46 +2,57 @@
 
 ## Goal and scope
 
-- Define clear match end conditions and restart flow.
-- Validate an end-to-end multi-turn gameplay scenario through e2e.
+- Keep a clear domination-only win/loss loop.
+- Ensure restart is always available and safe.
+- Keep full-scenario e2e aligned with current city assault flow.
 
 ## Decisions made (and alternatives rejected)
 
-- Chosen: two win conditions:
-  - enemy elimination
-  - survive until configured hold-turn target
-- Chosen: loss condition is complete player elimination (no units and no cities).
-- Chosen: end-of-match overlay with explicit restart action in UI scene.
-- Rejected for now: score-based or multi-objective victory systems.
+- Chosen: only domination victory (`eliminate all enemy units and cities`).
+- Chosen: defeat condition remains full player elimination (no units and no cities).
+- Chosen: restart is available mid-match and post-result.
+- Chosen: restart uses confirmation modal + interaction lock.
+- Chosen: city defeat now requires explicit resolution (`Capture` / `Raze`) before turn continues.
+- Rejected for now: score/time-based victories and multi-objective win sets.
 
 ## Interfaces/types added
 
 - Match state:
-  - `status`, `reason`, `holdTurnsTarget`
-- Victory system:
+  - `status`, `reason`
+- Victory APIs:
   - `VictorySystem.evaluateMatchState(gameState)`
   - `VictorySystem.getMatchResultLabel(gameState)`
-- New events:
+- UI events:
   - `restart-match-requested`
+  - `ui-modal-state-changed`
+  - `city-outcome-requested`
+  - `ui-toast-requested`
+- Reset and scenario flow:
+  - `WorldScene.startNewMatch(previousLayout?)`
+  - `createInitialGameState({ seed, minFactionDistance })`
 
 ## Behavior and acceptance criteria
 
-- Match switches from `ongoing` to `won`/`lost` when condition triggers.
-- Result overlay appears with outcome text and restart button.
-- Restart resets game state and returns to playable loop.
-- E2E scenario executes:
-  - move -> attack -> found city -> produce unit -> complete tech -> trigger victory
+- Match transitions `ongoing -> won/lost` only through elimination checks.
+- Restart modal blocks gameplay input and closes via cancel/confirm/escape (restart modal path).
+- City-resolution modal blocks gameplay until capture/raze decision is applied.
+- Restart confirm creates a fresh seeded match with regenerated layout.
+- Full e2e scenario covers:
+  - settler-only start
+  - player founding + enemy auto-founding
+  - production to first combat unit
+  - city assault and resolution modal
+  - domination victory after enemy units/cities are removed
 
 ## Validation performed (tests/manual checks)
 
-- Integration test: `tests/integration/victorySystem.test.js`.
-- Updated e2e: `tests/e2e/smoke.mjs` validates full scenario path and final victory.
-- Manual visual validation of result overlay and controls:
-  - `tests/e2e/artifacts/smoke.png`
-  - `tests/e2e/artifacts/mobile-smoke.png`
+- Integration: `tests/integration/victorySystem.test.js`
+- Integration: `tests/integration/combat.test.js` (city resolution impact on elimination path)
+- E2E: `tests/e2e/smoke.mjs` validates domination win chain and modal gates
+- Manual artifact review: `tests/e2e/artifacts/smoke.png`
 
 ## Known gaps and next steps
 
-- No post-match summary stats screen yet.
-- No scenario parameterization UI for alternate victory targets.
-- No separate campaign/meta progression after match completion.
+- No post-match breakdown stats.
+- No campaign/meta progression hooks.
+- No dedicated capture-vs-raze analytics/debug overlay.

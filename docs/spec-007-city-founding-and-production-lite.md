@@ -2,40 +2,45 @@
 
 ## Goal and scope
 
-- Add foundational expansion gameplay through settler city founding.
-- Add city production accumulation and unit spawning.
+- Make city founding the opening action for both factions in a settler-only start.
+- Keep production simple while integrating with empire-wide resource spending.
 
 ## Decisions made (and alternatives rejected)
 
-- Chosen: only `settler` can found cities.
-- Chosen: founding consumes settler and creates a city on that tile.
-- Chosen: city production is lightweight and turn-based with queue cycling.
-- Rejected for now: city tile ownership, districting, food/housing/happiness systems.
+- Chosen: only settlers can found cities.
+- Chosen: both factions start with one settler; no starting warriors.
+- Chosen: enemy auto-founds its first city during enemy turn when valid.
+- Chosen: city queues remain city-level, but spending is from empire `productionStock`.
+- Chosen: discoverability relies on contextual hints/toasts and `F` shortcut (no persistent tutorial blocks).
+- Rejected for now: border expansion, manual worker placement, and building branches in this milestone.
 
 ## Interfaces/types added
 
-- City type:
-  - `id`, `owner`, `q`, `r`, `population`, `productionPerTurn`, `storedProduction`, `queue`
-- City system:
-  - `CitySystem.canFoundCity(unitId, gameState)`
-  - `CitySystem.foundCity(unitId, gameState)`
-  - `CitySystem.processTurn(gameState, owner)`
-  - `CitySystem.cycleCityQueue(cityId, gameState)`
+- `CitySystem.canFoundCity(unitId, gameState)`
+- `CitySystem.foundCity(unitId, gameState)`
+- `CitySystem.processTurn(gameState, owner)`
+- `CitySystem.cycleCityQueue(cityId, gameState)`
+- `CitySystem.getFoundCityReasonText(reason)`
+- City state includes:
+  - `focus`, `workedHexes`, `yieldLastTurn`, `identity`, `growthProgress`, `health`, `maxHealth`, `queue`
 
 ## Behavior and acceptance criteria
 
-- Settler can found a city via UI action when selected.
-- City gains production per turn.
-- Queue item is produced once enough production is accumulated.
-- Produced unit spawns on valid adjacent tile when available.
+- Settler can found city only on valid passable tile with no existing city.
+- Found City action is context-sensitive and provides reasoned disabled feedback.
+- Player founding consumes the settler and selects the new city.
+- Enemy opening behavior auto-founds first enemy city from settler start.
+- City yields feed empire income; queues spend empire production to spawn units.
 
 ## Validation performed (tests/manual checks)
 
-- Integration test: `tests/integration/citySystem.test.js`.
-- E2E scenario includes `found city` step followed by produced unit assertion.
+- Integration: `tests/integration/citySystem.test.js`
+- Integration: `tests/integration/enemyTurn.test.js` (auto-found behavior)
+- Integration: `tests/integration/uiSurface.test.js` (founding hints/action state)
+- E2E: `tests/e2e/smoke.mjs` includes player founding + enemy auto-founding in scenario flow
 
 ## Known gaps and next steps
 
-- No city growth/food model beyond static population field.
-- No building production branch yet (unit-only queue focus).
-- Enemy city behavior is not implemented in this milestone.
+- No building queue branches yet.
+- No city placement preview pathing.
+- No dedicated early-game advisor/tutorial sequence.

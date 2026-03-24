@@ -3,43 +3,48 @@
 ## Goal and scope
 
 - Add medium-term progression through selectable research.
-- Unlock additional production options upon tech completion.
+- Unlock additional production options on tech completion.
+- Align research funding with empire-wide science stock.
 
 ## Decisions made (and alternatives rejected)
 
 - Chosen: small linear tech set (`bronzeWorking`, `masonry`) with prerequisite checks.
-- Chosen: research accrues each turn with baseline + city bonus income.
-- Chosen: completing `bronzeWorking` unlocks `spearman` production.
-- Rejected for now: branching research UI graph and tech trading/diplomacy.
+- Chosen: research consumes pooled empire science (`economy[owner].scienceStock`) plus baseline turn income.
+- Chosen: overflow can complete a tech and carry into the next selectable tech in the same turn.
+- Chosen: `bronzeWorking` unlocks `spearman` production.
+- Rejected for now: full visual tech graph, diplomacy-based tech exchange, and per-city research sliders.
 
 ## Interfaces/types added
 
 - Research state:
   - `activeTechId`, `progress`, `completedTechIds`
 - Tech definitions:
-  - `core/techTree.js`
+  - `src/core/techTree.js`
 - Research system:
   - `ResearchSystem.canSelectResearch()`
   - `ResearchSystem.selectResearch()`
   - `ResearchSystem.cycleResearch()`
   - `ResearchSystem.advanceResearch()`
+  - `ResearchSystem.consumeScienceStock(gameState, owner, baseIncome)`
   - `ResearchSystem.getSelectableTechIds()`
 
 ## Behavior and acceptance criteria
 
-- Player can choose active research (UI cycle action).
-- Research points are applied each turn.
-- Completed tech is stored in `completedTechIds`.
-- Unit unlocks from tech completion are added to production options.
+- Player can choose active research through UI cycle action.
+- Each player turn adds baseline science and spends available empire `scienceStock` on active tech.
+- Completed tech ids are tracked in `completedTechIds`.
+- Overflow supports chained completion/progress in a single turn when enough science exists.
+- Remaining science is preserved in stock when no further tech is selectable.
+- Unit unlocks from completed techs are added to city production options.
 
 ## Validation performed (tests/manual checks)
 
-- Integration test: `tests/integration/researchSystem.test.js`.
-- E2E scenario asserts `bronzeWorking` completion.
-- UI text confirms active/completed research state and unlocked units list.
+- Integration: `tests/integration/researchSystem.test.js`
+- E2E: `tests/e2e/smoke.mjs` verifies `bronzeWorking` completion in a full gameplay chain
+- UI runtime checks show active tech/progress updates during turn advancement
 
 ## Known gaps and next steps
 
-- No dedicated tech panel; current UI uses compact cycling control.
-- No overflow carry behavior between completed and next tech.
-- No building unlock usage yet beyond data placeholder support.
+- No dedicated research panel; current UX uses compact cycling controls.
+- No AI research strategy yet.
+- No building unlock usage beyond data placeholders.

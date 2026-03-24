@@ -1,23 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { createInitialGameState, getTileAt } from "../../src/core/gameState.js";
+import { neighbors } from "../../src/core/hexGrid.js";
 import { getReachable } from "../../src/systems/movementSystem.js";
 
 describe("terrain movement costs and obstacles", () => {
   it("treats mountain/water as blocked and applies movement costs", () => {
     const gameState = createInitialGameState();
-    const playerUnit = gameState.units.find((unit) => unit.owner === "player" && unit.type === "warrior");
+    const playerUnit = gameState.units.find((unit) => unit.owner === "player");
     expect(playerUnit).toBeTruthy();
     if (!playerUnit) {
       return;
     }
 
-    const forestTile = getTileAt(gameState.map, playerUnit.q + 1, playerUnit.r);
-    const waterTile = getTileAt(gameState.map, playerUnit.q, playerUnit.r + 1);
-    const mountainTile = getTileAt(gameState.map, playerUnit.q + 1, playerUnit.r - 1);
-    expect(forestTile && waterTile && mountainTile).toBeTruthy();
-    if (!forestTile || !waterTile || !mountainTile) {
+    const adjacentTiles = neighbors(playerUnit)
+      .map((hex) => getTileAt(gameState.map, hex.q, hex.r))
+      .filter((tile) => !!tile);
+    expect(adjacentTiles.length).toBeGreaterThanOrEqual(3);
+    if (adjacentTiles.length < 3) {
       return;
     }
+
+    const [forestTile, waterTile, mountainTile] = adjacentTiles;
 
     forestTile.terrainType = "forest";
     forestTile.moveCost = 2;

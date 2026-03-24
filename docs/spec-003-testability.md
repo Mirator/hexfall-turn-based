@@ -2,16 +2,17 @@
 
 ## Goal and scope
 
-- Make gameplay state machine-readable for automated validation.
-- Add deterministic time-step hook for test clients.
-- Add Playwright smoke flow for the full select -> move -> end-turn interaction.
+- Keep gameplay machine-readable for deterministic automation.
+- Preserve stable browser test hooks while simulation complexity grows.
+- Validate the full civ-lite loop through a Playwright smoke scenario.
 
 ## Decisions made (and alternatives rejected)
 
-- Chosen: expose browser hooks on `window` for simple integration.
-- Chosen: keep e2e script self-contained (starts dev server, runs browser steps, asserts state).
-- Chosen: keep hooks stable while lazy-loading Phaser through dynamic import.
-- Rejected for now: heavyweight test framework wrappers around Playwright.
+- Chosen: keep hooks on `window` for low-friction automation from e2e and ad-hoc debugging.
+- Chosen: keep `tests/e2e/smoke.mjs` self-contained (spins server, runs scenario, asserts, captures artifact).
+- Chosen: include modal state and city-resolution state in text payload instead of scraping UI visuals.
+- Chosen: harden e2e teardown with signal-aware cleanup (`SIGINT`/`SIGTERM`) and best-effort force-kill fallback for `chrome-headless-shell` to prevent orphan CPU-heavy processes.
+- Rejected for now: moving to a heavier custom browser harness.
 
 ## Interfaces/types added
 
@@ -20,25 +21,53 @@
   - `window.advanceTime(ms: number): void`
   - `window.__hexfallTest.hexToWorld(q, r)`
   - `window.__hexfallTest.getEndTurnButtonCenter()`
+  - `window.__hexfallTest.openRestartConfirm()`
+  - `window.__hexfallTest.cancelRestartConfirm()`
+  - `window.__hexfallTest.confirmRestartConfirm()`
+  - `window.__hexfallTest.getRestartModalState()`
+  - `window.__hexfallTest.getCityResolutionModalState()`
+  - `window.__hexfallTest.selectUnit(unitId)`
+  - `window.__hexfallTest.moveSelected(q, r)`
+  - `window.__hexfallTest.attackTarget(unitId)`
+  - `window.__hexfallTest.attackCity(cityId)`
+  - `window.__hexfallTest.foundCity()`
+  - `window.__hexfallTest.cycleCityFocus()`
+  - `window.__hexfallTest.chooseCityOutcome(choice)`
+  - `window.__hexfallTest.endTurnImmediate()`
+  - `window.__hexfallTest.setUnitPosition(unitId, q, r)`
+  - `window.__hexfallTest.arrangeCombatSkirmish(playerUnitId, enemyUnitId)`
 - E2E command:
   - `npm run test:e2e`
 
 ## Behavior and acceptance criteria
 
-- `render_game_to_text` returns concise JSON with turn/phase, units, selection, movement, terrain summary, cities, research, unlocks, and match status.
-- `advanceTime` exists and advances deterministic simulation time accounting used by tests.
-- Smoke test verifies:
-  - Initial state
-  - Multi-turn chain including move, attack, city founding, production, research completion, and victory
-  - No console/page errors during scenario
+- `render_game_to_text` includes:
+  - map seed/hash/spawn metadata
+  - units/cities/research/economy snapshots
+  - `cities[].health` and `cities[].maxHealth`
+  - `pendingCityResolution`
+  - contextual `uiHints` and `uiActions`
+  - modal lock state (`uiModalOpen`)
+- `advanceTime` remains available for deterministic stepping.
+- Smoke test covers:
+  - settler-only start validation
+  - restart modal open/cancel behavior
+  - player founding and enemy auto-founding
+  - production path to player warrior
+  - city assault and city-resolution modal visibility
+  - deterministic `raze` resolution and domination victory
+  - zero console/page errors
+- Smoke runner must always close Playwright browser and Vite server on success, failure, and interrupt.
+- On Windows, if graceful browser close fails, cleanup force-terminates `chrome-headless-shell.exe` as a last resort.
 
 ## Validation performed (tests/manual checks)
 
 - `npm run test:e2e` passes and captures `tests/e2e/artifacts/smoke.png`.
-- Manual screenshot review confirms UI + map + unit visibility.
-- Mobile viewport capture (`390x844`) confirms the game canvas and controls render on narrow screens.
+- `npm test` validates hook-consumed systems through integration suites.
+- Post-run process check confirms no lingering `chrome-headless-shell` process.
+- Manual artifact review confirms readable HUD overlays and modal states in gameplay captures.
 
 ## Known gaps and next steps
 
-- Expand e2e scenarios for edge interactions (invalid destination, empty click deselect, repeat turn cycles).
-- Add artifact comparison or snapshot checks once visuals stabilize.
+- Add focused e2e for `capture` branch (current smoke uses `raze` branch).
+- Add dedicated artifact capture for city-resolution modal state if visual regressions become common.

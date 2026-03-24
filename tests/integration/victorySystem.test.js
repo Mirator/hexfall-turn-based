@@ -13,13 +13,13 @@ describe("victory conditions", () => {
     expect(gameState.match.reason).toBe("elimination");
   });
 
-  it("wins by hold turns target", () => {
+  it("does not win from turn count alone", () => {
     const gameState = createInitialGameState();
-    gameState.turnState.turn = gameState.match.holdTurnsTarget;
+    gameState.turnState.turn = 99;
 
     evaluateMatchState(gameState);
 
-    expect(gameState.match.status).toBe("won");
-    expect(gameState.match.reason).toBe("hold-turns");
+    expect(gameState.match.status).toBe("ongoing");
+    expect(gameState.match.reason).toBeNull();
   });
 });

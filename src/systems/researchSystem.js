@@ -64,43 +64,75 @@ export function cycleResearch(gameState) {
 /**
  * @param {import("../core/types.js").GameState} gameState
  * @param {number} points
- * @returns {{ completedTechIds: string[] }}
+ * @returns {{ completedTechIds: string[], spentPoints: number, remainingPoints: number }}
  */
 export function advanceResearch(gameState, points) {
   const completedTechIds = [];
-  if (!gameState.research.activeTechId || points <= 0) {
-    return { completedTechIds };
-  }
+  let remainingPoints = Math.max(0, points);
+  let spentPoints = 0;
 
-  const activeTech = TECH_TREE[gameState.research.activeTechId];
-  if (!activeTech) {
-    return { completedTechIds };
-  }
+  while (remainingPoints > 0 && gameState.research.activeTechId) {
+    const activeTech = TECH_TREE[gameState.research.activeTechId];
+    if (!activeTech) {
+      break;
+    }
 
-  gameState.research.progress += points;
-  if (gameState.research.progress < activeTech.cost) {
-    return { completedTechIds };
-  }
+    const remainingCost = Math.max(0, activeTech.cost - gameState.research.progress);
+    const spend = Math.min(remainingPoints, remainingCost);
+    gameState.research.progress += spend;
+    remainingPoints -= spend;
+    spentPoints += spend;
 
-  gameState.research.completedTechIds.push(activeTech.id);
-  completedTechIds.push(activeTech.id);
-  gameState.research.progress = 0;
-  gameState.research.activeTechId = null;
+    if (gameState.research.progress < activeTech.cost) {
+      break;
+    }
 
-  if (activeTech.unlocks.units) {
-    for (const unlockedUnit of activeTech.unlocks.units) {
-      if (!gameState.unlocks.units.includes(unlockedUnit)) {
-        gameState.unlocks.units.push(unlockedUnit);
+    gameState.research.completedTechIds.push(activeTech.id);
+    completedTechIds.push(activeTech.id);
+    gameState.research.progress = 0;
+    gameState.research.activeTechId = null;
+
+    if (activeTech.unlocks.units) {
+      for (const unlockedUnit of activeTech.unlocks.units) {
+        if (!gameState.unlocks.units.includes(unlockedUnit)) {
+          gameState.unlocks.units.push(unlockedUnit);
+        }
       }
+    }
+
+    const nextAvailableTech = getSelectableTechIds(gameState)[0] ?? null;
+    if (nextAvailableTech) {
+      gameState.research.activeTechId = nextAvailableTech;
     }
   }
 
-  const nextAvailableTech = getSelectableTechIds(gameState)[0] ?? null;
-  if (nextAvailableTech) {
-    gameState.research.activeTechId = nextAvailableTech;
+  return { completedTechIds, spentPoints, remainingPoints };
+}
+
+/**
+ * @param {import("../core/types.js").GameState} gameState
+ * @param {"player"|"enemy"} owner
+ * @param {number} baseIncome
+ * @returns {{ completedTechIds: string[], spentScience: number, remainingScience: number, income: number }}
+ */
+export function consumeScienceStock(gameState, owner, baseIncome = 1) {
+  const economy = gameState.economy[owner];
+  if (!economy) {
+    return { completedTechIds: [], spentScience: 0, remainingScience: 0, income: 0 };
   }
 
-  return { completedTechIds };
+  const normalizedBase = Math.max(0, baseIncome);
+  economy.scienceStock += normalizedBase;
+  const income = normalizedBase + economy.lastTurnIncome.science;
+  const result = advanceResearch(gameState, economy.scienceStock);
+  economy.scienceStock = Math.max(0, economy.scienceStock - result.spentPoints);
+
+  return {
+    completedTechIds: result.completedTechIds,
+    spentScience: result.spentPoints,
+    remainingScience: economy.scienceStock,
+    income,
+  };
 }
 
 /**

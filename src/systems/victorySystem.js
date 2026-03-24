@@ -24,12 +24,6 @@ export function evaluateMatchState(gameState) {
     return gameState.match;
   }
 
-  if (gameState.turnState.turn >= gameState.match.holdTurnsTarget) {
-    gameState.match.status = "won";
-    gameState.match.reason = "hold-turns";
-    return gameState.match;
-  }
-
   return gameState.match;
 }
 
@@ -46,5 +40,5 @@ export function getMatchResultLabel(gameState) {
     return "Defeat";
   }
 
-  return gameState.match.reason === "hold-turns" ? "Victory (Hold Turns)" : "Victory (Elimination)";
+  return "Victory (Elimination)";
 }

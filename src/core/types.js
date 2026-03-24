@@ -5,12 +5,30 @@
  */
 
 /**
+ * @typedef {Object} YieldBundle
+ * @property {number} food
+ * @property {number} production
+ * @property {number} science
+ */
+
+/**
  * @typedef {Object} Tile
  * @property {number} q
  * @property {number} r
  * @property {"plains"|"forest"|"hill"|"mountain"|"water"} terrainType
  * @property {number} moveCost
  * @property {boolean} blocksMovement
+ * @property {YieldBundle} yields
+ */
+
+/**
+ * @typedef {Object} SpawnMetadata
+ * @property {number} attempts
+ * @property {boolean} fallbackUsed
+ * @property {number} minFactionDistance
+ * @property {number} nearestFactionDistance
+ * @property {{ player: Hex, enemy: Hex }} anchors
+ * @property {{ playerSettler: Hex, enemySettler: Hex }} spawns
  */
 
 /**
@@ -36,9 +54,30 @@
  * @property {number} q
  * @property {number} r
  * @property {number} population
- * @property {number} productionPerTurn
- * @property {number} storedProduction
+ * @property {"balanced"|"food"|"production"|"science"} focus
+ * @property {Hex[]} workedHexes
+ * @property {YieldBundle} yieldLastTurn
+ * @property {"agricultural"|"industrial"|"scholarly"|"balanced"} identity
+ * @property {number} growthProgress
+ * @property {number} health
+ * @property {number} maxHealth
  * @property {string[]} queue
+ */
+
+/**
+ * @typedef {Object} PendingCityResolution
+ * @property {string} cityId
+ * @property {"player"|"enemy"} attackerOwner
+ * @property {"player"|"enemy"} defenderOwner
+ * @property {Array<"capture"|"raze">} choices
+ */
+
+/**
+ * @typedef {Object} EmpireEconomy
+ * @property {number} foodStock
+ * @property {number} productionStock
+ * @property {number} scienceStock
+ * @property {YieldBundle} lastTurnIncome
  */
 
 /**
@@ -58,20 +97,21 @@
  * @typedef {Object} MatchState
  * @property {"ongoing"|"won"|"lost"} status
  * @property {string|null} reason
- * @property {number} holdTurnsTarget
  */
 
 /**
  * @typedef {Object} GameState
  * @property {TurnState} turnState
- * @property {{ width: number, height: number, tiles: Tile[] }} map
+ * @property {{ width: number, height: number, seed: number, tiles: Tile[], spawnMetadata: SpawnMetadata }} map
  * @property {Unit[]} units
  * @property {City[]} cities
-  * @property {string|null} selectedUnitId
+ * @property {string|null} selectedUnitId
  * @property {string|null} selectedCityId
  * @property {ResearchState} research
  * @property {{ units: string[] }} unlocks
  * @property {MatchState} match
+ * @property {{ player: EmpireEconomy, enemy: EmpireEconomy, researchIncomeThisTurn: number }} economy
+ * @property {PendingCityResolution|null} pendingCityResolution
  * @property {{ unit: number, city: number }} nextIds
  */
 

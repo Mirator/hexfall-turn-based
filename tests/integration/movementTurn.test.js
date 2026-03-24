@@ -6,7 +6,7 @@ import { beginEnemyTurn, beginPlayerTurn } from "../../src/systems/turnSystem.js
 describe("movement and turn systems", () => {
   it("returns reachable tiles using movement budget", () => {
     const gameState = createInitialGameState();
-    const unit = gameState.units.find((candidate) => candidate.owner === "player" && candidate.type === "warrior");
+    const unit = gameState.units.find((candidate) => candidate.owner === "player");
     expect(unit).toBeTruthy();
     if (!unit) {
       return;
@@ -19,7 +19,7 @@ describe("movement and turn systems", () => {
 
   it("consumes movement points and marks unit acted on movement", () => {
     const gameState = createInitialGameState();
-    const unit = gameState.units.find((candidate) => candidate.owner === "player" && candidate.type === "warrior");
+    const unit = gameState.units.find((candidate) => candidate.owner === "player");
     expect(unit).toBeTruthy();
     if (!unit) {
       return;
@@ -39,7 +39,7 @@ describe("movement and turn systems", () => {
 
   it("beginPlayerTurn resets movement and acted flags for player units", () => {
     const gameState = createInitialGameState();
-    const playerUnit = gameState.units.find((unit) => unit.owner === "player" && unit.type === "warrior");
+    const playerUnit = gameState.units.find((unit) => unit.owner === "player");
     expect(playerUnit).toBeTruthy();
     if (!playerUnit) {
       return;
