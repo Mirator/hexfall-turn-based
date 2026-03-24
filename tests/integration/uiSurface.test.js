@@ -65,7 +65,7 @@ describe("UI surface hints/actions", () => {
     expect(ui.uiHints.level).toBe("info");
   });
 
-  it("enables cycle-focus action for player city selection", () => {
+  it("enables direct focus and queue actions for player city selection", () => {
     const gameState = createInitialGameState({ seed: 121 });
     const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
     expect(settler).toBeTruthy();
@@ -78,8 +78,29 @@ describe("UI surface hints/actions", () => {
 
     const city = gameState.cities[0];
     const ui = deriveUiSurface(gameState, null, city, [], []);
-    expect(ui.uiActions.canCycleFocus).toBe(true);
+    expect(ui.uiActions.canSetCityFocus).toBe(true);
+    expect(ui.uiActions.canQueueProduction).toBe(true);
+    expect(ui.uiActions.cityQueueMax).toBe(3);
+    expect(ui.uiActions.cityProductionChoices.length).toBeGreaterThan(0);
     expect(ui.uiHints.primary).toContain("City selected");
+  });
+
+  it("reports queue-full reason when city queue reaches max", () => {
+    const gameState = createInitialGameState({ seed: 122 });
+    const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
+    expect(settler).toBeTruthy();
+    if (!settler) {
+      return;
+    }
+
+    const founded = foundCity(settler.id, gameState);
+    expect(founded.ok).toBe(true);
+
+    const city = gameState.cities[0];
+    city.queue = ["warrior", "settler", "warrior"];
+    const ui = deriveUiSurface(gameState, null, city, [], []);
+    expect(ui.uiActions.canQueueProduction).toBe(false);
+    expect(ui.uiActions.cityQueueReason).toContain("full");
   });
 
   it("shows pending city-resolution hint while modal context is active", () => {

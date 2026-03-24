@@ -11,6 +11,8 @@
 - Chosen: both factions start with one settler; no starting warriors.
 - Chosen: enemy auto-founds its first city during enemy turn when valid.
 - Chosen: city queues remain city-level, but spending is from empire `productionStock`.
+- Chosen: player production queue supports up to 3 slots with add/remove management from contextual city panel.
+- Chosen: player queues do not auto-refill; enemy queues auto-refill with cheapest unlocked unit.
 - Chosen: discoverability relies on contextual hints/toasts and `F` shortcut (no persistent tutorial blocks).
 - Rejected for now: border expansion, manual worker placement, and building branches in this milestone.
 
@@ -20,6 +22,8 @@
 - `CitySystem.foundCity(unitId, gameState)`
 - `CitySystem.processTurn(gameState, owner)`
 - `CitySystem.cycleCityQueue(cityId, gameState)`
+- `CitySystem.enqueueCityQueue(cityId, unitType, gameState)`
+- `CitySystem.removeCityQueueAt(cityId, index, gameState)`
 - `CitySystem.getFoundCityReasonText(reason)`
 - City state includes:
   - `focus`, `workedHexes`, `yieldLastTurn`, `identity`, `growthProgress`, `health`, `maxHealth`, `queue`
@@ -31,6 +35,10 @@
 - Player founding consumes the settler and selects the new city.
 - Enemy opening behavior auto-founds first enemy city from settler start.
 - City yields feed empire income; queues spend empire production to spawn units.
+- City queue behavior:
+  - player queue length cap `3`,
+  - front item is consumed on successful production,
+  - enemy queue auto-refills deterministically when empty.
 
 ## Validation performed (tests/manual checks)
 

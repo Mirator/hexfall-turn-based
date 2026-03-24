@@ -137,6 +137,7 @@ async function run() {
     assert.equal(initialPlayerSettlers.length, 1, "player should start with one settler");
     assert.equal(initialEnemySettlers.length, 1, "enemy should start with one settler");
     assert.equal(initialState.units.some((unit) => unit.type === "warrior"), false, "no warriors at match start");
+    assert.equal(initialState.cityPanel?.visible, false, "city panel should be hidden before city selection");
 
     const scenarioResult = await page.evaluate(() => {
       const getState = () => window.__hexfallTest.getState();
@@ -173,6 +174,37 @@ async function run() {
       }
       if (getState().cities.filter((city) => city.owner === "player").length !== 1) {
         return { ok: false, reason: "player-city-missing" };
+      }
+      const cityPanel = window.__hexfallTest.getCityPanelState();
+      if (!cityPanel?.visible || cityPanel.focusButtons.filter((button) => button.visible).length !== 4) {
+        return { ok: false, reason: "city-panel-not-visible-after-founding" };
+      }
+
+      // Direct focus set + queue add/remove flow.
+      const focusResult = window.__hexfallTest.setCityFocus("production");
+      if (focusResult !== "production") {
+        return { ok: false, reason: "direct-focus-set-failed" };
+      }
+      const focusedCity = getState().cities.find((city) => city.owner === "player");
+      if (!focusedCity || focusedCity.focus !== "production") {
+        return { ok: false, reason: "focus-not-updated" };
+      }
+
+      const queueAfterFirstAdd = window.__hexfallTest.enqueueCityProduction("settler");
+      if (!Array.isArray(queueAfterFirstAdd) || queueAfterFirstAdd.length !== 2) {
+        return { ok: false, reason: "queue-first-enqueue-failed" };
+      }
+      const queueAfterSecondAdd = window.__hexfallTest.enqueueCityProduction("warrior");
+      if (!Array.isArray(queueAfterSecondAdd) || queueAfterSecondAdd.length !== 3) {
+        return { ok: false, reason: "queue-second-enqueue-failed" };
+      }
+      const overfillAttempt = window.__hexfallTest.enqueueCityProduction("warrior");
+      if (overfillAttempt !== false) {
+        return { ok: false, reason: "queue-overfill-should-fail" };
+      }
+      const queueAfterRemove = window.__hexfallTest.removeCityQueueAt(1);
+      if (!Array.isArray(queueAfterRemove) || queueAfterRemove.length !== 2) {
+        return { ok: false, reason: "queue-remove-failed" };
       }
 
       // AI should auto-found on enemy phase.
@@ -293,7 +325,7 @@ async function run() {
 
       // Finish domination if enemy units remain.
       let combatLoops = 0;
-      while (combatLoops < 10) {
+      while (combatLoops < 30) {
         const state = getState();
         if (state.match.status !== "ongoing") {
           break;
@@ -307,7 +339,11 @@ async function run() {
           .filter((unit) => unit.owner === "player")
           .sort((a, b) => b.attack - a.attack || b.health - a.health)[0];
         if (!attacker) {
-          return { ok: false, reason: "no-player-attacker-available" };
+          if (!window.__hexfallTest.endTurnImmediate()) {
+            return { ok: false, reason: "no-player-attacker-and-cannot-advance" };
+          }
+          combatLoops += 1;
+          continue;
         }
 
         const arranged = window.__hexfallTest.arrangeCombatSkirmish(attacker.id, enemyUnits[0].id);

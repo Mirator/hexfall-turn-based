@@ -1,8 +1,9 @@
 import { allocateEntityId, getCityAt, getCityById, getTileAt, getUnitAt, getUnitById, isInsideMap, removeUnitById } from "../core/gameState.js";
 import { neighbors } from "../core/hexGrid.js";
-import { createUnit, getUnitDefinition } from "../core/unitData.js";
+import { createUnit, getAllUnitTypes, getUnitDefinition } from "../core/unitData.js";
 
 export const CITY_MAX_HEALTH = 12;
+export const CITY_QUEUE_MAX = 3;
 
 const FOUND_CITY_REASON_TEXT = {
   "unit-not-found": "Select a settler to found a city.",
@@ -135,6 +136,30 @@ export function cycleCityQueue(cityId, gameState) {
 
 /**
  * @param {string} cityId
+ * @param {"balanced"|"food"|"production"|"science"} focus
+ * @param {import("../core/types.js").GameState} gameState
+ * @returns {{ ok: boolean, reason?: string, focus?: string }}
+ */
+export function setCityFocus(cityId, focus, gameState) {
+  const city = getCityById(gameState, cityId);
+  if (!city) {
+    return { ok: false, reason: "city-not-found" };
+  }
+
+  if (!CITY_FOCUS_ORDER.includes(focus)) {
+    return { ok: false, reason: "invalid-focus" };
+  }
+
+  city.focus = focus;
+  assignWorkedHexes(cityId, gameState);
+  const cityYield = computeCityYield(cityId, gameState);
+  city.yieldLastTurn = cityYield;
+  city.identity = deriveCityIdentity(cityYield);
+  return { ok: true, focus: city.focus };
+}
+
+/**
+ * @param {string} cityId
  * @param {import("../core/types.js").GameState} gameState
  * @returns {{ ok: boolean, reason?: string, focus?: string }}
  */
@@ -146,12 +171,56 @@ export function cycleCityFocus(cityId, gameState) {
 
   const currentIndex = CITY_FOCUS_ORDER.indexOf(city.focus);
   const nextFocus = CITY_FOCUS_ORDER[(currentIndex + 1 + CITY_FOCUS_ORDER.length) % CITY_FOCUS_ORDER.length];
-  city.focus = /** @type {"balanced"|"food"|"production"|"science"} */ (nextFocus);
-  assignWorkedHexes(cityId, gameState);
-  const cityYield = computeCityYield(cityId, gameState);
-  city.yieldLastTurn = cityYield;
-  city.identity = deriveCityIdentity(cityYield);
-  return { ok: true, focus: city.focus };
+  return setCityFocus(cityId, /** @type {"balanced"|"food"|"production"|"science"} */ (nextFocus), gameState);
+}
+
+/**
+ * @param {string} cityId
+ * @param {"warrior"|"settler"|"spearman"} unitType
+ * @param {import("../core/types.js").GameState} gameState
+ * @returns {{ ok: boolean, reason?: string, queue?: string[] }}
+ */
+export function enqueueCityQueue(cityId, unitType, gameState) {
+  const city = getCityById(gameState, cityId);
+  if (!city) {
+    return { ok: false, reason: "city-not-found" };
+  }
+
+  if (!getAllUnitTypes().includes(unitType)) {
+    return { ok: false, reason: "invalid-unit-type" };
+  }
+
+  const availableTypes = getAvailableProductionUnits(gameState);
+  if (!availableTypes.includes(unitType)) {
+    return { ok: false, reason: "unit-not-unlocked" };
+  }
+
+  if (city.queue.length >= CITY_QUEUE_MAX) {
+    return { ok: false, reason: "queue-full" };
+  }
+
+  city.queue.push(unitType);
+  return { ok: true, queue: [...city.queue] };
+}
+
+/**
+ * @param {string} cityId
+ * @param {number} index
+ * @param {import("../core/types.js").GameState} gameState
+ * @returns {{ ok: boolean, reason?: string, queue?: string[] }}
+ */
+export function removeCityQueueAt(cityId, index, gameState) {
+  const city = getCityById(gameState, cityId);
+  if (!city) {
+    return { ok: false, reason: "city-not-found" };
+  }
+
+  if (!Number.isInteger(index) || index < 0 || index >= city.queue.length) {
+    return { ok: false, reason: "queue-index-invalid" };
+  }
+
+  city.queue.splice(index, 1);
+  return { ok: true, queue: [...city.queue] };
 }
 
 /**
@@ -301,8 +370,8 @@ export function processTurn(gameState, owner) {
   }
 
   for (const city of ownerCities) {
-    if (city.queue.length === 0) {
-      const defaultType = getAvailableProductionUnits(gameState)[0];
+    if (city.queue.length === 0 && owner === "enemy") {
+      const defaultType = getCheapestProductionUnit(gameState);
       if (defaultType) {
         city.queue = [defaultType];
       }
@@ -336,6 +405,13 @@ export function processTurn(gameState, owner) {
     unit.movementRemaining = 0;
     gameState.units.push(unit);
     produced.push(unit.id);
+    city.queue.shift();
+    if (owner === "enemy" && city.queue.length === 0) {
+      const refillType = getCheapestProductionUnit(gameState);
+      if (refillType) {
+        city.queue = [refillType];
+      }
+    }
   }
 
   return {
@@ -352,6 +428,27 @@ export function processTurn(gameState, owner) {
 export function getAvailableProductionUnits(gameState) {
   const unlocked = new Set(gameState.unlocks.units);
   return ["warrior", "settler", "spearman"].filter((type) => unlocked.has(type));
+}
+
+/**
+ * @param {import("../core/types.js").GameState} gameState
+ * @returns {"warrior"|"settler"|"spearman"|null}
+ */
+function getCheapestProductionUnit(gameState) {
+  const available = getAvailableProductionUnits(gameState);
+  if (available.length === 0) {
+    return null;
+  }
+
+  return (
+    [...available].sort((a, b) => {
+      const costDelta = getUnitDefinition(a).productionCost - getUnitDefinition(b).productionCost;
+      if (costDelta !== 0) {
+        return costDelta;
+      }
+      return a.localeCompare(b);
+    })[0] ?? null
+  );
 }
 
 function findSpawnHex(city, gameState) {

@@ -10,6 +10,8 @@
 
 - Chosen: ring-1 workable tiles with deterministic assignment by focus.
 - Chosen: growth and production spend from empire stockpiles, not per-city stores.
+- Chosen: city focus is set directly from contextual city panel buttons (not cycle-only UX).
+- Chosen: city production spending follows queue-front consumption with finite queue slots.
 - Chosen: research consumes empire science stock with carryover.
 - Chosen: on city capture, city economy identity fields persist and ownership flips.
 - Rejected for now: gold/upkeep/happiness/trade-route systems.
@@ -25,7 +27,7 @@
 - City durability fields used with capture flow:
   - `health`, `maxHealth`
 - City APIs:
-  - `assignWorkedHexes`, `computeCityYield`, `cycleCityFocus`, `processTurn`
+  - `assignWorkedHexes`, `computeCityYield`, `setCityFocus`, `enqueueCityQueue`, `removeCityQueueAt`, `processTurn`
 
 ## Behavior and acceptance criteria
 
@@ -37,6 +39,7 @@
 - `processTurn(gameState, owner)` aggregates city yield into `economy[owner].lastTurnIncome` and stocks.
 - Growth spends empire `foodStock` with threshold `8 + (population - 1) * 4`.
 - Production spends empire `productionStock` in deterministic city-id order.
+- Player queue uses finite slots and consumes front item on successful production; enemy queue can auto-refill.
 - Capture keeps city identity/economy fields and resets city HP; raze removes city.
 - Research consumes empire science and keeps overflow/leftovers as designed.
 

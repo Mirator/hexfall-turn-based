@@ -14,10 +14,12 @@ import {
 import { axialKey, axialToWorld, neighbors, worldToAxial } from "../core/hexGrid.js";
 import { TERRAIN } from "../core/terrainData.js";
 import {
-  cycleCityFocus,
-  cycleCityQueue,
+  CITY_QUEUE_MAX,
+  enqueueCityQueue,
   foundCity,
   getFoundCityReasonText,
+  removeCityQueueAt,
+  setCityFocus,
   processTurn as processCityTurn,
 } from "../systems/citySystem.js";
 import {
@@ -74,8 +76,9 @@ export class WorldScene extends Phaser.Scene {
     gameEvents.on("end-turn-requested", this.handleEndTurnRequested, this);
     gameEvents.on("found-city-requested", this.handleFoundCityRequested, this);
     gameEvents.on("research-cycle-requested", this.handleResearchCycleRequested, this);
-    gameEvents.on("city-queue-cycle-requested", this.handleCityQueueCycleRequested, this);
-    gameEvents.on("city-focus-cycle-requested", this.handleCityFocusCycleRequested, this);
+    gameEvents.on("city-focus-set-requested", this.handleCityFocusSetRequested, this);
+    gameEvents.on("city-queue-enqueue-requested", this.handleCityQueueEnqueueRequested, this);
+    gameEvents.on("city-queue-remove-requested", this.handleCityQueueRemoveRequested, this);
     gameEvents.on("city-outcome-requested", this.handleCityOutcomeRequested, this);
     gameEvents.on("restart-match-requested", this.handleRestartRequested, this);
     gameEvents.on("ui-modal-state-changed", this.handleUiModalStateChanged, this);
@@ -87,8 +90,9 @@ export class WorldScene extends Phaser.Scene {
       gameEvents.off("end-turn-requested", this.handleEndTurnRequested, this);
       gameEvents.off("found-city-requested", this.handleFoundCityRequested, this);
       gameEvents.off("research-cycle-requested", this.handleResearchCycleRequested, this);
-      gameEvents.off("city-queue-cycle-requested", this.handleCityQueueCycleRequested, this);
-      gameEvents.off("city-focus-cycle-requested", this.handleCityFocusCycleRequested, this);
+      gameEvents.off("city-focus-set-requested", this.handleCityFocusSetRequested, this);
+      gameEvents.off("city-queue-enqueue-requested", this.handleCityQueueEnqueueRequested, this);
+      gameEvents.off("city-queue-remove-requested", this.handleCityQueueRemoveRequested, this);
       gameEvents.off("city-outcome-requested", this.handleCityOutcomeRequested, this);
       gameEvents.off("restart-match-requested", this.handleRestartRequested, this);
       gameEvents.off("ui-modal-state-changed", this.handleUiModalStateChanged, this);
@@ -208,34 +212,69 @@ export class WorldScene extends Phaser.Scene {
     this.evaluateAndPublish();
   };
 
-  handleCityQueueCycleRequested = () => {
+  handleCityFocusSetRequested = (payload) => {
     if (!this.canAcceptPlayerCommands() || !this.gameState.selectedCityId) {
       return;
     }
-    const result = cycleCityQueue(this.gameState.selectedCityId, this.gameState);
+
+    const focus = payload?.focus;
+    if (focus !== "balanced" && focus !== "food" && focus !== "production" && focus !== "science") {
+      return;
+    }
+
+    const result = setCityFocus(this.gameState.selectedCityId, focus, this.gameState);
     if (result.ok) {
       this.evaluateAndPublish();
       gameEvents.emit("ui-toast-requested", {
-        message: "City production queue changed.",
+        message: `City focus: ${result.focus}.`,
         level: "info",
       });
       return;
     }
     gameEvents.emit("ui-toast-requested", {
-      message: "Could not change city queue.",
+      message: "Could not set city focus.",
       level: "warning",
     });
   };
 
-  handleCityFocusCycleRequested = () => {
+  handleCityQueueEnqueueRequested = (payload) => {
     if (!this.canAcceptPlayerCommands() || !this.gameState.selectedCityId) {
       return;
     }
 
-    const result = cycleCityFocus(this.gameState.selectedCityId, this.gameState);
+    const unitType = payload?.unitType;
+    if (unitType !== "warrior" && unitType !== "settler" && unitType !== "spearman") {
+      return;
+    }
+
+    const result = enqueueCityQueue(this.gameState.selectedCityId, unitType, this.gameState);
+    if (!result.ok) {
+      const message = this.getQueueFailureMessage(result.reason);
+      gameEvents.emit("ui-toast-requested", {
+        message,
+        level: "warning",
+      });
+      this.evaluateAndPublish();
+      return;
+    }
+
+    this.evaluateAndPublish();
+    gameEvents.emit("ui-toast-requested", {
+      message: `${capitalizeLabel(unitType)} added to queue (${result.queue?.length ?? 0}/${CITY_QUEUE_MAX}).`,
+      level: "info",
+    });
+  };
+
+  handleCityQueueRemoveRequested = (payload) => {
+    if (!this.canAcceptPlayerCommands() || !this.gameState.selectedCityId) {
+      return;
+    }
+
+    const slotIndex = Number(payload?.index);
+    const result = removeCityQueueAt(this.gameState.selectedCityId, slotIndex, this.gameState);
     if (!result.ok) {
       gameEvents.emit("ui-toast-requested", {
-        message: "Could not change city focus.",
+        message: "Could not remove queue item.",
         level: "warning",
       });
       return;
@@ -243,7 +282,7 @@ export class WorldScene extends Phaser.Scene {
 
     this.evaluateAndPublish();
     gameEvents.emit("ui-toast-requested", {
-      message: `City focus: ${result.focus}.`,
+      message: "Queue item removed.",
       level: "info",
     });
   };
@@ -295,6 +334,19 @@ export class WorldScene extends Phaser.Scene {
     this.uiModalOpen = !!isOpen;
     this.publishState();
   };
+
+  getQueueFailureMessage(reason) {
+    if (reason === "queue-full") {
+      return `Queue is full (${CITY_QUEUE_MAX}/${CITY_QUEUE_MAX}). Remove one item first.`;
+    }
+    if (reason === "unit-not-unlocked") {
+      return "That unit is not unlocked yet.";
+    }
+    if (reason === "city-not-found") {
+      return "Select a city first.";
+    }
+    return "Could not add unit to queue.";
+  }
 
   startNewMatch(previousLayout = null) {
     let nextState = null;
@@ -728,6 +780,15 @@ export class WorldScene extends Phaser.Scene {
       uiHints: uiSurface.uiHints,
       uiActions: uiSurface.uiActions,
       uiModalOpen: this.uiModalOpen,
+      cityPanel: {
+        visible: !!selectedCity && selectedCity.owner === "player" && this.gameState.match.status === "ongoing",
+        queueMax: uiSurface.uiActions.cityQueueMax,
+        selectedCityQueue: selectedCity ? [...selectedCity.queue] : [],
+        queueReason: uiSurface.uiActions.cityQueueReason,
+        canSetCityFocus: uiSurface.uiActions.canSetCityFocus,
+        canQueueProduction: uiSurface.uiActions.canQueueProduction,
+        productionChoices: uiSurface.uiActions.cityProductionChoices,
+      },
       simulatedTimeMs: this.manualTimeMs,
     };
     return JSON.stringify(payload);
@@ -825,12 +886,68 @@ export class WorldScene extends Phaser.Scene {
     if (!cityId) {
       return false;
     }
-    const result = cycleCityFocus(cityId, this.gameState);
+    const city = this.gameState.cities.find((candidate) => candidate.id === cityId);
+    if (!city) {
+      return false;
+    }
+    const focusOrder = ["balanced", "food", "production", "science"];
+    const currentIndex = focusOrder.indexOf(city.focus);
+    const nextFocus = focusOrder[(currentIndex + 1 + focusOrder.length) % focusOrder.length];
+    const result = setCityFocus(
+      cityId,
+      /** @type {"balanced"|"food"|"production"|"science"} */ (nextFocus),
+      this.gameState
+    );
     if (!result.ok) {
       return false;
     }
     this.evaluateAndPublish();
     return result.focus;
+  }
+
+  testSetCityFocus(focus) {
+    const cityId = this.gameState.selectedCityId;
+    if (!cityId) {
+      return false;
+    }
+    if (focus !== "balanced" && focus !== "food" && focus !== "production" && focus !== "science") {
+      return false;
+    }
+    const result = setCityFocus(cityId, focus, this.gameState);
+    if (!result.ok) {
+      return false;
+    }
+    this.evaluateAndPublish();
+    return result.focus;
+  }
+
+  testEnqueueCityProduction(unitType) {
+    const cityId = this.gameState.selectedCityId;
+    if (!cityId) {
+      return false;
+    }
+    if (unitType !== "warrior" && unitType !== "settler" && unitType !== "spearman") {
+      return false;
+    }
+    const result = enqueueCityQueue(cityId, unitType, this.gameState);
+    if (!result.ok) {
+      return false;
+    }
+    this.evaluateAndPublish();
+    return [...(result.queue ?? [])];
+  }
+
+  testRemoveCityQueueAt(index) {
+    const cityId = this.gameState.selectedCityId;
+    if (!cityId) {
+      return false;
+    }
+    const result = removeCityQueueAt(cityId, index, this.gameState);
+    if (!result.ok) {
+      return false;
+    }
+    this.evaluateAndPublish();
+    return [...(result.queue ?? [])];
   }
 
   testCycleResearch() {
@@ -944,4 +1061,11 @@ function drawHex(graphics, x, y, size, fillColor, fillAlpha, strokeColor, stroke
     graphics.fillPoints(points, true);
   }
   graphics.strokePoints(points, true);
+}
+
+function capitalizeLabel(value) {
+  if (!value) {
+    return "";
+  }
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }

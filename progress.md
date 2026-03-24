@@ -152,3 +152,26 @@ Original prompt: I want to make civilization like easy game in JS. Let's init th
   - `npm run test:e2e`
   - `npm run lint`
   - post-run process check returns zero `chrome-headless-shell` processes.
+## 2026-03-24 (Spec-012 city bottom command panel + 3-slot queue)
+- Reworked city interaction UX from top-right city buttons to a contextual bottom city command panel in `UIScene`.
+- Added direct focus buttons (`Balanced/Food/Prod/Sci`) and queue controls (`enqueue` + `remove slot`) with transient hints/toasts.
+- Added city queue APIs and rules in `citySystem`:
+  - `setCityFocus`, `enqueueCityQueue`, `removeCityQueueAt`, queue cap `3`,
+  - player queue is finite, front item consumed on successful production,
+  - enemy queue auto-refills with cheapest unlocked unit when empty.
+- Updated world event wiring and test hooks:
+  - events: `city-focus-set-requested`, `city-queue-enqueue-requested`, `city-queue-remove-requested`,
+  - hooks: `setCityFocus`, `enqueueCityProduction`, `removeCityQueueAt`, `getCityPanelState`.
+- Expanded UI/testability surface:
+  - `uiActions` now includes queue/focus action state and production choice metadata,
+  - `render_game_to_text` now includes `cityPanel` snapshot details.
+- Updated docs/spec alignment:
+  - added `docs/spec-012-city-bottom-command-panel-and-queue-ui.md`,
+  - updated `docs/spec-003-testability.md`, `docs/spec-007-city-founding-and-production-lite.md`,
+  - updated `docs/spec-010-economy-and-city-identity-lite.md`, `docs/README.md`.
+## 2026-03-24 (City panel visibility hotfix)
+- Fixed city command button layering in `UIScene`: focus/production/queue buttons are now rendered above the city panel background (`depth 14/15`), restoring visibility and clickability.
+- Stabilized e2e scenario timing bound in `tests/e2e/smoke.mjs` (`combatLoops` increased) to reduce random-seed late-game false negatives while preserving domination assertions.
+- Verification:
+  - `npm run lint`
+  - `npm run test:e2e`

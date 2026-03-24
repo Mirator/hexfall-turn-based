@@ -59,6 +59,10 @@ window.__hexfallTest = {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testGetCityResolutionModalState() : null;
   },
+  getCityPanelState() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testGetCityPanelState() : null;
+  },
   selectUnit(unitId) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testSelectUnit(unitId) : false;
@@ -86,6 +90,18 @@ window.__hexfallTest = {
   cycleCityFocus() {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testCycleCityFocus() : null;
+  },
+  setCityFocus(focus) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testSetCityFocus(focus) : null;
+  },
+  enqueueCityProduction(unitType) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testEnqueueCityProduction(unitType) : false;
+  },
+  removeCityQueueAt(index) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testRemoveCityQueueAt(index) : false;
   },
   cycleResearch() {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;

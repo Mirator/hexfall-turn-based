@@ -15,6 +15,7 @@ Every meaningful work item in this repository must be captured in a spec file un
 - [spec-009-victory-conditions-and-scenario-loop.md](./spec-009-victory-conditions-and-scenario-loop.md) - Win/loss conditions, match-end UI, restart, and full scenario e2e.
 - [spec-010-economy-and-city-identity-lite.md](./spec-010-economy-and-city-identity-lite.md) - Empire-wide economy stocks, city focus/identity, and yield-driven growth/production.
 - [spec-011-city-siege-and-capture-lite.md](./spec-011-city-siege-and-capture-lite.md) - City HP, assault flow, capture/raze resolution, and deterministic AI outcome policy.
+- [spec-012-city-bottom-command-panel-and-queue-ui.md](./spec-012-city-bottom-command-panel-and-queue-ui.md) - Contextual city command panel with direct focus controls and 3-slot production queue UX.
 
 ## Spec Template Rules
 

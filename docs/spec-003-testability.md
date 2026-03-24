@@ -32,6 +32,10 @@
   - `window.__hexfallTest.attackCity(cityId)`
   - `window.__hexfallTest.foundCity()`
   - `window.__hexfallTest.cycleCityFocus()`
+  - `window.__hexfallTest.setCityFocus(focus)`
+  - `window.__hexfallTest.enqueueCityProduction(unitType)`
+  - `window.__hexfallTest.removeCityQueueAt(index)`
+  - `window.__hexfallTest.getCityPanelState()`
   - `window.__hexfallTest.chooseCityOutcome(choice)`
   - `window.__hexfallTest.endTurnImmediate()`
   - `window.__hexfallTest.setUnitPosition(unitId, q, r)`
@@ -47,11 +51,15 @@
   - `cities[].health` and `cities[].maxHealth`
   - `pendingCityResolution`
   - contextual `uiHints` and `uiActions`
+  - `cityPanel` snapshot (visibility, queue max/current queue, production choices metadata)
   - modal lock state (`uiModalOpen`)
 - `advanceTime` remains available for deterministic stepping.
 - Smoke test covers:
   - settler-only start validation
   - restart modal open/cancel behavior
+  - city panel visibility after founding
+  - direct city focus set through test hook
+  - 3-slot queue add/remove/full rejection behavior
   - player founding and enemy auto-founding
   - production path to player warrior
   - city assault and city-resolution modal visibility

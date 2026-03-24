@@ -3,6 +3,25 @@ import { gameEvents } from "../core/eventBus.js";
 
 const BUTTON_WIDTH = 180;
 const BUTTON_HEIGHT = 40;
+const CITY_PANEL_FOCUS_WIDTH = 88;
+const CITY_PANEL_ACTION_WIDTH = 58;
+const CITY_PANEL_BUTTON_HEIGHT = 30;
+const CITY_PANEL_QUEUE_MAX = 3;
+const FOCUS_MODES = ["balanced", "food", "production", "science"];
+const PRODUCTION_TYPES = ["warrior", "settler", "spearman"];
+
+const FOCUS_LABELS = {
+  balanced: "Balanced",
+  food: "Food",
+  production: "Prod",
+  science: "Sci",
+};
+
+const UNIT_SHORT_LABELS = {
+  warrior: "War",
+  settler: "Set",
+  spearman: "Sp",
+};
 
 export class UIScene extends Phaser.Scene {
   constructor() {
@@ -15,6 +34,7 @@ export class UIScene extends Phaser.Scene {
     this.modalStateOpen = false;
     this.toastTimer = null;
     this.escapeKey = null;
+    this.cityPanelVisible = false;
   }
 
   create() {
@@ -34,9 +54,87 @@ export class UIScene extends Phaser.Scene {
 
     this.endTurnButton = this.createButton("End Turn", "endTurn", () => gameEvents.emit("end-turn-requested"));
     this.foundCityButton = this.createButton("Found City", "foundCity", () => gameEvents.emit("found-city-requested"));
-    this.queueButton = this.createButton("Cycle Queue", "cycleQueue", () => gameEvents.emit("city-queue-cycle-requested"));
-    this.focusButton = this.createButton("Cycle Focus", "cycleFocus", () => gameEvents.emit("city-focus-cycle-requested"));
     this.restartButton = this.createButton("Restart", "restart", () => this.openRestartConfirm());
+
+    this.cityPanel = this.add.rectangle(0, 0, 10, 10, 0xead7b1, 0.95).setDepth(12).setVisible(false);
+    this.cityPanel.setStrokeStyle(2, 0x7d5a2f, 0.9);
+    this.cityPanelTitle = this.add
+      .text(0, 0, "", {
+        fontFamily: "Trebuchet MS",
+        fontSize: "15px",
+        color: "#3d2a14",
+      })
+      .setOrigin(0.5)
+      .setDepth(13)
+      .setVisible(false);
+
+    this.cityFocusButtons = FOCUS_MODES.map((focus) =>
+      this.createButton(
+        FOCUS_LABELS[focus],
+        `city-focus-${focus}`,
+        () => gameEvents.emit("city-focus-set-requested", { focus }),
+        {
+          width: CITY_PANEL_FOCUS_WIDTH,
+          height: CITY_PANEL_BUTTON_HEIGHT,
+          fontSize: "14px",
+          enabledFill: 0x4f6b4a,
+          hoverFill: 0x5d8156,
+          activeFill: 0x2f7a41,
+          disabledFill: 0x6f776d,
+          stroke: 0xe6dbbf,
+        }
+      )
+    );
+    for (const button of this.cityFocusButtons) {
+      button.rectangle.setDepth(14);
+      button.label.setDepth(15);
+    }
+
+    this.cityProductionButtons = PRODUCTION_TYPES.map((unitType) =>
+      this.createButton(
+        "--",
+        `city-enqueue-${unitType}`,
+        () => gameEvents.emit("city-queue-enqueue-requested", { unitType }),
+        {
+          width: CITY_PANEL_ACTION_WIDTH,
+          height: CITY_PANEL_BUTTON_HEIGHT,
+          fontSize: "13px",
+          enabledFill: 0x355e94,
+          hoverFill: 0x4a76ae,
+          activeFill: 0x355e94,
+          disabledFill: 0x6d747e,
+          stroke: 0xe9d9b4,
+        }
+      )
+    );
+    for (const button of this.cityProductionButtons) {
+      button.rectangle.setDepth(14);
+      button.label.setDepth(15);
+    }
+
+    this.cityQueueButtons = [0, 1, 2].map((index) =>
+      this.createButton(
+        `${index + 1}:--`,
+        `city-queue-slot-${index}`,
+        () => gameEvents.emit("city-queue-remove-requested", { index }),
+        {
+          width: CITY_PANEL_ACTION_WIDTH,
+          height: CITY_PANEL_BUTTON_HEIGHT,
+          fontSize: "13px",
+          enabledFill: 0x7c4e2b,
+          hoverFill: 0x956039,
+          activeFill: 0x7c4e2b,
+          disabledFill: 0x7f7568,
+          stroke: 0xf2debb,
+        }
+      )
+    );
+    for (const button of this.cityQueueButtons) {
+      button.rectangle.setDepth(14);
+      button.label.setDepth(15);
+    }
+
+    this.setCityPanelVisible(false);
 
     this.hintPanel = this.add.rectangle(0, 0, 380, 74, 0xf0e4cb, 0.95).setDepth(20).setVisible(false);
     this.hintPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
@@ -240,27 +338,32 @@ export class UIScene extends Phaser.Scene {
       .setDepth(10);
   }
 
-  createButton(label, actionId, onClick, palette = {}) {
+  createButton(label, actionId, onClick, options = {}) {
     const resolvedPalette = {
-      enabledFill: palette.enabledFill ?? 0x355e94,
-      hoverFill: palette.hoverFill ?? 0x4a76ae,
-      disabledFill: palette.disabledFill ?? 0x6d747e,
-      stroke: palette.stroke ?? 0xe9d9b4,
-      textColor: palette.textColor ?? "#fff8e8",
-      enabledAlpha: palette.enabledAlpha ?? 0.96,
-      hoverAlpha: palette.hoverAlpha ?? 1,
-      disabledAlpha: palette.disabledAlpha ?? 0.85,
+      enabledFill: options.enabledFill ?? 0x355e94,
+      hoverFill: options.hoverFill ?? 0x4a76ae,
+      activeFill: options.activeFill ?? options.enabledFill ?? 0x355e94,
+      disabledFill: options.disabledFill ?? 0x6d747e,
+      stroke: options.stroke ?? 0xe9d9b4,
+      textColor: options.textColor ?? "#fff8e8",
+      enabledAlpha: options.enabledAlpha ?? 0.96,
+      hoverAlpha: options.hoverAlpha ?? 1,
+      activeAlpha: options.activeAlpha ?? 0.98,
+      disabledAlpha: options.disabledAlpha ?? 0.85,
     };
 
+    const width = options.width ?? BUTTON_WIDTH;
+    const height = options.height ?? BUTTON_HEIGHT;
+
     const rectangle = this.add
-      .rectangle(0, 0, BUTTON_WIDTH, BUTTON_HEIGHT, resolvedPalette.enabledFill, resolvedPalette.enabledAlpha)
+      .rectangle(0, 0, width, height, resolvedPalette.enabledFill, resolvedPalette.enabledAlpha)
       .setStrokeStyle(2, resolvedPalette.stroke)
       .setInteractive({ useHandCursor: true })
       .setDepth(10);
     const text = this.add
       .text(0, 0, label, {
         fontFamily: "Trebuchet MS",
-        fontSize: "18px",
+        fontSize: options.fontSize ?? "18px",
         color: resolvedPalette.textColor,
       })
       .setOrigin(0.5)
@@ -271,8 +374,11 @@ export class UIScene extends Phaser.Scene {
       label: text,
       actionId,
       enabled: true,
+      isActive: false,
       onClick,
       palette: resolvedPalette,
+      width,
+      height,
     };
 
     rectangle.on("pointerover", () => this.handleButtonHover(button, true));
@@ -288,10 +394,11 @@ export class UIScene extends Phaser.Scene {
     }
 
     if (button.enabled) {
-      button.rectangle.setFillStyle(
-        isEntering ? button.palette.hoverFill : button.palette.enabledFill,
-        isEntering ? button.palette.hoverAlpha : button.palette.enabledAlpha
-      );
+      if (isEntering) {
+        button.rectangle.setFillStyle(button.palette.hoverFill, button.palette.hoverAlpha);
+      } else {
+        this.applyButtonVisualState(button);
+      }
       return;
     }
 
@@ -328,20 +435,53 @@ export class UIScene extends Phaser.Scene {
     if (!this.latestState) {
       return null;
     }
+
+    const canIssueOrders =
+      this.latestState.turnState?.phase === "player" &&
+      this.latestState.match?.status === "ongoing" &&
+      !this.latestState.pendingCityResolution;
+    const selectedCity = this.latestState.cities?.find((city) => city.id === this.latestState.selectedCityId) ?? null;
+
     if (actionId === "foundCity") {
       return this.latestState.uiActions?.foundCityReason ?? "Cannot found a city right now.";
-    }
-    if (actionId === "cycleQueue") {
-      return "Select a city to change its queue.";
-    }
-    if (actionId === "cycleFocus") {
-      return "Select a city to change focus.";
     }
     if (actionId === "endTurn") {
       if (this.latestState.pendingCityResolution) {
         return "Resolve city outcome first.";
       }
       return "Wait for the enemy turn to finish.";
+    }
+    if (actionId.startsWith("city-focus-")) {
+      if (!selectedCity || selectedCity.owner !== "player") {
+        return "Select one of your cities to set focus.";
+      }
+      if (!canIssueOrders) {
+        return "You can set focus on your turn only.";
+      }
+      return "Focus cannot be changed right now.";
+    }
+    if (actionId.startsWith("city-enqueue-")) {
+      if (!selectedCity || selectedCity.owner !== "player") {
+        return "Select one of your cities to manage production.";
+      }
+      if (!canIssueOrders) {
+        return "You can manage queue on your turn only.";
+      }
+      return this.latestState.uiActions?.cityQueueReason ?? "Queue is unavailable right now.";
+    }
+    if (actionId.startsWith("city-queue-slot-")) {
+      if (!selectedCity || selectedCity.owner !== "player") {
+        return "Select one of your cities to manage production.";
+      }
+      if (!canIssueOrders) {
+        return "You can manage queue on your turn only.";
+      }
+      const rawIndex = actionId.slice("city-queue-slot-".length);
+      const index = Number(rawIndex);
+      if (!Number.isInteger(index) || index < 0 || index >= selectedCity.queue.length) {
+        return "This queue slot is empty.";
+      }
+      return "Cannot remove this queue item right now.";
     }
     return null;
   }
@@ -358,14 +498,23 @@ export class UIScene extends Phaser.Scene {
     this.foundCityButton.rectangle.setPosition(buttonX, 78);
     this.foundCityButton.label.setPosition(buttonX, 78);
 
-    this.queueButton.rectangle.setPosition(buttonX, 126);
-    this.queueButton.label.setPosition(buttonX, 126);
+    this.restartButton.rectangle.setPosition(buttonX, 126);
+    this.restartButton.label.setPosition(buttonX, 126);
 
-    this.focusButton.rectangle.setPosition(buttonX, 174);
-    this.focusButton.label.setPosition(buttonX, 174);
+    const panelWidth = Math.max(372, Math.min(gameSize.width - 12, 760));
+    const panelHeight = 118;
+    const panelX = gameSize.width / 2;
+    const panelY = gameSize.height - panelHeight / 2 - 10;
+    this.cityPanel.setPosition(panelX, panelY);
+    this.cityPanel.setSize(panelWidth, panelHeight);
+    this.cityPanelTitle.setPosition(panelX, panelY - 42);
 
-    this.restartButton.rectangle.setPosition(buttonX, 222);
-    this.restartButton.label.setPosition(buttonX, 222);
+    const focusRowY = panelY - 14;
+    this.layoutButtonRow(this.cityFocusButtons, panelX, focusRowY, 6);
+
+    const queueRowY = panelY + 24;
+    const queueRowButtons = [...this.cityProductionButtons, ...this.cityQueueButtons];
+    this.layoutButtonRow(queueRowButtons, panelX, queueRowY, 4);
 
     this.hintPanel.setPosition(gameSize.width / 2, 56);
     this.hintPrimary.setPosition(gameSize.width / 2, 44);
@@ -400,6 +549,17 @@ export class UIScene extends Phaser.Scene {
     this.resultRestartButton.label.setPosition(gameSize.width / 2, gameSize.height / 2 + 74);
   }
 
+  layoutButtonRow(buttons, centerX, y, gap) {
+    const totalWidth = buttons.reduce((sum, button) => sum + button.width, 0) + Math.max(0, buttons.length - 1) * gap;
+    let cursor = centerX - totalWidth / 2;
+    for (const button of buttons) {
+      const x = cursor + button.width / 2;
+      button.rectangle.setPosition(x, y);
+      button.label.setPosition(x, y);
+      cursor += button.width + gap;
+    }
+  }
+
   updateFromState(gameState) {
     this.latestState = gameState;
     const selectedUnit = gameState.units.find((unit) => unit.id === gameState.selectedUnitId);
@@ -408,8 +568,6 @@ export class UIScene extends Phaser.Scene {
     const hasPendingCityResolution = !!gameState.pendingCityResolution;
     const canIssueOrders = gameState.turnState.phase === "player" && gameState.match.status === "ongoing" && !hasPendingCityResolution;
     const canFoundCity = !!gameState.uiActions?.canFoundCity && canIssueOrders;
-    const canCycleQueue = !!selectedCity && selectedCity.owner === "player" && canIssueOrders;
-    const canCycleFocus = !!gameState.uiActions?.canCycleFocus && canIssueOrders;
 
     this.turnLabel.setText(`Turn ${gameState.turnState.turn} - ${phaseText}`);
     this.selectionChip.setText(this.getSelectionChipText(selectedUnit, selectedCity));
@@ -419,10 +577,9 @@ export class UIScene extends Phaser.Scene {
     this.endTurnButton.label.setText(canIssueOrders ? "End Turn" : hasPendingCityResolution ? "Resolve..." : "Enemy...");
     this.setButtonEnabled(this.endTurnButton, canIssueOrders);
     this.setButtonEnabled(this.foundCityButton, canFoundCity);
-    this.setButtonEnabled(this.queueButton, canCycleQueue);
-    this.setButtonEnabled(this.focusButton, canCycleFocus);
     this.setButtonEnabled(this.restartButton, !!gameState.uiActions?.canRestart && !hasPendingCityResolution);
 
+    this.syncCityCommandPanel(gameState, selectedCity, canIssueOrders);
     this.syncCityResolutionModal(gameState.pendingCityResolution);
     this.updateContextualHint();
 
@@ -439,6 +596,65 @@ export class UIScene extends Phaser.Scene {
       this.resultTitle.setText(title);
       this.resultSubtitle.setText(subtitle);
       this.setButtonEnabled(this.resultRestartButton, true);
+    }
+  }
+
+  syncCityCommandPanel(gameState, selectedCity, canIssueOrders) {
+    const panelVisible = !!selectedCity && selectedCity.owner === "player" && gameState.match.status === "ongoing";
+    this.cityPanelVisible = panelVisible;
+    this.setCityPanelVisible(panelVisible);
+    if (!panelVisible || !selectedCity) {
+      return;
+    }
+
+    const queueMax = gameState.uiActions?.cityQueueMax ?? CITY_PANEL_QUEUE_MAX;
+    const queueLength = selectedCity.queue.length;
+    this.cityPanelTitle.setText(`City Commands  Pop ${selectedCity.population}  Queue ${queueLength}/${queueMax}`);
+
+    for (let i = 0; i < this.cityFocusButtons.length; i += 1) {
+      const focus = FOCUS_MODES[i];
+      const button = this.cityFocusButtons[i];
+      this.setButtonActive(button, selectedCity.focus === focus);
+      this.setButtonEnabled(button, canIssueOrders && !!gameState.uiActions?.canSetCityFocus);
+    }
+
+    const byType = new Map((gameState.uiActions?.cityProductionChoices ?? []).map((choice) => [choice.type, choice]));
+    const canQueueProduction = canIssueOrders && !!gameState.uiActions?.canQueueProduction;
+    for (let i = 0; i < this.cityProductionButtons.length; i += 1) {
+      const button = this.cityProductionButtons[i];
+      const unitType = PRODUCTION_TYPES[i];
+      const choice = byType.get(unitType);
+      const isUnlocked = !!choice?.unlocked;
+      const affordable = !!choice?.affordable;
+      const costText = choice ? `${choice.cost}` : "--";
+      const lockSuffix = isUnlocked ? "" : "X";
+      this.setButtonLabel(button, `${UNIT_SHORT_LABELS[unitType]}${lockSuffix}${costText}`);
+      this.setButtonEnabled(button, canQueueProduction && isUnlocked);
+      if (button.enabled) {
+        button.label.setAlpha(affordable ? 1 : 0.9);
+      }
+    }
+
+    for (let i = 0; i < this.cityQueueButtons.length; i += 1) {
+      const button = this.cityQueueButtons[i];
+      const queueItem = selectedCity.queue[i] ?? null;
+      const label = queueItem ? `${i + 1}:${UNIT_SHORT_LABELS[queueItem]}` : `${i + 1}:--`;
+      this.setButtonLabel(button, label);
+      this.setButtonEnabled(button, canIssueOrders && !!queueItem);
+    }
+  }
+
+  setCityPanelVisible(visible) {
+    this.cityPanel.setVisible(visible);
+    this.cityPanelTitle.setVisible(visible);
+    for (const button of this.cityFocusButtons) {
+      this.setCompositeVisible(button, visible);
+    }
+    for (const button of this.cityProductionButtons) {
+      this.setCompositeVisible(button, visible);
+    }
+    for (const button of this.cityQueueButtons) {
+      this.setCompositeVisible(button, visible);
     }
   }
 
@@ -607,13 +823,29 @@ export class UIScene extends Phaser.Scene {
 
   setButtonEnabled(button, enabled) {
     button.enabled = enabled;
-    if (enabled) {
-      button.rectangle.setFillStyle(button.palette.enabledFill, button.palette.enabledAlpha);
-      button.label.setAlpha(1);
+    this.applyButtonVisualState(button);
+    button.label.setAlpha(enabled ? 1 : 0.95);
+  }
+
+  setButtonActive(button, isActive) {
+    button.isActive = isActive;
+    this.applyButtonVisualState(button);
+  }
+
+  applyButtonVisualState(button) {
+    if (!button.enabled) {
+      button.rectangle.setFillStyle(button.palette.disabledFill, button.palette.disabledAlpha);
       return;
     }
-    button.rectangle.setFillStyle(button.palette.disabledFill, button.palette.disabledAlpha);
-    button.label.setAlpha(0.95);
+    if (button.isActive) {
+      button.rectangle.setFillStyle(button.palette.activeFill, button.palette.activeAlpha);
+      return;
+    }
+    button.rectangle.setFillStyle(button.palette.enabledFill, button.palette.enabledAlpha);
+  }
+
+  setButtonLabel(button, label) {
+    button.label.setText(label);
   }
 
   setCompositeVisible(button, visible) {
@@ -682,6 +914,30 @@ export class UIScene extends Phaser.Scene {
       razeEnabled: this.cityRazeButton.enabled,
       captureDepth: this.cityCaptureButton.rectangle.depth,
       panelDepth: this.cityOutcomePanel.depth,
+    };
+  }
+
+  testGetCityPanelState() {
+    return {
+      visible: this.cityPanelVisible,
+      focusButtons: this.cityFocusButtons.map((button) => ({
+        actionId: button.actionId,
+        visible: button.rectangle.visible && button.label.visible,
+        enabled: button.enabled,
+        active: button.isActive,
+      })),
+      productionButtons: this.cityProductionButtons.map((button) => ({
+        actionId: button.actionId,
+        label: button.label.text,
+        visible: button.rectangle.visible && button.label.visible,
+        enabled: button.enabled,
+      })),
+      queueButtons: this.cityQueueButtons.map((button) => ({
+        actionId: button.actionId,
+        label: button.label.text,
+        visible: button.rectangle.visible && button.label.visible,
+        enabled: button.enabled,
+      })),
     };
   }
 }

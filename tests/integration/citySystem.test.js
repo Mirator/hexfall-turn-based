@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { createInitialGameState, getTileAt } from "../../src/core/gameState.js";
 import { distance } from "../../src/core/hexGrid.js";
 import { applyTerrainDefinition } from "../../src/core/terrainData.js";
-import { assignWorkedHexes, foundCity, processTurn } from "../../src/systems/citySystem.js";
+import {
+  CITY_QUEUE_MAX,
+  enqueueCityQueue,
+  foundCity,
+  processTurn,
+  removeCityQueueAt,
+  setCityFocus,
+} from "../../src/systems/citySystem.js";
 
 describe("city economy and identity", () => {
   it("founding initializes city identity fields and removes local stockpiles", () => {
@@ -57,16 +64,13 @@ describe("city economy and identity", () => {
     setTerrain(gameState, productionHex.q, productionHex.r, "forest");
     setTerrain(gameState, scienceHex.q, scienceHex.r, "hill");
 
-    city.focus = "food";
-    assignWorkedHexes(city.id, gameState);
+    setCityFocus(city.id, "food", gameState);
     expect(hasHex(city.workedHexes, foodHex)).toBe(true);
 
-    city.focus = "production";
-    assignWorkedHexes(city.id, gameState);
+    setCityFocus(city.id, "production", gameState);
     expect(hasHex(city.workedHexes, productionHex)).toBe(true);
 
-    city.focus = "science";
-    assignWorkedHexes(city.id, gameState);
+    setCityFocus(city.id, "science", gameState);
     expect(hasHex(city.workedHexes, scienceHex)).toBe(true);
   });
 
@@ -126,6 +130,78 @@ describe("city economy and identity", () => {
       return;
     }
     expect(distance(producedUnit, { q: 2, r: 2 })).toBeLessThanOrEqual(1);
+  });
+
+  it("enforces queue cap and supports remove-by-index compaction", () => {
+    const gameState = createInitialGameState({ seed: 444 });
+    const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
+    expect(settler).toBeTruthy();
+    if (!settler) {
+      return;
+    }
+    const founded = foundCity(settler.id, gameState);
+    expect(founded.ok).toBe(true);
+    if (!founded.cityId) {
+      return;
+    }
+
+    const city = gameState.cities.find((candidate) => candidate.id === founded.cityId);
+    expect(city).toBeTruthy();
+    if (!city) {
+      return;
+    }
+
+    city.queue = [];
+    const added1 = enqueueCityQueue(city.id, "warrior", gameState);
+    const added2 = enqueueCityQueue(city.id, "settler", gameState);
+    const added3 = enqueueCityQueue(city.id, "warrior", gameState);
+    expect(added1.ok && added2.ok && added3.ok).toBe(true);
+    expect(city.queue.length).toBe(CITY_QUEUE_MAX);
+
+    const overfill = enqueueCityQueue(city.id, "warrior", gameState);
+    expect(overfill.ok).toBe(false);
+    expect(overfill.reason).toBe("queue-full");
+
+    const removed = removeCityQueueAt(city.id, 1, gameState);
+    expect(removed.ok).toBe(true);
+    expect(city.queue).toEqual(["warrior", "warrior"]);
+  });
+
+  it("consumes player queue front item after successful production", () => {
+    const gameState = createInitialGameState({ seed: 445 });
+    gameState.units = [];
+    gameState.cities = [createCity("player-city-1", "player", 2, 2)];
+    gameState.cities[0].queue = ["warrior", "settler"];
+    ensureLocalPassableArea(gameState, 2, 2);
+
+    gameState.economy.player.foodStock = 0;
+    gameState.economy.player.productionStock = 20;
+    gameState.economy.player.scienceStock = 0;
+
+    const firstTurn = processTurn(gameState, "player");
+    expect(firstTurn.produced.length).toBe(1);
+    expect(gameState.cities[0].queue).toEqual(["settler"]);
+
+    const secondTurn = processTurn(gameState, "player");
+    expect(secondTurn.produced.length).toBe(1);
+    expect(gameState.cities[0].queue).toEqual([]);
+  });
+
+  it("auto-refills enemy empty queue with the cheapest unlocked unit", () => {
+    const gameState = createInitialGameState({ seed: 446 });
+    gameState.units = [];
+    gameState.cities = [createCity("enemy-city-1", "enemy", 2, 2)];
+    gameState.cities[0].queue = [];
+    ensureLocalPassableArea(gameState, 2, 2);
+    gameState.unlocks.units = ["warrior", "settler"];
+
+    gameState.economy.enemy.foodStock = 0;
+    gameState.economy.enemy.productionStock = 100;
+    gameState.economy.enemy.scienceStock = 0;
+
+    const result = processTurn(gameState, "enemy");
+    expect(result.produced.length).toBe(1);
+    expect(gameState.cities[0].queue).toEqual(["warrior"]);
   });
 
   it("does not spend production when a city has no valid spawn hex", () => {
