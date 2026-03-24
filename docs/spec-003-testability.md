@@ -10,6 +10,7 @@
 
 - Chosen: expose browser hooks on `window` for simple integration.
 - Chosen: keep e2e script self-contained (starts dev server, runs browser steps, asserts state).
+- Chosen: keep hooks stable while lazy-loading Phaser through dynamic import.
 - Rejected for now: heavyweight test framework wrappers around Playwright.
 
 ## Interfaces/types added
@@ -24,12 +25,11 @@
 
 ## Behavior and acceptance criteria
 
-- `render_game_to_text` returns concise JSON with turn, units, selection, movement, and map metadata.
+- `render_game_to_text` returns concise JSON with turn/phase, units, selection, movement, terrain summary, cities, research, unlocks, and match status.
 - `advanceTime` exists and advances deterministic simulation time accounting used by tests.
 - Smoke test verifies:
   - Initial state
-  - Unit move and movement point decrement
-  - End-turn behavior (turn increment and movement reset)
+  - Multi-turn chain including move, attack, city founding, production, research completion, and victory
   - No console/page errors during scenario
 
 ## Validation performed (tests/manual checks)

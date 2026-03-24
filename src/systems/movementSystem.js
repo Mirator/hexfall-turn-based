@@ -1,5 +1,5 @@
-import { getUnitAt, getUnitById, isInsideMap } from "../core/gameState.js";
-import { distance } from "../core/hexGrid.js";
+import { getTileAt, getUnitAt, getUnitById, isInsideMap } from "../core/gameState.js";
+import { axialKey, neighbors } from "../core/hexGrid.js";
 
 /**
  * @param {string} unitId
@@ -8,25 +8,69 @@ import { distance } from "../core/hexGrid.js";
  */
 export function getReachable(unitId, gameState) {
   const unit = getUnitById(gameState, unitId);
-  if (!unit || unit.movementRemaining <= 0) {
+  if (!unit || unit.movementRemaining <= 0 || unit.hasActed) {
     return [];
   }
 
-  const reachable = [];
-  for (let q = 0; q < gameState.map.width; q += 1) {
-    for (let r = 0; r < gameState.map.height; r += 1) {
-      const cost = distance(unit, { q, r });
-      if (cost <= 0 || cost > unit.movementRemaining) {
+  const costByHex = getReachableCostMap(unit, gameState);
+  return [...costByHex.entries()]
+    .filter(([key]) => key !== axialKey(unit))
+    .map(([key, cost]) => {
+      const [q, r] = key.split(",").map((value) => Number.parseInt(value, 10));
+      return { q, r, cost };
+    })
+    .sort((a, b) => a.cost - b.cost || a.q - b.q || a.r - b.r);
+}
+
+/**
+ * @param {import("../core/types.js").Unit} unit
+ * @param {import("../core/types.js").GameState} gameState
+ * @returns {Map<string, number>}
+ */
+export function getReachableCostMap(unit, gameState) {
+  const startKey = axialKey(unit);
+  const frontier = [{ q: unit.q, r: unit.r, cost: 0 }];
+  const bestCostByHex = new Map([[startKey, 0]]);
+
+  while (frontier.length > 0) {
+    frontier.sort((a, b) => a.cost - b.cost);
+    const current = frontier.shift();
+    if (!current) {
+      break;
+    }
+
+    for (const neighbor of neighbors(current)) {
+      if (!isInsideMap(gameState.map, neighbor.q, neighbor.r)) {
         continue;
       }
-      if (getUnitAt(gameState, q, r)) {
+
+      const occupant = getUnitAt(gameState, neighbor.q, neighbor.r);
+      if (occupant && occupant.id !== unit.id) {
         continue;
       }
-      reachable.push({ q, r, cost });
+
+      const tile = getTileAt(gameState.map, neighbor.q, neighbor.r);
+      if (!tile || tile.blocksMovement) {
+        continue;
+      }
+
+      const nextCost = current.cost + tile.moveCost;
+      if (nextCost > unit.movementRemaining) {
+        continue;
+      }
+
+      const key = axialKey(neighbor);
+      const previousCost = bestCostByHex.get(key);
+      if (typeof previousCost === "number" && previousCost <= nextCost) {
+        continue;
+      }
+
+      bestCostByHex.set(key, nextCost);
+      frontier.push({ q: neighbor.q, r: neighbor.r, cost: nextCost });
     }
   }
 
-  return reachable;
+  return bestCostByHex;
 }
 
 /**
@@ -41,17 +85,21 @@ export function canMoveUnitTo(unitId, destination, gameState) {
     return { ok: false, reason: "unit-not-found" };
   }
 
+  if (unit.hasActed) {
+    return { ok: false, reason: "unit-already-acted" };
+  }
+
   if (!isInsideMap(gameState.map, destination.q, destination.r)) {
     return { ok: false, reason: "out-of-bounds" };
   }
 
-  const cost = distance(unit, destination);
-  if (cost <= 0) {
+  if (unit.q === destination.q && unit.r === destination.r) {
     return { ok: false, reason: "same-tile" };
   }
 
-  if (cost > unit.movementRemaining) {
-    return { ok: false, reason: "out-of-range" };
+  const tile = getTileAt(gameState.map, destination.q, destination.r);
+  if (!tile || tile.blocksMovement) {
+    return { ok: false, reason: "blocked-terrain" };
   }
 
   const occupant = getUnitAt(gameState, destination.q, destination.r);
@@ -59,7 +107,13 @@ export function canMoveUnitTo(unitId, destination, gameState) {
     return { ok: false, reason: "occupied" };
   }
 
-  return { ok: true, cost };
+  const reachableCosts = getReachableCostMap(unit, gameState);
+  const destinationCost = reachableCosts.get(axialKey(destination));
+  if (typeof destinationCost !== "number") {
+    return { ok: false, reason: "out-of-range" };
+  }
+
+  return { ok: true, cost: destinationCost };
 }
 
 /**
@@ -81,7 +135,8 @@ export function moveUnit(unitId, destination, gameState) {
 
   unit.q = destination.q;
   unit.r = destination.r;
-  unit.movementRemaining -= check.cost ?? 0;
+  unit.movementRemaining = Math.max(0, unit.movementRemaining - (check.cost ?? 0));
+  unit.hasActed = true;
 
   return { ok: true, cost: check.cost };
 }

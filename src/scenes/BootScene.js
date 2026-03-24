@@ -1,4 +1,4 @@
-import Phaser from "phaser";
+import Phaser from "../core/phaserRuntime.js";
 
 export class BootScene extends Phaser.Scene {
   constructor() {

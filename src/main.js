@@ -1,37 +1,26 @@
-import Phaser from "phaser";
-import { BASE_GAME_HEIGHT, BASE_GAME_WIDTH } from "./core/constants.js";
 import "./style.css";
-import { BootScene } from "./scenes/BootScene.js";
-import { UIScene } from "./scenes/UIScene.js";
-import { WorldScene } from "./scenes/WorldScene.js";
+const gameRoot = document.getElementById("game-root");
+const loadingBanner = createLoadingBanner();
+gameRoot?.appendChild(loadingBanner);
 
-const config = {
-  type: Phaser.AUTO,
-  parent: "game-root",
-  width: BASE_GAME_WIDTH,
-  height: BASE_GAME_HEIGHT,
-  scene: [BootScene, WorldScene, UIScene],
-  scale: {
-    mode: Phaser.Scale.RESIZE,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
-    width: BASE_GAME_WIDTH,
-    height: BASE_GAME_HEIGHT,
-  },
+let game = null;
+let sceneGetters = {
+  getWorldScene: () => null,
+  getUIScene: () => null,
 };
+let gameLoadPromise = null;
 
-const game = new Phaser.Game(config);
-
-window.__hexfallGame = game;
+window.__hexfallGame = null;
 window.render_game_to_text = () => {
-  const worldScene = getWorldScene(game);
+  const worldScene = game ? sceneGetters.getWorldScene(game) : null;
   if (!worldScene) {
-    return JSON.stringify({ mode: "booting" });
+    return JSON.stringify({ mode: "loading" });
   }
   return worldScene.renderGameToText();
 };
 
 window.advanceTime = (ms) => {
-  const worldScene = getWorldScene(game);
+  const worldScene = game ? sceneGetters.getWorldScene(game) : null;
   if (!worldScene) {
     return;
   }
@@ -39,28 +28,90 @@ window.advanceTime = (ms) => {
 };
 
 window.__hexfallTest = {
+  getState() {
+    return JSON.parse(window.render_game_to_text());
+  },
   hexToWorld(q, r) {
-    const worldScene = getWorldScene(game);
-    if (!worldScene) {
-      return null;
-    }
-    return worldScene.hexToWorld(q, r);
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.hexToWorld(q, r) : null;
   },
   getEndTurnButtonCenter() {
-    const uiScene = getUIScene(game);
-    if (!uiScene) {
-      return null;
-    }
-    return uiScene.getEndTurnButtonCenter();
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.getEndTurnButtonCenter() : null;
+  },
+  selectUnit(unitId) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testSelectUnit(unitId) : false;
+  },
+  moveSelected(q, r) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testMoveSelected(q, r) : false;
+  },
+  attackTarget(targetId) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testAttackTarget(targetId) : false;
+  },
+  foundCity() {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testFoundCity() : false;
+  },
+  cycleResearch() {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testCycleResearch() : null;
+  },
+  selectResearch(techId) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testSelectResearch(techId) : false;
+  },
+  endTurnImmediate() {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testEndTurnImmediate() : false;
   },
 };
 
-function getWorldScene(phaserGame) {
-  const scene = phaserGame.scene.getScene("WorldScene");
-  return scene && scene.scene.isActive() ? scene : null;
+void startGame();
+
+async function startGame() {
+  if (gameLoadPromise) {
+    return gameLoadPromise;
+  }
+
+  loadingBanner.textContent = "Loading Phaser engine...";
+  gameLoadPromise = import("./game/createGame.js")
+    .then((module) => {
+      sceneGetters = {
+        getWorldScene: module.getWorldScene,
+        getUIScene: module.getUIScene,
+      };
+      game = module.createGame();
+      window.__hexfallGame = game;
+      return game;
+    })
+    .then(async (createdGame) => {
+      await waitForCanvas();
+      loadingBanner.remove();
+      return createdGame;
+    })
+    .catch((error) => {
+      loadingBanner.textContent = `Failed to load game: ${error instanceof Error ? error.message : "unknown error"}`;
+      throw error;
+    });
+
+  return gameLoadPromise;
 }
 
-function getUIScene(phaserGame) {
-  const scene = phaserGame.scene.getScene("UIScene");
-  return scene && scene.scene.isActive() ? scene : null;
+async function waitForCanvas() {
+  for (let i = 0; i < 100; i += 1) {
+    if (document.querySelector("canvas")) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+}
+
+function createLoadingBanner() {
+  const element = document.createElement("div");
+  element.id = "loading-banner";
+  element.textContent = "Preparing Hexfall...";
+  return element;
 }

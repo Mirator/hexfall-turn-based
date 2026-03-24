@@ -16,6 +16,8 @@
 
 - `package.json` scripts:
   - `dev`, `build`, `preview`, `lint`, `test`, `test:e2e`
+- Build config:
+  - `vite.config.js` manual chunking for Phaser vendor/gameplay split
 - Project directories:
   - `src/core`, `src/scenes`, `src/systems`, `src/ui`, `src/assets`, `tests/e2e`, `docs`
 

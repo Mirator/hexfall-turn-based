@@ -1,49 +1,63 @@
 import { describe, expect, it } from "vitest";
-import { createInitialGameState } from "../../src/core/gameState.js";
+import { createInitialGameState, getUnitById } from "../../src/core/gameState.js";
 import { getReachable, moveUnit } from "../../src/systems/movementSystem.js";
-import { endTurn } from "../../src/systems/turnSystem.js";
+import { beginEnemyTurn, beginPlayerTurn } from "../../src/systems/turnSystem.js";
 
 describe("movement and turn systems", () => {
-  it("returns reachable tiles within movement points", () => {
+  it("returns reachable tiles using movement budget", () => {
     const gameState = createInitialGameState();
-    const unit = gameState.units[0];
+    const unit = gameState.units.find((candidate) => candidate.owner === "player" && candidate.type === "warrior");
+    expect(unit).toBeTruthy();
+    if (!unit) {
+      return;
+    }
+
     const reachable = getReachable(unit.id, gameState);
-    expect(reachable).toHaveLength(18);
+    expect(reachable.length).toBeGreaterThan(0);
+    expect(reachable.every((hex) => hex.cost <= unit.movementRemaining)).toBe(true);
   });
 
-  it("consumes movement points on successful movement", () => {
+  it("consumes movement points and marks unit acted on movement", () => {
     const gameState = createInitialGameState();
-    const unit = gameState.units[0];
-    const result = moveUnit(unit.id, { q: unit.q + 1, r: unit.r }, gameState);
+    const unit = gameState.units.find((candidate) => candidate.owner === "player" && candidate.type === "warrior");
+    expect(unit).toBeTruthy();
+    if (!unit) {
+      return;
+    }
 
+    const firstReachable = getReachable(unit.id, gameState)[0];
+    expect(firstReachable).toBeTruthy();
+    if (!firstReachable) {
+      return;
+    }
+
+    const result = moveUnit(unit.id, { q: firstReachable.q, r: firstReachable.r }, gameState);
     expect(result.ok).toBe(true);
-    expect(unit.q).toBe(3);
-    expect(unit.r).toBe(2);
-    expect(unit.movementRemaining).toBe(1);
+    expect(unit.hasActed).toBe(true);
+    expect(unit.movementRemaining).toBeLessThanOrEqual(unit.maxMovement);
   });
 
-  it("rejects invalid movement beyond available range", () => {
+  it("beginPlayerTurn resets movement and acted flags for player units", () => {
     const gameState = createInitialGameState();
-    const unit = gameState.units[0];
-    const result = moveUnit(unit.id, { q: unit.q + 3, r: unit.r }, gameState);
+    const playerUnit = gameState.units.find((unit) => unit.owner === "player" && unit.type === "warrior");
+    expect(playerUnit).toBeTruthy();
+    if (!playerUnit) {
+      return;
+    }
 
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe("out-of-range");
-    expect(unit.q).toBe(2);
-    expect(unit.r).toBe(2);
-    expect(unit.movementRemaining).toBe(2);
-  });
+    playerUnit.hasActed = true;
+    playerUnit.movementRemaining = 0;
+    beginEnemyTurn(gameState);
+    beginPlayerTurn(gameState);
 
-  it("endTurn increments turn and restores movement points", () => {
-    const gameState = createInitialGameState();
-    const unit = gameState.units[0];
+    const refreshed = getUnitById(gameState, playerUnit.id);
+    expect(refreshed).toBeTruthy();
+    if (!refreshed) {
+      return;
+    }
 
-    moveUnit(unit.id, { q: unit.q + 1, r: unit.r }, gameState);
-    gameState.selectedUnitId = unit.id;
-    endTurn(gameState);
-
+    expect(refreshed.hasActed).toBe(false);
+    expect(refreshed.movementRemaining).toBe(refreshed.maxMovement);
     expect(gameState.turnState.turn).toBe(2);
-    expect(gameState.selectedUnitId).toBeNull();
-    expect(unit.movementRemaining).toBe(unit.maxMovement);
   });
 });

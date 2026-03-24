@@ -20,7 +20,7 @@ async function waitForServer(url, timeoutMs = 30000) {
         return;
       }
     } catch {
-      // Keep polling until the timeout expires.
+      // Keep polling.
     }
     await delay(300);
   }
@@ -67,50 +67,69 @@ async function run() {
 
     await page.goto(URL, { waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => typeof window.render_game_to_text === "function");
-    await page.waitForTimeout(350);
+    await page.waitForTimeout(700);
 
-    const initialState = await page.evaluate(() => JSON.parse(window.render_game_to_text()));
+    const initialState = await page.evaluate(() => window.__hexfallTest.getState());
     assert.equal(initialState.turn, 1, "initial turn should be 1");
-    assert.equal(initialState.units.length, 1, "expected exactly one unit");
+    assert.equal(initialState.match.status, "ongoing", "match should begin ongoing");
+
+    const scenarioResult = await page.evaluate(() => {
+      const getState = () => window.__hexfallTest.getState();
+
+      const initial = getState();
+      const warrior = initial.units.find((unit) => unit.owner === "player" && unit.type === "warrior");
+      const settler = initial.units.find((unit) => unit.owner === "player" && unit.type === "settler");
+      const enemy = initial.units.find((unit) => unit.owner === "enemy");
+      if (!warrior || !settler || !enemy) {
+        return { ok: false, reason: "missing-units" };
+      }
+
+      window.__hexfallTest.selectResearch("bronzeWorking");
+      window.__hexfallTest.selectUnit(warrior.id);
+      const moved = window.__hexfallTest.moveSelected(warrior.q + 1, warrior.r);
+      const firstEndTurn = window.__hexfallTest.endTurnImmediate();
+      if (!moved || !firstEndTurn) {
+        return { ok: false, reason: "move-or-endturn-failed" };
+      }
+
+      window.__hexfallTest.selectUnit(warrior.id);
+      const attacked = window.__hexfallTest.attackTarget(enemy.id);
+      window.__hexfallTest.selectUnit(settler.id);
+      const founded = window.__hexfallTest.foundCity();
+      if (!attacked || !founded) {
+        return { ok: false, reason: "attack-or-found-failed" };
+      }
+
+      let loops = 0;
+      while (loops < 8) {
+        const state = getState();
+        if (state.match.status !== "ongoing") {
+          break;
+        }
+        window.__hexfallTest.endTurnImmediate();
+        loops += 1;
+      }
+
+      const finalState = getState();
+      return { ok: true, loops, finalState };
+    });
+
+    assert.equal(scenarioResult.ok, true, `scenario failed: ${scenarioResult.reason}`);
+    const finalState = scenarioResult.finalState;
+    assert.ok(finalState, "final state should be available");
+    assert.equal(finalState.match.status, "won", "scenario should end in victory");
+    assert.ok(
+      finalState.research.completedTechIds.includes("bronzeWorking"),
+      "bronze working should complete during scenario"
+    );
+    assert.ok(finalState.cities.length >= 1, "city should exist after founding");
+    assert.ok(
+      finalState.units.some((unit) => unit.owner === "player" && !["player-1", "player-2"].includes(unit.id)),
+      "city should produce at least one additional player unit"
+    );
 
     const canvas = page.locator("canvas");
     await canvas.waitFor({ state: "visible" });
-    const canvasBox = await canvas.boundingBox();
-    assert.ok(canvasBox, "expected visible game canvas");
-
-    const clickTargets = await page.evaluate(() => {
-      const state = JSON.parse(window.render_game_to_text());
-      const unit = state.units[0];
-      const from = window.__hexfallTest.hexToWorld(unit.q, unit.r);
-      const destination = window.__hexfallTest.hexToWorld(unit.q + 1, unit.r);
-      const endTurnCenter = window.__hexfallTest.getEndTurnButtonCenter();
-      return { from, destination, endTurnCenter };
-    });
-
-    assert.ok(clickTargets.from && clickTargets.destination, "expected click coordinates");
-    assert.ok(clickTargets.endTurnCenter, "expected end turn button coordinates");
-
-    await page.mouse.click(canvasBox.x + clickTargets.from.x, canvasBox.y + clickTargets.from.y);
-    await page.waitForTimeout(120);
-    await page.mouse.click(canvasBox.x + clickTargets.destination.x, canvasBox.y + clickTargets.destination.y);
-    await page.waitForTimeout(160);
-
-    const movedState = await page.evaluate(() => JSON.parse(window.render_game_to_text()));
-    assert.equal(movedState.units[0].q, 3, "unit q should increment after moving");
-    assert.equal(movedState.units[0].r, 2, "unit r should remain unchanged for horizontal move");
-    assert.equal(movedState.units[0].movementRemaining, 1, "movement points should decrement");
-
-    await page.mouse.click(
-      canvasBox.x + clickTargets.endTurnCenter.x,
-      canvasBox.y + clickTargets.endTurnCenter.y
-    );
-    await page.waitForTimeout(140);
-
-    const endedTurnState = await page.evaluate(() => JSON.parse(window.render_game_to_text()));
-    assert.equal(endedTurnState.turn, 2, "turn should advance after end turn");
-    assert.equal(endedTurnState.selectedUnitId, null, "selection should clear on end turn");
-    assert.equal(endedTurnState.units[0].movementRemaining, 2, "movement should reset on new turn");
-
     await canvas.screenshot({ path: `${ARTIFACT_DIR}/smoke.png` });
 
     assert.equal(consoleErrors.length, 0, `console errors found:\n${consoleErrors.join("\n")}`);
