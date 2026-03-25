@@ -87,7 +87,7 @@ describe("UI surface hints/actions", () => {
     expect(ui.uiActions.cityQueueMax).toBe(3);
     expect(ui.uiActions.cityProductionChoices.length).toBeGreaterThan(0);
     expect(ui.uiActions.cityBuildingChoices.length).toBeGreaterThan(0);
-    expect(ui.uiActions.cityQueueItems[0]).toEqual({ kind: "unit", id: "warrior" });
+    expect(ui.uiActions.cityQueueItems).toEqual([]);
     expect(ui.uiHints.primary).toContain("City selected");
   });
 

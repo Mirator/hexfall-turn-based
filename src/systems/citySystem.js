@@ -139,7 +139,7 @@ export function foundCity(unitId, gameState) {
     maxHealth: CITY_MAX_HEALTH,
     productionTab: "units",
     buildings: [],
-    queue: [createQueueItem("unit", "warrior")],
+    queue: [],
   });
 
   assignWorkedHexes(cityId, gameState);

@@ -31,7 +31,7 @@ describe("city economy and identity", () => {
     expect(city.yieldLastTurn).toEqual(expect.objectContaining({ food: expect.any(Number), production: expect.any(Number) }));
     expect(["agricultural", "industrial", "scholarly", "balanced"]).toContain(city.identity);
     expect(city.specialization).toBe("balanced");
-    expect(city.queue).toEqual([{ kind: "unit", id: "warrior" }]);
+    expect(city.queue).toEqual([]);
     expect("storedProduction" in city).toBe(false);
     expect("storedFood" in city).toBe(false);
   });
