@@ -20,7 +20,7 @@
 - Chosen: unit mode supports `Found City` + `Skip Unit`.
 - Chosen: hover-driven action preview surfaces (`move`, `attack-unit`, `attack-city`) with no state mutation.
 - Chosen: map clarity overlays include reachable/attackable emphasis and threat visualization when a player unit is selected.
-- Chosen: turn-readiness assistant shows `Units ready: N`, supports `Next Unit`, and keeps End Turn one-click with warning tint when units remain.
+- Chosen: bottom-right readiness assistant uses clickable `Attention needed (X)` status, where `X = ready units + player cities with empty queues`; click cycles the next attention target (unit or city), and End Turn keeps warning tint while any attention remains.
 - Chosen: restart lives in Esc pause menu (`Resume`, `Restart`, confirm step) and blocks underlying interactions while modal is open.
 - Chosen: notification center v2 supports categories (`All/Combat/City/Research/System`), filtering, and click-to-jump focus.
 - Chosen: notification rows with no map `focus` are rendered as non-clickable text and never emit "no target" warning on click.
@@ -72,8 +72,8 @@
   - clears on selection/phase/modal changes
 - End-turn readiness flow:
   - one-click End Turn remains
-  - readiness count and next-ready action are visible
-  - deterministic next-unit cycling (`Tab` parity)
+  - readiness count aggregates unit + city-queue attention
+  - clicking the assistant deterministically cycles next attention target (ready unit or city with empty queue)
 - Notification center:
   - newest-first feed
   - filter chips by category

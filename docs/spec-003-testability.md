@@ -72,6 +72,7 @@
   - seed/hash/spawn metadata
   - units/cities/combat/research/economy snapshots
   - `uiPreview`, `uiTurnAssistant`, `uiContextPanel`, `uiNotificationFilter`
+  - `uiTurnAssistant.emptyQueueCityCount` (player cities with empty queues)
   - `threatHexes`
   - `cities[].health` + `cities[].maxHealth`
   - `pendingCityResolution`
@@ -88,7 +89,7 @@
 - `advanceTime` remains available for deterministic stepping.
 - Smoke scenario validates:
   - hover move and city-attack previews
-  - turn readiness assistant and deterministic next-ready action path
+  - turn readiness assistant and deterministic attention-cycle path (ready units + cities with empty queues)
   - context panel expanded/pinned behavior
   - notification filtering and notification-focus camera jump
   - non-focus notification row click returns `false` without adding warning notification
