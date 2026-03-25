@@ -15,6 +15,7 @@ Consolidated domain specs; older milestone specs removed.
 - [spec-007-hud-context-panels-and-notifications.md](./spec-007-hud-context-panels-and-notifications.md) - HUD layout, contextual panels, previews/readiness UX, pause flow, and notification center behavior.
 - [spec-008-ai-personalities-and-strategy.md](./spec-008-ai-personalities-and-strategy.md) - Deterministic AI personalities, goal/action scoring, and strategic policies.
 - [spec-009-action-timeline-and-turn-playback.md](./spec-009-action-timeline-and-turn-playback.md) - Presentation timeline, action animations, and sequential enemy turn playback for explainable combat/movement flow.
+- [spec-010-ci-github-actions-pages-publishing.md](./spec-010-ci-github-actions-pages-publishing.md) - GitHub Actions quality-gated build and automatic GitHub Pages publishing policy.
 
 ## Spec Template Rules
 

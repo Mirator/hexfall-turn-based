@@ -47,6 +47,6 @@
 
 ## Known gaps and next steps
 
-- CI workflow/pipeline policy is still outside this spec.
+- CI workflow/pipeline policy is documented in `spec-010-ci-github-actions-pages-publishing.md`; this foundation spec intentionally keeps CI policy out of scope.
 - Bundle-size optimization can be expanded further if gameplay modules continue to grow.
 - Historical baseline notes should remain concise to avoid duplicating current behavior specs.
