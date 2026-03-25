@@ -1,4 +1,4 @@
-# spec-012-hud-context-panels-and-notifications
+# spec-007-hud-context-panels-and-notifications
 
 ## Goal and scope
 

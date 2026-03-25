@@ -12,7 +12,7 @@
 - Chosen: keep one self-contained smoke runner (`tests/e2e/smoke.mjs`) that starts Vite, drives gameplay, asserts, and captures artifacts.
 - Chosen: expose UI/runtime surfaces in `render_game_to_text` so tests do not depend on pixel scraping.
 - Chosen: harden e2e cleanup with signal-aware close and force-kill fallback for `chrome-headless-shell` on Windows.
-- Chosen: centralize testability as cross-spec authority for payload/hook contract, with gameplay authority remaining in domain specs (`spec-002`, `spec-005`, `spec-007`, `spec-008`, `spec-012`, `spec-014`).
+- Chosen: centralize testability as cross-spec authority for payload/hook contract, with gameplay authority remaining in domain specs (`spec-002`, `spec-004`, `spec-005`, `spec-006`, `spec-007`, `spec-008`).
 - Rejected for now: replacing hooks with a heavier bespoke automation protocol.
 
 ## Interfaces/types added

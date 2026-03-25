@@ -1,4 +1,4 @@
-# spec-014-ai-personalities-and-strategy
+# spec-008-ai-personalities-and-strategy
 
 ## Goal and scope
 

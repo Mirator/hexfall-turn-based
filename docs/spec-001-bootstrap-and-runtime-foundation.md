@@ -12,7 +12,7 @@
 - Chosen: JavaScript + JSDoc typing for rapid iteration.
 - Chosen: dynamic runtime bootstrap (lazy import of game creation from `main.js`).
 - Chosen: chunk-splitting for runtime separation (`entry`, `gameplay`, `vendor/runtime`).
-- Chosen: keep the early enemy-turn implementation documented as baseline history; current enemy behavior is authoritative in `spec-014`/`spec-005`.
+- Chosen: keep the early enemy-turn implementation documented as baseline history; current enemy behavior is authoritative in `spec-008`/`spec-004`.
 - Rejected for now: TypeScript-first bootstrap and CI-specific workflow requirements in this foundational spec.
 
 ## Interfaces/types added

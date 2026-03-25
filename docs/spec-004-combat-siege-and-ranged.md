@@ -1,4 +1,4 @@
-# spec-005-combat-siege-and-ranged
+# spec-004-combat-siege-and-ranged
 
 ## Goal and scope
 
@@ -15,7 +15,7 @@
 - Chosen: cities have durability (`health/maxHealth`, default `12/12`) and are valid combat targets.
 - Chosen: city defeat resolution:
   - player attacker chooses `Capture`/`Raze` via modal,
-  - AI attacker resolves deterministically by personality policy from `spec-014`.
+- AI attacker resolves deterministically by personality policy from `spec-008`.
 - Chosen: pure preview APIs mirror resolver math with no state mutation.
 - Rejected for now: multi-retaliation chains, critical hits, flanking systems, city ranged strikes.
 

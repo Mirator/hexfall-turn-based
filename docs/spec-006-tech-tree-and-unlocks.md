@@ -1,4 +1,4 @@
-# spec-008-tech-tree-and-unlocks
+# spec-006-tech-tree-and-unlocks
 
 ## Goal and scope
 
@@ -39,7 +39,7 @@
 - Overflow/carryover behavior is deterministic and preserved.
 - Remaining science is retained when no further selectable tech exists.
 - Unlocks update production availability for city queue choices.
-- AI research uses the same selectable-tech constraints and personality priorities from `spec-014`.
+- AI research uses the same selectable-tech constraints and personality priorities from `spec-008`.
 
 ## Validation performed (tests/manual checks)
 

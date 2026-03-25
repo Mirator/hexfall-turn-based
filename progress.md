@@ -346,3 +346,16 @@ Original prompt: I want to make civilization like easy game in JS. Let's init th
 - Validation sweep:
   - verified deleted spec filenames are no longer referenced in `docs/*.md`.
   - verified each remaining spec includes all 6 required template sections.
+## 2026-03-25 (Spec numbering normalization 001-008)
+- Renumbered consolidated domain specs to contiguous `spec-001` through `spec-008` without gaps.
+- File renames:
+  - `spec-004-combat-siege-and-ranged.md`
+  - `spec-005-city-economy-production-and-specialization.md`
+  - `spec-006-tech-tree-and-unlocks.md`
+  - `spec-007-hud-context-panels-and-notifications.md`
+  - `spec-008-ai-personalities-and-strategy.md`
+- Updated `docs/README.md` links and descriptions to match new numbering.
+- Updated intra-doc cross-references from old numbers (`005/007/008/012/014`) to the contiguous set.
+- Validation:
+  - all docs references now use 001-008 set,
+  - required template sections still present in each remaining spec file.

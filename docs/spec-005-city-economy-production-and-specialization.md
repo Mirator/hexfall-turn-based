@@ -1,4 +1,4 @@
-# spec-007-city-economy-production-and-specialization
+# spec-005-city-economy-production-and-specialization
 
 ## Goal and scope
 
@@ -21,7 +21,7 @@
   - `monument` (`cost=8`, unlock `masonry`, `+1 science`)
 - Chosen: duplicate building construction per city is blocked (built or queued).
 - Chosen: city identity derives from worked yields; specialization derives from buildings with priority `scholarly > industrial > agricultural > balanced`.
-- Chosen: enemy queue refill strategy is personality-aware and defined by `spec-014`.
+- Chosen: enemy queue refill strategy is personality-aware and defined by `spec-008`.
 - Rejected for now: manual citizen placement UI, gold/upkeep/happiness/trade-route systems.
 
 ## Interfaces/types added
