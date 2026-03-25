@@ -11,8 +11,10 @@
 - Chosen: deterministic personality assignment by seed (`seed % 3`) with explicit test override.
 - Chosen: turn-goal scoring with locked goals (`foundFirstCity`, `expand`, `defend`, `assaultCity`, `huntUnits`, `regroup`, `idle`).
 - Chosen: scored unit actions with deterministic tie-break `score -> cost -> q -> r -> id`.
+- Chosen: enemy-turn execution is exposed as deterministic step flow (`prepare -> prelude -> step -> finalize`) to support sequential playback without changing decision logic.
 - Chosen: personality-specific research priority lists (including `archery`).
 - Chosen: personality-aware queue refill uses typed queue items (`unit`/`building`) and respects duplicate-building rules.
+- Chosen: executed action summaries can carry presentation metadata (`from`/`to`/`target`) for explainable playback surfaces.
 - Chosen: personality-specific city outcome policy:
   - `raider`: raze unless AI has zero cities
   - `expansionist`: capture
@@ -33,7 +35,13 @@
   - `pickEnemyQueueUnit(gameState, personality)`
   - `pickEnemyGoal(gameState, personality)`
   - `pickEnemyCityOutcome(attackerOwner, targetCity, gameState)`
+  - `prepareEnemyTurnPlan(gameState)`
+  - `executeEnemyTurnPrelude(gameState, plan)`
+  - `executeEnemyTurnStep(gameState, step)`
+  - `finalizeEnemyTurnPlan(gameState, plan, actions, appliedPrelude?)`
   - `runEnemyTurn(gameState)`
+- Enemy summary shape additions:
+  - `EnemyActionSummary.presentation?: { from, to, target }`
 - Test hooks:
   - `window.__hexfallTest.setEnemyPersonality(personality)`
   - `window.__hexfallTest.getEnemyAiState()`
@@ -42,16 +50,18 @@
 
 - Personality is stable for a seed unless explicitly overridden.
 - Enemy turn summary records goal, research choice, queue refills, and scored actions.
+- Sequential playback uses the same deterministic action order as wrapper execution; `runEnemyTurn` remains a compatibility composition over step flow.
 - Enemy opening behavior founds first city from settler-only start when valid.
 - Queue refill choices are deterministic and personality-aware.
 - AI city capture/raze outcomes follow personality policy and trigger immediate state updates.
+- Runtime action stream supports per-step explainability message rendering (`Enemy action X/Y`) and deterministic animation targeting.
 - Runtime payload exposes AI state for deterministic automation and regression checks.
 
 ## Validation performed (tests/manual checks)
 
 - Integration:
   - `tests/integration/enemyAi.test.js`
-  - `tests/integration/enemyTurn.test.js`
+  - `tests/integration/enemyTurn.test.js` (wrapper `runEnemyTurn` equivalence vs step-flow execution)
   - `tests/integration/combat.test.js`
 - E2E:
   - `tests/e2e/smoke.mjs` verifies personality payload and override hooks in full scenario flow.

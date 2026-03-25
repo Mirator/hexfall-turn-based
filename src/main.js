@@ -83,6 +83,10 @@ window.__hexfallTest = {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testGetActionPreviewState() : null;
   },
+  getAnimationState() {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testGetAnimationState() : null;
+  },
   hoverHex(q, r) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testHoverHex(q, r) : false;
@@ -178,6 +182,10 @@ window.__hexfallTest = {
   endTurnImmediate() {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testEndTurnImmediate() : false;
+  },
+  requestEndTurn() {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testRequestEndTurn() : false;
   },
   setUnitPosition(unitId, q, r) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;

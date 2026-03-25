@@ -35,7 +35,15 @@ import {
   resolveCityAttack,
   resolveCityOutcome,
 } from "../systems/combatSystem.js";
-import { ensureEnemyAiState, normalizeEnemyPersonality, runEnemyTurn } from "../systems/enemyTurnSystem.js";
+import {
+  ensureEnemyAiState,
+  executeEnemyTurnPrelude,
+  executeEnemyTurnStep,
+  finalizeEnemyTurnPlan,
+  normalizeEnemyPersonality,
+  prepareEnemyTurnPlan,
+  runEnemyTurn,
+} from "../systems/enemyTurnSystem.js";
 import { getReachable, moveUnit } from "../systems/movementSystem.js";
 import { consumeScienceStock, cycleResearch, selectResearch } from "../systems/researchSystem.js";
 import { beginEnemyTurn, beginPlayerTurn } from "../systems/turnSystem.js";
@@ -46,6 +54,10 @@ import { evaluateMatchState } from "../systems/victorySystem.js";
 const SQRT_3 = Math.sqrt(3);
 const RESTART_MIN_FACTION_DISTANCE = DEFAULT_MIN_FACTION_DISTANCE;
 const CAMERA_KEYBOARD_PAN_SPEED = 700;
+const MOVE_SEGMENT_MS = 160;
+const ATTACK_ANIMATION_MS = 260;
+const FOUND_CITY_ANIMATION_MS = 420;
+const ENEMY_ACTION_GAP_MS = 120;
 
 export class WorldScene extends Phaser.Scene {
   constructor() {
@@ -64,7 +76,8 @@ export class WorldScene extends Phaser.Scene {
     this.uiPreview = null;
     this.mapOrigin = { x: 0, y: 0 };
     this.manualTimeMs = 0;
-    this.enemyTurnTimer = null;
+    this.enemyTurnPlaybackToken = 0;
+    this.enemyTurnActivePlan = null;
     this.foundCityKeyBinding = null;
     this.nextUnitKeyBinding = null;
     this.cameraPanKeys = null;
@@ -75,6 +88,18 @@ export class WorldScene extends Phaser.Scene {
     this.isRightDraggingCamera = false;
     this.cameraDragLastScreenPos = null;
     this.preventContextMenuHandler = null;
+    this.animationQueue = [];
+    this.animationQueueRunning = false;
+    this.isAnimationBusy = false;
+    this.activeAnimationKind = null;
+    this.unitRenderOverrides = new Map();
+    this.cityRenderOverrides = new Map();
+    this.fxBursts = [];
+    this.floatingDamage = [];
+    this.floatingDamageTextById = new Map();
+    this.floatingDamageNextId = 1;
+    this.turnPlayback = this.createTurnPlaybackState();
+    this.activeTimers = new Set();
   }
 
   create() {
@@ -89,6 +114,7 @@ export class WorldScene extends Phaser.Scene {
     this.selectionGraphics = this.add.graphics();
     this.cityGraphics = this.add.graphics();
     this.unitGraphics = this.add.graphics();
+    this.fxGraphics = this.add.graphics();
 
     this.input.on("pointerdown", this.handlePointerDown, this);
     this.input.on("pointermove", this.handlePointerMove, this);
@@ -147,10 +173,8 @@ export class WorldScene extends Phaser.Scene {
       gameEvents.off("restart-match-requested", this.handleRestartRequested, this);
       gameEvents.off("notification-focus-requested", this.handleNotificationFocusRequested, this);
       gameEvents.off("ui-modal-state-changed", this.handleUiModalStateChanged, this);
-      if (this.enemyTurnTimer) {
-        this.enemyTurnTimer.remove(false);
-        this.enemyTurnTimer = null;
-      }
+      this.abortEnemyPlayback();
+      this.clearAnimationArtifacts();
       if (this.game.canvas && this.preventContextMenuHandler) {
         this.game.canvas.removeEventListener("contextmenu", this.preventContextMenuHandler);
       }
@@ -162,8 +186,12 @@ export class WorldScene extends Phaser.Scene {
     this.evaluateAndPublish();
   }
 
-  update(_time, delta) {
+  update(time, delta) {
     const moved = this.updateKeyboardCameraPan(delta);
+    const hasAnimationFrame = this.updateTransientVisualState(time);
+    if (hasAnimationFrame) {
+      this.renderAll();
+    }
     if (moved) {
       this.publishState();
     }
@@ -205,12 +233,7 @@ export class WorldScene extends Phaser.Scene {
     const clickedCity = getCityAt(this.gameState, clickedHex.q, clickedHex.r);
 
     if (selectedUnit && clickedUnit && clickedUnit.owner !== selectedUnit.owner) {
-      const attackResult = resolveAttack(selectedUnit.id, clickedUnit.id, this.gameState);
-      if (attackResult.ok) {
-        this.handleUnitAttackResult(selectedUnit, clickedUnit, attackResult);
-        this.setUiPreview(null);
-        this.evaluateAndPublish();
-      }
+      void this.handlePlayerUnitAttack(selectedUnit.id, clickedUnit.id);
       return;
     }
 
@@ -218,22 +241,12 @@ export class WorldScene extends Phaser.Scene {
       if (!this.attackableCityLookup.has(clickedCity.id)) {
         return;
       }
-      const cityAttackResult = resolveCityAttack(selectedUnit.id, clickedCity.id, this.gameState);
-      if (cityAttackResult.ok) {
-        this.recordCityAttackEvent(selectedUnit, clickedCity, cityAttackResult);
-        this.handleCityAttackResult(cityAttackResult);
-        this.setUiPreview(null);
-        this.evaluateAndPublish();
-      }
+      void this.handlePlayerCityAttack(selectedUnit.id, clickedCity.id);
       return;
     }
 
     if (selectedUnit && this.reachableLookup.has(axialKey(clickedHex))) {
-      const moveResult = moveUnit(selectedUnit.id, clickedHex, this.gameState);
-      if (moveResult.ok) {
-        this.setUiPreview(null);
-        this.evaluateAndPublish();
-      }
+      void this.handlePlayerMove(selectedUnit.id, clickedHex);
       return;
     }
 
@@ -310,7 +323,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   handleEndTurnRequested = () => {
-    if (!this.canAcceptPlayerCommands() || this.enemyTurnTimer) {
+    if (!this.canAcceptPlayerCommands() || this.turnPlayback.active) {
       return;
     }
 
@@ -377,6 +390,15 @@ export class WorldScene extends Phaser.Scene {
         category: "City",
         focus: foundedCity ? { cityId: foundedCity.id, q: foundedCity.q, r: foundedCity.r } : null,
       });
+      if (foundedCity) {
+        void this.enqueueAnimation("found-city", async () => {
+          await this.animateFoundCityClip({
+            cityId: foundedCity.id,
+            q: foundedCity.q,
+            r: foundedCity.r,
+          });
+        });
+      }
       return true;
     }
     this.emitNotification(getFoundCityReasonText(result.reason), {
@@ -557,6 +579,8 @@ export class WorldScene extends Phaser.Scene {
     if (!cityId) {
       return;
     }
+    const cityBefore = this.gameState.cities.find((city) => city.id === cityId) ?? null;
+    const cityHexBefore = cityBefore ? { q: cityBefore.q, r: cityBefore.r } : null;
 
     const choice = payload?.choice;
     if (choice !== "capture" && choice !== "raze") {
@@ -579,13 +603,20 @@ export class WorldScene extends Phaser.Scene {
       category: "Combat",
     });
     this.evaluateAndPublish();
+    if (cityHexBefore) {
+      void this.enqueueAnimation("city-outcome", async () => {
+        await this.animateCityOutcomeClip({
+          q: cityHexBefore.q,
+          r: cityHexBefore.r,
+          choice,
+        });
+      });
+    }
   };
 
   handleRestartRequested = () => {
-    if (this.enemyTurnTimer) {
-      this.enemyTurnTimer.remove(false);
-      this.enemyTurnTimer = null;
-    }
+    this.abortEnemyPlayback();
+    this.clearAnimationArtifacts();
     const previousLayout = this.captureLayoutFingerprint(this.gameState);
     this.startNewMatch(previousLayout);
     this.evaluateAndPublish();
@@ -654,11 +685,19 @@ export class WorldScene extends Phaser.Scene {
         minFactionDistance: RESTART_MIN_FACTION_DISTANCE,
       });
     ensureEnemyAiState(this.gameState);
+    this.enemyTurnPlaybackToken += 1;
+    this.enemyTurnActivePlan = null;
     this.uiModalOpen = false;
     this.manualTimeMs = 0;
     this.lastCombatEvent = null;
     this.threatHexes = [];
     this.threatLookup = new Set();
+    this.turnPlayback = this.createTurnPlaybackState();
+    this.animationQueue = [];
+    this.animationQueueRunning = false;
+    this.isAnimationBusy = false;
+    this.activeAnimationKind = null;
+    this.clearAnimationArtifacts();
     this.setUiPreview(null);
     this.cameraFocusHex = null;
     this.cameras?.main?.setScroll(0, 0);
@@ -701,16 +740,74 @@ export class WorldScene extends Phaser.Scene {
   enterEnemyPhase() {
     this.setUiPreview(null);
     beginEnemyTurn(this.gameState);
+    this.turnPlayback = {
+      active: true,
+      actor: "enemy",
+      stepIndex: 0,
+      totalSteps: 0,
+      message: "Planning enemy actions...",
+    };
+    this.evaluateAndPublish();
+    const playbackToken = ++this.enemyTurnPlaybackToken;
+    void this.runEnemyTurnPlayback(playbackToken);
+  }
+
+  async runEnemyTurnPlayback(playbackToken) {
+    const plan = prepareEnemyTurnPlan(this.gameState);
+    this.enemyTurnActivePlan = plan;
+    this.turnPlayback.totalSteps = plan.steps.length;
+    this.turnPlayback.message = plan.steps.length > 0 ? "Enemy is acting..." : "Enemy has no actions.";
+    const appliedPrelude = executeEnemyTurnPrelude(this.gameState, plan);
+    finalizeEnemyTurnPlan(this.gameState, plan, [], appliedPrelude);
     this.evaluateAndPublish();
 
-    this.enemyTurnTimer = this.time.delayedCall(320, () => {
-      this.resolveEnemyAndAdvanceTurn();
-      this.enemyTurnTimer = null;
-    });
+    if (!this.isPlaybackTokenCurrent(playbackToken)) {
+      return;
+    }
+
+    /** @type {import("../core/types.js").EnemyActionSummary[]} */
+    const executedActions = [];
+    for (let index = 0; index < plan.steps.length; index += 1) {
+      if (!this.isPlaybackTokenCurrent(playbackToken)) {
+        return;
+      }
+
+      const step = plan.steps[index];
+      this.turnPlayback.stepIndex = index + 1;
+      this.turnPlayback.message = this.describeEnemyStep(step, index + 1, plan.steps.length);
+      this.publishState();
+
+      const execution = executeEnemyTurnStep(this.gameState, step);
+      if (!execution.ok || !execution.actionSummary) {
+        continue;
+      }
+      executedActions.push(execution.actionSummary);
+      this.handleEnemyStepNotification(step, execution);
+      this.evaluateAndPublish();
+
+      await this.animateEnemyStep(step, execution, playbackToken);
+      if (!this.isPlaybackTokenCurrent(playbackToken)) {
+        return;
+      }
+      await this.waitForAnimationDelay(ENEMY_ACTION_GAP_MS, playbackToken);
+    }
+
+    if (!this.isPlaybackTokenCurrent(playbackToken)) {
+      return;
+    }
+
+    finalizeEnemyTurnPlan(this.gameState, plan, executedActions, appliedPrelude);
+    this.turnPlayback.message = plan.steps.length > 0 ? "Enemy turn complete." : "Enemy is idle.";
+    this.publishState();
+    this.resolveEnemyAndAdvanceTurn();
   }
 
   resolveEnemyAndAdvanceTurn() {
-    runEnemyTurn(this.gameState);
+    if (this.turnPlayback.active && this.enemyTurnActivePlan) {
+      this.enemyTurnActivePlan = null;
+    } else {
+      runEnemyTurn(this.gameState);
+    }
     processCityTurn(this.gameState, "enemy");
     beginPlayerTurn(this.gameState);
     const cityTurnResult = processCityTurn(this.gameState, "player");
@@ -726,6 +823,7 @@ export class WorldScene extends Phaser.Scene {
     }
 
     evaluateMatchState(this.gameState);
+    this.turnPlayback = this.createTurnPlaybackState();
     this.evaluateAndPublish();
   }
 
@@ -810,6 +908,659 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
+  async handlePlayerMove(unitId, destination) {
+    if (!this.canAcceptPlayerCommands()) {
+      return false;
+    }
+    const moveResult = moveUnit(unitId, destination, this.gameState);
+    if (!moveResult.ok) {
+      return false;
+    }
+
+    this.setUiPreview(null);
+    this.evaluateAndPublish();
+    await this.enqueueAnimation("move", async () => {
+      await this.animateMoveClip(unitId, moveResult.path ?? [], 1);
+    });
+    return true;
+  }
+
+  async handlePlayerUnitAttack(attackerId, targetId) {
+    if (!this.canAcceptPlayerCommands()) {
+      return false;
+    }
+
+    const attackerBefore = getUnitById(this.gameState, attackerId);
+    const targetBefore = getUnitById(this.gameState, targetId);
+    if (!attackerBefore || !targetBefore) {
+      return false;
+    }
+
+    const attackerFrom = { q: attackerBefore.q, r: attackerBefore.r };
+    const targetHex = { q: targetBefore.q, r: targetBefore.r };
+    const attackResult = resolveAttack(attackerId, targetId, this.gameState);
+    if (!attackResult.ok) {
+      return false;
+    }
+
+    this.handleUnitAttackResult(attackerBefore, targetBefore, attackResult);
+    this.setUiPreview(null);
+    this.evaluateAndPublish();
+    await this.enqueueAnimation("attack", async () => {
+      await this.animateUnitAttackClip({
+        attackerId,
+        defenderId: targetId,
+        attackerFrom,
+        targetHex,
+        attackResult,
+        speedScale: 1,
+      });
+    });
+    return true;
+  }
+
+  async handlePlayerCityAttack(attackerId, cityId) {
+    if (!this.canAcceptPlayerCommands()) {
+      return false;
+    }
+
+    const attackerBefore = getUnitById(this.gameState, attackerId);
+    const cityBefore = this.gameState.cities.find((city) => city.id === cityId) ?? null;
+    if (!attackerBefore || !cityBefore) {
+      return false;
+    }
+
+    const attackerFrom = { q: attackerBefore.q, r: attackerBefore.r };
+    const cityHex = { q: cityBefore.q, r: cityBefore.r };
+    const cityAttackResult = resolveCityAttack(attackerId, cityId, this.gameState);
+    if (!cityAttackResult.ok) {
+      return false;
+    }
+
+    this.recordCityAttackEvent(attackerBefore, cityBefore, cityAttackResult);
+    this.handleCityAttackResult(cityAttackResult);
+    this.setUiPreview(null);
+    this.evaluateAndPublish();
+    await this.enqueueAnimation("attack-city", async () => {
+      await this.animateCityAttackClip({
+        attackerId,
+        cityId,
+        attackerFrom,
+        cityHex,
+        attackResult: cityAttackResult,
+        speedScale: 1,
+      });
+    });
+    return true;
+  }
+
+  handleEnemyStepNotification(step, execution) {
+    if (!execution?.ok || !execution.result) {
+      return;
+    }
+
+    if (step.action === "foundCity") {
+      const foundedCityId = execution.result.cityId ?? null;
+      const foundedCity = foundedCityId ? this.gameState.cities.find((city) => city.id === foundedCityId) ?? null : null;
+      this.emitNotification("Enemy founded a city.", {
+        level: "warning",
+        category: "City",
+        focus: foundedCity ? { cityId: foundedCity.id, q: foundedCity.q, r: foundedCity.r } : null,
+      });
+      return;
+    }
+
+    if (step.action === "attackUnit") {
+      const targetHex =
+        execution.actionSummary?.presentation?.target ??
+        (Number.isFinite(step.q) && Number.isFinite(step.r) ? { q: step.q, r: step.r } : null);
+      this.handleUnitAttackResult(
+        { id: step.unitId },
+        {
+          id: step.targetId ?? "target",
+          q: targetHex?.q ?? 0,
+          r: targetHex?.r ?? 0,
+        },
+        execution.result
+      );
+      return;
+    }
+
+    if (step.action === "attackCity") {
+      const targetHex =
+        execution.actionSummary?.presentation?.target ??
+        (Number.isFinite(step.q) && Number.isFinite(step.r) ? { q: step.q, r: step.r } : null);
+      this.recordCityAttackEvent(
+        { id: step.unitId },
+        {
+          id: step.targetId ?? "city",
+          q: targetHex?.q ?? 0,
+          r: targetHex?.r ?? 0,
+        },
+        execution.result
+      );
+      this.handleCityAttackResult(execution.result);
+    }
+  }
+
+  describeEnemyStep(step, index, total) {
+    const prefix = `Enemy action ${index}/${Math.max(1, total)}`;
+    if (!step) {
+      return `${prefix}: thinking...`;
+    }
+
+    if (step.action === "foundCity") {
+      return `${prefix}: ${step.unitId} founds a city`;
+    }
+    if (step.action === "attackUnit") {
+      return `${prefix}: ${step.unitId} attacks ${step.targetId ?? "a unit"}`;
+    }
+    if (step.action === "attackCity") {
+      return `${prefix}: ${step.unitId} assaults ${step.targetId ?? "a city"}`;
+    }
+    if (step.action === "move") {
+      return `${prefix}: ${step.unitId} moves to (${step.q ?? "?"}, ${step.r ?? "?"})`;
+    }
+    return `${prefix}: ${step.unitId} waits`;
+  }
+
+  async animateEnemyStep(step, execution, playbackToken) {
+    if (!execution?.ok || !step) {
+      return;
+    }
+
+    const speedScale = this.getEnemyPlaybackSpeedScale(this.turnPlayback.totalSteps);
+    if (step.action === "move") {
+      const movementPath = Array.isArray(execution.result?.path) ? execution.result.path : [];
+      await this.enqueueAnimation("move", async () => {
+        await this.animateMoveClip(step.unitId, movementPath, speedScale, playbackToken);
+      });
+      return;
+    }
+
+    if (step.action === "attackUnit") {
+      const from = execution.actionSummary?.presentation?.from ?? step.presentation?.from ?? null;
+      const targetHex = execution.actionSummary?.presentation?.target ?? step.presentation?.target ?? null;
+      await this.enqueueAnimation("attack", async () => {
+        await this.animateUnitAttackClip({
+          attackerId: step.unitId,
+          defenderId: step.targetId ?? null,
+          attackerFrom: from,
+          targetHex,
+          attackResult: execution.result,
+          speedScale,
+          playbackToken,
+        });
+      });
+      return;
+    }
+
+    if (step.action === "attackCity") {
+      const from = execution.actionSummary?.presentation?.from ?? step.presentation?.from ?? null;
+      const cityHex = execution.actionSummary?.presentation?.target ?? step.presentation?.target ?? null;
+      await this.enqueueAnimation("attack-city", async () => {
+        await this.animateCityAttackClip({
+          attackerId: step.unitId,
+          cityId: step.targetId ?? null,
+          attackerFrom: from,
+          cityHex,
+          attackResult: execution.result,
+          speedScale,
+          playbackToken,
+        });
+      });
+      return;
+    }
+
+    if (step.action === "foundCity") {
+      const foundedCityId = execution.result?.cityId ?? null;
+      const foundedCity =
+        foundedCityId && this.gameState.cities.find((city) => city.id === foundedCityId)
+          ? this.gameState.cities.find((city) => city.id === foundedCityId)
+          : null;
+      if (foundedCity) {
+        await this.enqueueAnimation("found-city", async () => {
+          await this.animateFoundCityClip(
+            {
+              cityId: foundedCity.id,
+              q: foundedCity.q,
+              r: foundedCity.r,
+            },
+            speedScale,
+            playbackToken
+          );
+        });
+      }
+    }
+  }
+
+  getEnemyPlaybackSpeedScale(totalSteps) {
+    if (totalSteps >= 10) {
+      return 0.62;
+    }
+    if (totalSteps >= 7) {
+      return 0.74;
+    }
+    if (totalSteps >= 4) {
+      return 0.86;
+    }
+    return 1;
+  }
+
+  async animateMoveClip(unitId, path, speedScale = 1, playbackToken = null) {
+    if (!Array.isArray(path) || path.length < 2) {
+      return;
+    }
+    const startHex = path[0];
+    if (!Number.isFinite(startHex?.q) || !Number.isFinite(startHex?.r)) {
+      return;
+    }
+
+    const startWorld = this.hexToWorld(startHex.q, startHex.r);
+    const override = { x: startWorld.x, y: startWorld.y, scale: 1, alpha: 1 };
+    this.unitRenderOverrides.set(unitId, override);
+    for (let i = 1; i < path.length; i += 1) {
+      if (playbackToken !== null && !this.isPlaybackTokenCurrent(playbackToken)) {
+        this.unitRenderOverrides.delete(unitId);
+        return;
+      }
+      const nextHex = path[i];
+      if (!Number.isFinite(nextHex?.q) || !Number.isFinite(nextHex?.r)) {
+        continue;
+      }
+      const targetWorld = this.hexToWorld(nextHex.q, nextHex.r);
+      await this.tweenObjectTo(override, { x: targetWorld.x, y: targetWorld.y }, MOVE_SEGMENT_MS * speedScale);
+    }
+    this.unitRenderOverrides.delete(unitId);
+  }
+
+  async animateUnitAttackClip({
+    attackerId,
+    defenderId,
+    attackerFrom,
+    targetHex,
+    attackResult,
+    speedScale = 1,
+    playbackToken = null,
+  }) {
+    if (!targetHex || !Number.isFinite(targetHex.q) || !Number.isFinite(targetHex.r)) {
+      return;
+    }
+
+    const attackerOrigin = attackerFrom && Number.isFinite(attackerFrom.q) && Number.isFinite(attackerFrom.r) ? attackerFrom : null;
+    const targetWorld = this.hexToWorld(targetHex.q, targetHex.r);
+    if (attackerOrigin && this.gameState.units.some((unit) => unit.id === attackerId)) {
+      const originWorld = this.hexToWorld(attackerOrigin.q, attackerOrigin.r);
+      const override = { x: originWorld.x, y: originWorld.y, scale: 1, alpha: 1 };
+      this.unitRenderOverrides.set(attackerId, override);
+      const lungePoint = {
+        x: originWorld.x + (targetWorld.x - originWorld.x) * 0.34,
+        y: originWorld.y + (targetWorld.y - originWorld.y) * 0.34,
+      };
+      await this.tweenObjectTo(override, lungePoint, ATTACK_ANIMATION_MS * 0.46 * speedScale);
+      this.spawnFxBurst(targetHex.q, targetHex.r, { color: 0xf1998f, maxRadius: 28 });
+      if (typeof attackResult?.damage === "number" && attackResult.damage > 0) {
+        this.spawnFloatingDamage(targetHex.q, targetHex.r, attackResult.damage);
+      }
+      await this.tweenObjectTo(override, originWorld, ATTACK_ANIMATION_MS * 0.54 * speedScale);
+      this.unitRenderOverrides.delete(attackerId);
+    } else {
+      this.spawnFxBurst(targetHex.q, targetHex.r, { color: 0xf1998f, maxRadius: 30 });
+      if (typeof attackResult?.damage === "number" && attackResult.damage > 0) {
+        this.spawnFloatingDamage(targetHex.q, targetHex.r, attackResult.damage);
+      }
+    }
+
+    if (attackResult?.counterattack?.triggered) {
+      const counterDamage = attackResult.counterattack.damage ?? 0;
+      const counterTarget = attackerOrigin;
+      if (counterTarget && Number.isFinite(counterTarget.q) && Number.isFinite(counterTarget.r)) {
+        const defender = defenderId ? getUnitById(this.gameState, defenderId) : null;
+        if (defender) {
+          const defenderOrigin = this.hexToWorld(targetHex.q, targetHex.r);
+          const counterTargetWorld = this.hexToWorld(counterTarget.q, counterTarget.r);
+          const defenderOverride = { x: defenderOrigin.x, y: defenderOrigin.y, scale: 1, alpha: 1 };
+          this.unitRenderOverrides.set(defender.id, defenderOverride);
+          const counterLunge = {
+            x: defenderOrigin.x + (counterTargetWorld.x - defenderOrigin.x) * 0.24,
+            y: defenderOrigin.y + (counterTargetWorld.y - defenderOrigin.y) * 0.24,
+          };
+          await this.tweenObjectTo(defenderOverride, counterLunge, ATTACK_ANIMATION_MS * 0.26 * speedScale);
+          await this.tweenObjectTo(defenderOverride, defenderOrigin, ATTACK_ANIMATION_MS * 0.26 * speedScale);
+          this.unitRenderOverrides.delete(defender.id);
+        }
+        this.spawnFxBurst(counterTarget.q, counterTarget.r, { color: 0xeb8f7f, maxRadius: 22 });
+        if (counterDamage > 0) {
+          this.spawnFloatingDamage(counterTarget.q, counterTarget.r, counterDamage, "#fbe2d4");
+        }
+      }
+    }
+
+    if (attackResult?.targetDefeated) {
+      this.spawnFxBurst(targetHex.q, targetHex.r, { color: 0xffcc7a, maxRadius: 34, duration: 360 });
+    }
+    if (attackResult?.attackerDefeated && attackerOrigin) {
+      this.spawnFxBurst(attackerOrigin.q, attackerOrigin.r, { color: 0xffcc7a, maxRadius: 34, duration: 360 });
+    }
+    if (attackResult?.targetDefeated || attackResult?.attackerDefeated) {
+      this.cameras.main.shake(90, 0.0018);
+    }
+
+    if (playbackToken !== null && !this.isPlaybackTokenCurrent(playbackToken)) {
+      return;
+    }
+  }
+
+  async animateCityAttackClip({ attackerId, cityId, attackerFrom, cityHex, attackResult, speedScale = 1, playbackToken = null }) {
+    if (!cityHex || !Number.isFinite(cityHex.q) || !Number.isFinite(cityHex.r)) {
+      return;
+    }
+
+    const attackerOrigin = attackerFrom && Number.isFinite(attackerFrom.q) && Number.isFinite(attackerFrom.r) ? attackerFrom : null;
+    const cityWorld = this.hexToWorld(cityHex.q, cityHex.r);
+    if (attackerOrigin && this.gameState.units.some((unit) => unit.id === attackerId)) {
+      const originWorld = this.hexToWorld(attackerOrigin.q, attackerOrigin.r);
+      const override = { x: originWorld.x, y: originWorld.y, scale: 1, alpha: 1 };
+      this.unitRenderOverrides.set(attackerId, override);
+      const lungePoint = {
+        x: originWorld.x + (cityWorld.x - originWorld.x) * 0.36,
+        y: originWorld.y + (cityWorld.y - originWorld.y) * 0.36,
+      };
+      await this.tweenObjectTo(override, lungePoint, ATTACK_ANIMATION_MS * 0.48 * speedScale);
+      await this.tweenObjectTo(override, originWorld, ATTACK_ANIMATION_MS * 0.52 * speedScale);
+      this.unitRenderOverrides.delete(attackerId);
+    }
+
+    if (cityId && this.gameState.cities.some((city) => city.id === cityId)) {
+      const cityOverride = { x: cityWorld.x, y: cityWorld.y, scale: 1, alpha: 1 };
+      this.cityRenderOverrides.set(cityId, cityOverride);
+      await this.tweenObjectTo(cityOverride, { scale: 1.16 }, ATTACK_ANIMATION_MS * 0.36 * speedScale);
+      await this.tweenObjectTo(cityOverride, { scale: 1 }, ATTACK_ANIMATION_MS * 0.36 * speedScale);
+      this.cityRenderOverrides.delete(cityId);
+    }
+
+    this.spawnFxBurst(cityHex.q, cityHex.r, { color: 0xf1998f, maxRadius: 34, duration: 280 });
+    if (typeof attackResult?.damage === "number" && attackResult.damage > 0) {
+      this.spawnFloatingDamage(cityHex.q, cityHex.r, attackResult.damage);
+    }
+    if (attackResult?.cityDefeated) {
+      this.spawnFxBurst(cityHex.q, cityHex.r, { color: 0xffd076, maxRadius: 40, duration: 420 });
+      if (attackResult.outcomeChoice === "capture") {
+        this.spawnFxBurst(cityHex.q, cityHex.r, { color: 0x7fd59d, maxRadius: 28, duration: 380 });
+      }
+      if (attackResult.outcomeChoice === "raze") {
+        this.spawnFxBurst(cityHex.q, cityHex.r, { color: 0xd36f63, maxRadius: 36, duration: 420 });
+      }
+      this.cameras.main.shake(100, 0.0022);
+    }
+
+    if (playbackToken !== null && !this.isPlaybackTokenCurrent(playbackToken)) {
+      return;
+    }
+  }
+
+  async animateFoundCityClip({ cityId, q, r }, speedScale = 1, playbackToken = null) {
+    if (!Number.isFinite(q) || !Number.isFinite(r)) {
+      return;
+    }
+    this.spawnFxBurst(q, r, { color: 0x8dd575, maxRadius: 44, duration: FOUND_CITY_ANIMATION_MS * speedScale });
+
+    const foundedCity = cityId ? this.gameState.cities.find((city) => city.id === cityId) ?? null : null;
+    if (!foundedCity) {
+      return;
+    }
+
+    const center = this.hexToWorld(foundedCity.q, foundedCity.r);
+    const cityOverride = { x: center.x, y: center.y, scale: 0.24, alpha: 0.2 };
+    this.cityRenderOverrides.set(foundedCity.id, cityOverride);
+    await this.tweenObjectTo(cityOverride, { scale: 1, alpha: 1 }, FOUND_CITY_ANIMATION_MS * speedScale);
+    this.cityRenderOverrides.delete(foundedCity.id);
+
+    if (playbackToken !== null && !this.isPlaybackTokenCurrent(playbackToken)) {
+      return;
+    }
+  }
+
+  async animateCityOutcomeClip({ q, r, choice }) {
+    if (!Number.isFinite(q) || !Number.isFinite(r)) {
+      return;
+    }
+    if (choice === "capture") {
+      this.spawnFxBurst(q, r, { color: 0x7fd59d, maxRadius: 36, duration: 320 });
+      this.spawnFxBurst(q, r, { color: 0xb5f0c4, maxRadius: 26, duration: 260 });
+    } else {
+      this.spawnFxBurst(q, r, { color: 0xd36f63, maxRadius: 40, duration: 360 });
+      this.spawnFxBurst(q, r, { color: 0xffb079, maxRadius: 28, duration: 280 });
+    }
+    this.cameras.main.shake(80, 0.0016);
+    await this.waitForAnimationDelay(220);
+  }
+
+  enqueueAnimation(kind, runner) {
+    return new Promise((resolve) => {
+      this.animationQueue.push({ kind, runner, resolve });
+      this.publishState();
+      void this.pumpAnimationQueue();
+    });
+  }
+
+  async pumpAnimationQueue() {
+    if (this.animationQueueRunning) {
+      return;
+    }
+    this.animationQueueRunning = true;
+    while (this.animationQueue.length > 0) {
+      const queued = this.animationQueue.shift();
+      if (!queued) {
+        continue;
+      }
+      this.isAnimationBusy = true;
+      this.activeAnimationKind = queued.kind;
+      this.publishState();
+      let ok = true;
+      try {
+        await queued.runner();
+      } catch {
+        ok = false;
+      }
+      this.isAnimationBusy = false;
+      this.activeAnimationKind = null;
+      queued.resolve(ok);
+      this.publishState();
+    }
+    this.animationQueueRunning = false;
+  }
+
+  tweenObjectTo(target, values, durationMs) {
+    return new Promise((resolve) => {
+      const tween = this.tweens.add({
+        targets: target,
+        ...values,
+        duration: Math.max(20, Math.floor(durationMs)),
+        ease: "Sine.easeInOut",
+        onComplete: () => {
+          resolve(true);
+        },
+      });
+      tween.once("stop", () => resolve(false));
+    });
+  }
+
+  waitForAnimationDelay(ms, playbackToken = null) {
+    if (!Number.isFinite(ms) || ms <= 0) {
+      return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
+      /** @type {Phaser.Time.TimerEvent|undefined} */
+      let timer;
+      timer = this.time.delayedCall(ms, () => {
+        if (timer) {
+          this.activeTimers.delete(timer);
+        }
+        if (playbackToken === null) {
+          resolve(true);
+          return;
+        }
+        resolve(this.isPlaybackTokenCurrent(playbackToken));
+      });
+      this.activeTimers.add(timer);
+    });
+  }
+
+  spawnFxBurst(q, r, options = {}) {
+    if (!Number.isFinite(q) || !Number.isFinite(r)) {
+      return;
+    }
+    const world = this.hexToWorld(q, r);
+    const duration = Number.isFinite(options.duration) ? options.duration : 300;
+    this.fxBursts.push({
+      x: world.x,
+      y: world.y,
+      color: Number.isFinite(options.color) ? options.color : 0xf1998f,
+      maxRadius: Number.isFinite(options.maxRadius) ? options.maxRadius : 26,
+      minRadius: Number.isFinite(options.minRadius) ? options.minRadius : 8,
+      alpha: Number.isFinite(options.alpha) ? options.alpha : 0.9,
+      createdAt: this.time.now,
+      expiresAt: this.time.now + duration,
+    });
+  }
+
+  spawnFloatingDamage(q, r, amount, color = "#fff3de") {
+    if (!Number.isFinite(q) || !Number.isFinite(r) || !Number.isFinite(amount)) {
+      return;
+    }
+    const center = this.hexToWorld(q, r);
+    const id = `fd-${this.floatingDamageNextId}`;
+    this.floatingDamageNextId += 1;
+    const text = this.add
+      .text(center.x, center.y - HEX_SIZE * 0.45, `${amount}`, {
+        fontFamily: "Trebuchet MS",
+        fontSize: "15px",
+        color,
+        stroke: "#2a1b10",
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5)
+      .setDepth(40);
+
+    this.floatingDamage.push({
+      id,
+      value: amount,
+      q,
+      r,
+      expiresAt: this.time.now + 460,
+    });
+    this.floatingDamageTextById.set(id, text);
+    this.tweens.add({
+      targets: text,
+      y: center.y - HEX_SIZE * 0.92,
+      alpha: 0,
+      duration: 460,
+      ease: "Sine.easeOut",
+      onComplete: () => {
+        text.destroy();
+        this.floatingDamageTextById.delete(id);
+        this.floatingDamage = this.floatingDamage.filter((entry) => entry.id !== id);
+      },
+    });
+  }
+
+  updateTransientVisualState(nowMs) {
+    const now = Number.isFinite(nowMs) ? nowMs : this.time.now;
+    this.fxBursts = this.fxBursts.filter((burst) => now <= burst.expiresAt);
+    this.floatingDamage = this.floatingDamage.filter((entry) => now <= entry.expiresAt);
+    return (
+      this.isAnimationBusy ||
+      this.animationQueue.length > 0 ||
+      this.unitRenderOverrides.size > 0 ||
+      this.cityRenderOverrides.size > 0 ||
+      this.fxBursts.length > 0 ||
+      this.floatingDamage.length > 0
+    );
+  }
+
+  clearAnimationArtifacts() {
+    this.unitRenderOverrides.clear();
+    this.cityRenderOverrides.clear();
+    this.fxBursts = [];
+    this.floatingDamage = [];
+    for (const text of this.floatingDamageTextById.values()) {
+      text.destroy();
+    }
+    this.floatingDamageTextById.clear();
+  }
+
+  abortEnemyPlayback() {
+    this.enemyTurnPlaybackToken += 1;
+    this.enemyTurnActivePlan = null;
+    this.turnPlayback = this.createTurnPlaybackState();
+    this.animationQueue = [];
+    this.animationQueueRunning = false;
+    this.isAnimationBusy = false;
+    this.activeAnimationKind = null;
+  }
+
+  createTurnPlaybackState() {
+    return {
+      active: false,
+      actor: null,
+      stepIndex: 0,
+      totalSteps: 0,
+      message: null,
+    };
+  }
+
+  getAnimationStatePayload() {
+    return {
+      busy: this.isAnimationBusy,
+      kind: this.activeAnimationKind,
+      queueLength: this.animationQueue.length,
+    };
+  }
+
+  isPlaybackTokenCurrent(playbackToken) {
+    return playbackToken === this.enemyTurnPlaybackToken && this.turnPlayback.active && this.gameState.turnState.phase === "enemy";
+  }
+
+  resolveUnitRenderPosition(unit) {
+    const base = this.hexToWorld(unit.q, unit.r);
+    const override = this.unitRenderOverrides.get(unit.id);
+    if (!override) {
+      return base;
+    }
+    return {
+      x: Number.isFinite(override.x) ? override.x : base.x,
+      y: Number.isFinite(override.y) ? override.y : base.y,
+    };
+  }
+
+  resolveCityRenderPosition(city) {
+    const base = this.hexToWorld(city.q, city.r);
+    const override = this.cityRenderOverrides.get(city.id);
+    if (!override) {
+      return base;
+    }
+    return {
+      x: Number.isFinite(override.x) ? override.x : base.x,
+      y: Number.isFinite(override.y) ? override.y : base.y,
+    };
+  }
+
+  renderEffects() {
+    this.fxGraphics.clear();
+    const now = this.time.now;
+    for (const burst of this.fxBursts) {
+      const duration = Math.max(1, burst.expiresAt - burst.createdAt);
+      const progress = Phaser.Math.Clamp((now - burst.createdAt) / duration, 0, 1);
+      const radius = Phaser.Math.Linear(burst.minRadius, burst.maxRadius, progress);
+      const alpha = Phaser.Math.Clamp((1 - progress) * burst.alpha, 0, 1);
+      this.fxGraphics.lineStyle(2, burst.color, alpha);
+      this.fxGraphics.strokeCircle(burst.x, burst.y, radius);
+      this.fxGraphics.fillStyle(burst.color, alpha * 0.18);
+      this.fxGraphics.fillCircle(burst.x, burst.y, radius * 0.52);
+    }
+  }
+
   canPanCamera() {
     return !this.uiModalOpen;
   }
@@ -889,7 +1640,9 @@ export class WorldScene extends Phaser.Scene {
       this.gameState.turnState.phase === "player" &&
       this.gameState.match.status === "ongoing" &&
       !this.uiModalOpen &&
-      !this.gameState.pendingCityResolution
+      !this.gameState.pendingCityResolution &&
+      !this.isAnimationBusy &&
+      !this.turnPlayback.active
     );
   }
 
@@ -990,6 +1743,8 @@ export class WorldScene extends Phaser.Scene {
       uiHints: uiSurface.uiHints,
       uiActions: uiSurface.uiActions,
       uiModalOpen: this.uiModalOpen,
+      animationState: this.getAnimationStatePayload(),
+      turnPlayback: structuredClone(this.turnPlayback),
       pauseMenu: {
         open: uiRuntime.pauseMenuOpen,
         restartConfirmOpen: uiRuntime.restartConfirmOpen,
@@ -1025,6 +1780,7 @@ export class WorldScene extends Phaser.Scene {
     this.renderSelection();
     this.renderCities();
     this.renderUnits();
+    this.renderEffects();
   }
 
   renderMap() {
@@ -1144,37 +1900,47 @@ export class WorldScene extends Phaser.Scene {
   renderCities() {
     this.cityGraphics.clear();
     for (const city of this.gameState.cities) {
-      const center = this.hexToWorld(city.q, city.r);
+      const center = this.resolveCityRenderPosition(city);
+      const override = this.cityRenderOverrides.get(city.id) ?? null;
+      const scale = Math.max(0.2, override?.scale ?? 1);
+      const alpha = Phaser.Math.Clamp(override?.alpha ?? 0.95, 0.05, 1);
+      const halfSize = 13 * scale;
       const fillColor = city.owner === "enemy" ? COLORS.cityEnemy : COLORS.cityPlayer;
-      this.cityGraphics.fillStyle(fillColor, 0.95);
-      this.cityGraphics.fillRect(center.x - 13, center.y - 13, 26, 26);
-      this.cityGraphics.lineStyle(2, COLORS.cityStroke, 1);
-      this.cityGraphics.strokeRect(center.x - 13, center.y - 13, 26, 26);
+      this.cityGraphics.fillStyle(fillColor, alpha);
+      this.cityGraphics.fillRect(center.x - halfSize, center.y - halfSize, halfSize * 2, halfSize * 2);
+      this.cityGraphics.lineStyle(2, COLORS.cityStroke, alpha);
+      this.cityGraphics.strokeRect(center.x - halfSize, center.y - halfSize, halfSize * 2, halfSize * 2);
 
       const hpRatio = Math.max(0, city.health / city.maxHealth);
-      this.cityGraphics.fillStyle(0x202020, 0.72);
-      this.cityGraphics.fillRect(center.x - 14, center.y + 17, 28, 4);
-      this.cityGraphics.fillStyle(0xb8df8f, 1);
-      this.cityGraphics.fillRect(center.x - 14, center.y + 17, 28 * hpRatio, 4);
+      const healthY = center.y + 17 * scale;
+      this.cityGraphics.fillStyle(0x202020, 0.72 * alpha);
+      this.cityGraphics.fillRect(center.x - 14, healthY, 28, 4);
+      this.cityGraphics.fillStyle(0xb8df8f, alpha);
+      this.cityGraphics.fillRect(center.x - 14, healthY, 28 * hpRatio, 4);
     }
   }
 
   renderUnits() {
     this.unitGraphics.clear();
     for (const unit of this.gameState.units) {
-      const center = this.hexToWorld(unit.q, unit.r);
+      const center = this.resolveUnitRenderPosition(unit);
+      const override = this.unitRenderOverrides.get(unit.id) ?? null;
+      const scale = Math.max(0.15, override?.scale ?? 1);
+      const alpha = Phaser.Math.Clamp(override?.alpha ?? 1, 0.05, 1);
       const fillColor = unit.owner === "enemy" ? COLORS.enemyUnit : COLORS.playerUnit;
       const strokeColor = unit.owner === "enemy" ? COLORS.enemyUnitStroke : COLORS.playerUnitStroke;
-      this.unitGraphics.fillStyle(fillColor, 1);
-      this.unitGraphics.fillCircle(center.x, center.y, HEX_SIZE * 0.4);
-      this.unitGraphics.lineStyle(2, strokeColor, 1);
-      this.unitGraphics.strokeCircle(center.x, center.y, HEX_SIZE * 0.4);
+      const radius = HEX_SIZE * 0.4 * scale;
+      this.unitGraphics.fillStyle(fillColor, alpha);
+      this.unitGraphics.fillCircle(center.x, center.y, radius);
+      this.unitGraphics.lineStyle(2, strokeColor, alpha);
+      this.unitGraphics.strokeCircle(center.x, center.y, radius);
 
       const hpRatio = Math.max(0, unit.health / unit.maxHealth);
-      this.unitGraphics.fillStyle(0x202020, 0.7);
-      this.unitGraphics.fillRect(center.x - 14, center.y + HEX_SIZE * 0.47, 28, 4);
-      this.unitGraphics.fillStyle(0x8dd575, 1);
-      this.unitGraphics.fillRect(center.x - 14, center.y + HEX_SIZE * 0.47, 28 * hpRatio, 4);
+      const healthY = center.y + HEX_SIZE * 0.47 * Math.max(0.7, scale);
+      this.unitGraphics.fillStyle(0x202020, 0.7 * alpha);
+      this.unitGraphics.fillRect(center.x - 14, healthY, 28, 4);
+      this.unitGraphics.fillStyle(0x8dd575, alpha);
+      this.unitGraphics.fillRect(center.x - 14, healthY, 28 * hpRatio, 4);
     }
   }
 
@@ -1233,6 +1999,8 @@ export class WorldScene extends Phaser.Scene {
       attackableCities: this.attackableCities.map((city) => ({ id: city.id, q: city.q, r: city.r })),
       threatHexes: this.threatHexes.map((hex) => ({ q: hex.q, r: hex.r })),
       uiPreview: this.buildUiPreviewPayload(),
+      animationState: this.getAnimationStatePayload(),
+      turnPlayback: structuredClone(this.turnPlayback),
       uiTurnAssistant: this.getTurnAssistantState(),
       uiContextPanel: {
         expanded: !!uiRuntime.contextPanelExpanded,
@@ -1624,7 +2392,9 @@ export class WorldScene extends Phaser.Scene {
     if (
       this.gameState.match.status !== "ongoing" ||
       this.gameState.turnState.phase !== "player" ||
-      !!this.gameState.pendingCityResolution
+      !!this.gameState.pendingCityResolution ||
+      this.isAnimationBusy ||
+      this.turnPlayback.active
     ) {
       return {
         readyCount: 0,
@@ -1721,6 +2491,10 @@ export class WorldScene extends Phaser.Scene {
   // Test-oriented helpers used through window.__hexfallTest
   testGetActionPreviewState() {
     return this.buildUiPreviewPayload();
+  }
+
+  testGetAnimationState() {
+    return this.getAnimationStatePayload();
   }
 
   testHoverHex(q, r) {
@@ -1992,6 +2766,14 @@ export class WorldScene extends Phaser.Scene {
     beginEnemyTurn(this.gameState);
     this.evaluateAndPublish();
     this.resolveEnemyAndAdvanceTurn();
+    return true;
+  }
+
+  testRequestEndTurn() {
+    if (!this.canAcceptPlayerCommands()) {
+      return false;
+    }
+    this.handleEndTurnRequested();
     return true;
   }
 

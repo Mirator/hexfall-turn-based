@@ -21,6 +21,8 @@
 - Chosen: hover-driven action preview surfaces (`move`, `attack-unit`, `attack-city`) with no state mutation.
 - Chosen: map clarity overlays include reachable/attackable emphasis and threat visualization when a player unit is selected.
 - Chosen: bottom-right readiness assistant uses clickable `Attention needed (X)` status, where `X = ready units + player cities with empty queues`; click cycles the next attention target (unit or city), and End Turn keeps warning tint while any attention remains.
+- Chosen: enemy playback banner is displayed while sequential enemy actions resolve (`Enemy action X/Y: <summary>`), centered above the map/HUD action layers.
+- Chosen: gameplay commands (End Turn + context actions) are disabled while animation timeline is busy, with explicit disabled reason text.
 - Chosen: restart lives in Esc pause menu (`Resume`, `Restart`, confirm step) and blocks underlying interactions while modal is open.
 - Chosen: notification center v2 supports categories (`All/Combat/City/Research/System`), filtering, and click-to-jump focus.
 - Chosen: notification rows with no map `focus` are rendered as non-clickable text and never emit "no target" warning on click.
@@ -37,6 +39,8 @@
   - `uiPreview`
   - `uiTurnAssistant`
   - `uiContextPanel`
+  - `animationState`
+  - `turnPlayback`
   - `uiNotifications` entries with `category` and optional `focus`
   - `uiNotificationFilter`
   - `cameraScroll`
@@ -56,6 +60,7 @@
   - `getPauseMenuState`, `openPauseMenu`, `closePauseMenu`
   - `getRestartModalState`, `getCityResolutionModalState`
   - `getCityPanelState`, `triggerUnitAction`
+  - `getAnimationState`, `requestEndTurn`, `endTurnImmediate`
   - `getActionPreviewState`, `hoverHex`
   - `getTurnAssistantState`, `nextReadyUnit`
   - `setContextPanelPinned`
@@ -74,6 +79,10 @@
   - one-click End Turn remains
   - readiness count aggregates unit + city-queue attention
   - clicking the assistant deterministically cycles next attention target (ready unit or city with empty queue)
+- Playback/lock flow:
+  - playback banner is visible only while `turnPlayback.active=true`
+  - End Turn label reflects state (`Resolve...`, `Enemy...`, `Animating...` as applicable)
+  - disabled gameplay commands surface explicit reason text (for example, animation-busy lock)
 - Notification center:
   - newest-first feed
   - filter chips by category
@@ -91,7 +100,7 @@
   - `tests/integration/uiSurface.test.js`
   - `tests/integration/unitActionSystem.test.js`
 - E2E:
-  - `tests/e2e/smoke.mjs` covers city/unit context actions, previews, turn assistant, pause/restart, filtering, and notification focus jump.
+  - `tests/e2e/smoke.mjs` covers city/unit context actions, previews, turn assistant, playback banner state progression, pause/restart, filtering, and notification focus jump.
 - Manual artifact checks:
   - `tests/e2e/artifacts/smoke.png`
   - `tests/e2e/artifacts/ui-city-panel.png`
@@ -102,3 +111,4 @@
 - Notification center currently prioritizes compact single-line rows over expanded per-entry detail.
 - Touch-first scrolling/interaction tuning in notification center can be improved further.
 - Additional panel section collapsing for very small viewports may still improve readability.
+- No user-facing playback speed/skip controls yet.

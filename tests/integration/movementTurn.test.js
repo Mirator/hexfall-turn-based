@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createInitialGameState, getUnitById } from "../../src/core/gameState.js";
-import { getReachable, moveUnit } from "../../src/systems/movementSystem.js";
+import { distance } from "../../src/core/hexGrid.js";
+import { getPathTo, getReachable, moveUnit } from "../../src/systems/movementSystem.js";
 import { beginEnemyTurn, beginPlayerTurn } from "../../src/systems/turnSystem.js";
 
 describe("movement and turn systems", () => {
@@ -31,10 +32,40 @@ describe("movement and turn systems", () => {
       return;
     }
 
+    const start = { q: unit.q, r: unit.r };
     const result = moveUnit(unit.id, { q: firstReachable.q, r: firstReachable.r }, gameState);
     expect(result.ok).toBe(true);
+    expect(Array.isArray(result.path)).toBe(true);
+    expect(result.path?.[0]).toMatchObject(start);
     expect(unit.hasActed).toBe(true);
     expect(unit.movementRemaining).toBeLessThanOrEqual(unit.maxMovement);
+  });
+
+  it("returns a contiguous movement path for reachable destinations", () => {
+    const gameState = createInitialGameState({ seed: 8088 });
+    const unit = gameState.units.find((candidate) => candidate.owner === "player");
+    expect(unit).toBeTruthy();
+    if (!unit) {
+      return;
+    }
+
+    const destination = getReachable(unit.id, gameState).find((hex) => hex.cost > 0);
+    expect(destination).toBeTruthy();
+    if (!destination) {
+      return;
+    }
+
+    const pathResult = getPathTo(unit.id, { q: destination.q, r: destination.r }, gameState);
+    expect(pathResult.ok).toBe(true);
+    expect(pathResult.cost).toBe(destination.cost);
+    expect(pathResult.path?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(pathResult.path?.[0]).toEqual({ q: unit.q, r: unit.r });
+    expect(pathResult.path?.[pathResult.path.length - 1]).toEqual({ q: destination.q, r: destination.r });
+
+    const path = pathResult.path ?? [];
+    for (let i = 1; i < path.length; i += 1) {
+      expect(distance(path[i - 1], path[i])).toBe(1);
+    }
   });
 
   it("beginPlayerTurn resets movement and acted flags for player units", () => {

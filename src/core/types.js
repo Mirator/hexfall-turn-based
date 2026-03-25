@@ -127,6 +127,7 @@
  * @property {number} score
  * @property {number} cost
  * @property {string|null} detail
+ * @property {{ from: Hex|null, to: Hex|null, target: Hex|null }|null} [presentation]
  */
 
 /**

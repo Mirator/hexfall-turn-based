@@ -12,7 +12,7 @@
 - Chosen: keep one self-contained smoke runner (`tests/e2e/smoke.mjs`) that starts Vite, drives gameplay, asserts, and captures artifacts.
 - Chosen: expose UI/runtime surfaces in `render_game_to_text` so tests do not depend on pixel scraping.
 - Chosen: harden e2e cleanup with signal-aware close and force-kill fallback for `chrome-headless-shell` on Windows.
-- Chosen: centralize testability as cross-spec authority for payload/hook contract, with gameplay authority remaining in domain specs (`spec-002`, `spec-004`, `spec-005`, `spec-006`, `spec-007`, `spec-008`).
+- Chosen: centralize testability as cross-spec authority for payload/hook contract, with gameplay authority remaining in domain specs (`spec-002`, `spec-004`, `spec-005`, `spec-006`, `spec-007`, `spec-008`, `spec-009`).
 - Rejected for now: replacing hooks with a heavier bespoke automation protocol.
 
 ## Interfaces/types added
@@ -57,7 +57,9 @@
   - `window.__hexfallTest.removeCityQueueAt(index)`
   - `window.__hexfallTest.cycleResearch()`
   - `window.__hexfallTest.selectResearch(techId)`
+  - `window.__hexfallTest.getAnimationState()`
   - `window.__hexfallTest.endTurnImmediate()`
+  - `window.__hexfallTest.requestEndTurn()`
   - `window.__hexfallTest.setUnitPosition(unitId, q, r)`
   - `window.__hexfallTest.arrangeCombatSkirmish(playerUnitId, enemyUnitId)`
   - `window.__hexfallTest.setEnemyPersonality(personality)`
@@ -72,6 +74,8 @@
   - seed/hash/spawn metadata
   - units/cities/combat/research/economy snapshots
   - `uiPreview`, `uiTurnAssistant`, `uiContextPanel`, `uiNotificationFilter`
+  - `animationState` (`busy`, `kind`, `queueLength`)
+  - `turnPlayback` (`active`, `actor`, `stepIndex`, `totalSteps`, `message`)
   - `uiTurnAssistant.emptyQueueCityCount` (player cities with empty queues)
   - `threatHexes`
   - `cities[].health` + `cities[].maxHealth`
@@ -87,6 +91,7 @@
   - city production context details for units/buildings tabs and typed queue items
   - contextual `uiHints` + `uiActions`
 - `advanceTime` remains available for deterministic stepping.
+- `endTurnImmediate()` remains unchanged as deterministic fast-path bypass for smoke/integration flows that do not need playback assertions.
 - Smoke scenario validates:
   - hover move and city-attack previews
   - turn readiness assistant and deterministic attention-cycle path (ready units + cities with empty queues)
@@ -95,6 +100,7 @@
   - non-focus notification row click returns `false` without adding warning notification
   - keyboard camera pan (`Arrow`/`WASD`) and right-drag camera pan both move `cameraScroll`
   - manual pan clears prior `cameraFocusHex`
+  - real End Turn enters enemy playback (`turnPlayback.active=true`) and step index progresses before returning to player phase
   - founding, queue/focus management, research, combat, city resolution, restart/pause flows
   - no unexpected defeat during validated scenario flow
   - zero console/page errors

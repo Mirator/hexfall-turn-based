@@ -10,6 +10,7 @@
 
 - Chosen: both factions start settler-only; no starting warriors.
 - Chosen: only settlers can found cities; enemy auto-founds first valid city opportunity.
+- Chosen: successful city founding emits timeline presentation feedback (settlement pulse + city spawn pop) while game-state mutation remains authoritative.
 - Chosen: economy is empire-wide per owner (`food/production/science` stockpiles).
 - Chosen: city yields are terrain-driven with ring-1 workable area and deterministic assignment.
 - Chosen: city focus is direct-select (`balanced`, `food`, `production`, `science`).
@@ -53,7 +54,8 @@
 
 - Founding:
   - settler-only, valid passable/empty tile required
-  - founding consumes settler and creates/ selects city
+  - founding consumes settler and creates/selects city
+  - successful founding plays visible settlement animation clip at founded tile
 - Terrain yields (locked defaults):
   - plains `2/1/0`
   - forest `1/2/0`
@@ -81,7 +83,7 @@
   - `tests/integration/enemyTurn.test.js`
   - `tests/integration/researchSystem.test.js` (science stock interaction)
 - E2E:
-  - `tests/e2e/smoke.mjs` (founding, queue/focus/building interactions, economy progression)
+  - `tests/e2e/smoke.mjs` (founding clip visibility + queue/focus/building interactions + economy progression)
 
 ## Known gaps and next steps
 

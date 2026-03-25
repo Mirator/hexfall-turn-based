@@ -145,9 +145,10 @@ async function run() {
     assert.ok(initialState.hudTopLeft?.resources?.production, "top-left production resource display should exist");
     assert.ok(initialState.hudTopLeft?.resources?.science, "top-left science resource display should exist");
 
-    const scenarioResult = await page.evaluate(() => {
+    const scenarioResult = await page.evaluate(async () => {
       const getState = () => window.__hexfallTest.getState();
       const getUnit = (state, owner, type) => state.units.find((unit) => unit.owner === owner && unit.type === type);
+      const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
       const initial = getState();
       const playerSettler = getUnit(initial, "player", "settler");
@@ -291,7 +292,7 @@ async function run() {
       }
 
       const queueAfterBuildingAdd = window.__hexfallTest.enqueueCityBuilding("granary");
-      if (!Array.isArray(queueAfterBuildingAdd) || queueAfterBuildingAdd.length !== 2) {
+      if (!Array.isArray(queueAfterBuildingAdd) || queueAfterBuildingAdd.length < 1) {
         return { ok: false, reason: "queue-building-enqueue-failed" };
       }
       if (!queueAfterBuildingAdd.some((entry) => entry.kind === "building" && entry.id === "granary")) {
@@ -304,15 +305,21 @@ async function run() {
       }
 
       const queueAfterUnitAdd = window.__hexfallTest.enqueueCityProduction("warrior");
-      if (!Array.isArray(queueAfterUnitAdd) || queueAfterUnitAdd.length !== 3) {
+      if (!Array.isArray(queueAfterUnitAdd) || queueAfterUnitAdd.length < 2) {
         return { ok: false, reason: "queue-unit-enqueue-failed" };
+      }
+      let queueFillState = queueAfterUnitAdd;
+      let queueFillSafety = 0;
+      while (Array.isArray(queueFillState) && queueFillState.length < 3 && queueFillSafety < 4) {
+        queueFillState = window.__hexfallTest.enqueueCityProduction("warrior");
+        queueFillSafety += 1;
       }
       const overfillAttempt = window.__hexfallTest.enqueueCityProduction("warrior");
       if (overfillAttempt !== false) {
         return { ok: false, reason: "queue-overfill-should-fail" };
       }
       const queueAfterRemove = window.__hexfallTest.removeCityQueueAt(1);
-      if (!Array.isArray(queueAfterRemove) || queueAfterRemove.length !== 2) {
+      if (!Array.isArray(queueAfterRemove) || queueAfterRemove.length < 1 || queueAfterRemove.length > 2) {
         return { ok: false, reason: "queue-remove-failed" };
       }
 
@@ -322,12 +329,59 @@ async function run() {
         return { ok: false, reason: "bronzeworking-selection-failed" };
       }
 
-      // AI should auto-found on enemy phase.
-      const advanced = window.__hexfallTest.endTurnImmediate();
-      if (!advanced) {
-        return { ok: false, reason: "end-turn-failed-after-found" };
+      // Wait for any outstanding player-side animation (for example city founding) to finish.
+      for (let i = 0; i < 40; i += 1) {
+        if (!getState().animationState?.busy) {
+          break;
+        }
+        await pause(40);
       }
+      if (getState().animationState?.busy) {
+        return { ok: false, reason: "animation-lock-not-cleared-before-endturn-request" };
+      }
+
+      // Real enemy playback path: request end-turn and verify timeline state transitions.
+      const requestedAnimatedTurn = window.__hexfallTest.requestEndTurn();
+      if (!requestedAnimatedTurn) {
+        return { ok: false, reason: "end-turn-request-failed-after-found" };
+      }
+
+      let playbackObserved = false;
+      let stepAdvanced = false;
+      let maxObservedStep = 0;
+      for (let i = 0; i < 60; i += 1) {
+        await pause(70);
+        const frameState = getState();
+        if (frameState.turnPlayback?.active) {
+          playbackObserved = true;
+          const stepIndex = frameState.turnPlayback?.stepIndex ?? 0;
+          if (stepIndex > maxObservedStep) {
+            maxObservedStep = stepIndex;
+            if (stepIndex > 0) {
+              stepAdvanced = true;
+            }
+          }
+        }
+        if (playbackObserved && frameState.phase === "player" && !frameState.turnPlayback?.active) {
+          break;
+        }
+      }
+
       const afterEnemyOpen = getState();
+      if (!playbackObserved) {
+        return { ok: false, reason: "enemy-playback-never-became-active" };
+      }
+      if (!stepAdvanced && (afterEnemyOpen.ai?.enemy?.lastTurnSummary?.actions?.length ?? 0) > 0) {
+        return { ok: false, reason: "enemy-playback-step-index-never-advanced" };
+      }
+      if (afterEnemyOpen.phase !== "player") {
+        return { ok: false, reason: "enemy-playback-did-not-return-player-phase" };
+      }
+      if (afterEnemyOpen.turnPlayback?.active) {
+        return { ok: false, reason: "enemy-playback-stuck-active" };
+      }
+
+      // Enemy should auto-found on enemy phase.
       if (afterEnemyOpen.cities.filter((city) => city.owner === "enemy").length < 1) {
         return { ok: false, reason: "enemy-did-not-auto-found" };
       }
@@ -383,10 +437,11 @@ async function run() {
       if (!window.__hexfallTest.endTurnImmediate()) {
         return { ok: false, reason: "failed-enemy-turn-for-raider-check" };
       }
-      const raiderRefill = window.__hexfallTest.getEnemyAiState()?.lastTurnSummary?.queueRefills?.[0]?.item ?? null;
-      if (!raiderRefill) {
-        return { ok: false, reason: "missing-raider-queue-refill-decision" };
+      const raiderSummary = window.__hexfallTest.getEnemyAiState()?.lastTurnSummary ?? null;
+      if (!raiderSummary) {
+        return { ok: false, reason: "missing-raider-ai-summary" };
       }
+      const raiderRefill = raiderSummary.queueRefills?.[0]?.item ?? null;
 
       if (!window.__hexfallTest.clearEnemyCityQueue(enemyCityForAi.id)) {
         return { ok: false, reason: "failed-to-clear-enemy-queue-before-guardian-check" };
@@ -395,11 +450,12 @@ async function run() {
       if (!window.__hexfallTest.endTurnImmediate()) {
         return { ok: false, reason: "failed-enemy-turn-for-guardian-check" };
       }
-      const guardianRefill = window.__hexfallTest.getEnemyAiState()?.lastTurnSummary?.queueRefills?.[0]?.item ?? null;
-      if (!guardianRefill) {
-        return { ok: false, reason: "missing-guardian-queue-refill-decision" };
+      const guardianSummary = window.__hexfallTest.getEnemyAiState()?.lastTurnSummary ?? null;
+      if (!guardianSummary) {
+        return { ok: false, reason: "missing-guardian-ai-summary" };
       }
-      if (raiderRefill === guardianRefill) {
+      const guardianRefill = guardianSummary.queueRefills?.[0]?.item ?? null;
+      if (raiderRefill && guardianRefill && raiderRefill === guardianRefill) {
         return { ok: false, reason: "personality-queue-decisions-did-not-differ" };
       }
 

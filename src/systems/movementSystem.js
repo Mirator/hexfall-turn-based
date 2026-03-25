@@ -28,49 +28,7 @@ export function getReachable(unitId, gameState) {
  * @returns {Map<string, number>}
  */
 export function getReachableCostMap(unit, gameState) {
-  const startKey = axialKey(unit);
-  const frontier = [{ q: unit.q, r: unit.r, cost: 0 }];
-  const bestCostByHex = new Map([[startKey, 0]]);
-
-  while (frontier.length > 0) {
-    frontier.sort((a, b) => a.cost - b.cost);
-    const current = frontier.shift();
-    if (!current) {
-      break;
-    }
-
-    for (const neighbor of neighbors(current)) {
-      if (!isInsideMap(gameState.map, neighbor.q, neighbor.r)) {
-        continue;
-      }
-
-      const occupant = getUnitAt(gameState, neighbor.q, neighbor.r);
-      if (occupant && occupant.id !== unit.id) {
-        continue;
-      }
-
-      const tile = getTileAt(gameState.map, neighbor.q, neighbor.r);
-      if (!tile || tile.blocksMovement) {
-        continue;
-      }
-
-      const nextCost = current.cost + tile.moveCost;
-      if (nextCost > unit.movementRemaining) {
-        continue;
-      }
-
-      const key = axialKey(neighbor);
-      const previousCost = bestCostByHex.get(key);
-      if (typeof previousCost === "number" && previousCost <= nextCost) {
-        continue;
-      }
-
-      bestCostByHex.set(key, nextCost);
-      frontier.push({ q: neighbor.q, r: neighbor.r, cost: nextCost });
-    }
-  }
-
-  return bestCostByHex;
+  return computeReachability(unit, gameState).costByHex;
 }
 
 /**
@@ -120,9 +78,9 @@ export function canMoveUnitTo(unitId, destination, gameState) {
  * @param {string} unitId
  * @param {{ q: number, r: number }} destination
  * @param {import("../core/types.js").GameState} gameState
- * @returns {{ ok: boolean, reason?: string, cost?: number }}
+ * @returns {{ ok: boolean, reason?: string, cost?: number, path?: Array<{ q: number, r: number }> }}
  */
-export function moveUnit(unitId, destination, gameState) {
+export function getPathTo(unitId, destination, gameState) {
   const check = canMoveUnitTo(unitId, destination, gameState);
   if (!check.ok) {
     return check;
@@ -133,10 +91,121 @@ export function moveUnit(unitId, destination, gameState) {
     return { ok: false, reason: "unit-not-found" };
   }
 
+  const reachability = computeReachability(unit, gameState);
+  const destinationKey = axialKey(destination);
+  if (!reachability.costByHex.has(destinationKey)) {
+    return { ok: false, reason: "out-of-range" };
+  }
+
+  const startKey = axialKey(unit);
+  const pathKeys = [destinationKey];
+  let currentKey = destinationKey;
+  while (currentKey !== startKey) {
+    const previous = reachability.previousByHex.get(currentKey);
+    if (!previous) {
+      return { ok: false, reason: "path-not-found" };
+    }
+    pathKeys.push(previous);
+    currentKey = previous;
+  }
+
+  const path = pathKeys
+    .reverse()
+    .map((key) => {
+      const [q, r] = key.split(",").map((value) => Number.parseInt(value, 10));
+      return { q, r };
+    })
+    .filter((hex) => Number.isFinite(hex.q) && Number.isFinite(hex.r));
+
+  if (path.length === 0) {
+    return { ok: false, reason: "path-not-found" };
+  }
+
+  return {
+    ok: true,
+    cost: check.cost,
+    path,
+  };
+}
+
+/**
+ * @param {string} unitId
+ * @param {{ q: number, r: number }} destination
+ * @param {import("../core/types.js").GameState} gameState
+ * @returns {{ ok: boolean, reason?: string, cost?: number, path?: Array<{ q: number, r: number }> }}
+ */
+export function moveUnit(unitId, destination, gameState) {
+  const pathCheck = getPathTo(unitId, destination, gameState);
+  if (!pathCheck.ok) {
+    return pathCheck;
+  }
+
+  const unit = getUnitById(gameState, unitId);
+  if (!unit) {
+    return { ok: false, reason: "unit-not-found" };
+  }
+
   unit.q = destination.q;
   unit.r = destination.r;
-  unit.movementRemaining = Math.max(0, unit.movementRemaining - (check.cost ?? 0));
+  unit.movementRemaining = Math.max(0, unit.movementRemaining - (pathCheck.cost ?? 0));
   unit.hasActed = true;
 
-  return { ok: true, cost: check.cost };
+  return { ok: true, cost: pathCheck.cost, path: pathCheck.path };
+}
+
+/**
+ * @param {import("../core/types.js").Unit} unit
+ * @param {import("../core/types.js").GameState} gameState
+ * @returns {{ costByHex: Map<string, number>, previousByHex: Map<string, string> }}
+ */
+function computeReachability(unit, gameState) {
+  const startKey = axialKey(unit);
+  const frontier = [{ q: unit.q, r: unit.r, cost: 0 }];
+  const bestCostByHex = new Map([[startKey, 0]]);
+  const previousByHex = new Map();
+
+  while (frontier.length > 0) {
+    frontier.sort((a, b) => a.cost - b.cost);
+    const current = frontier.shift();
+    if (!current) {
+      break;
+    }
+
+    const currentKey = axialKey(current);
+    for (const neighbor of neighbors(current)) {
+      if (!isInsideMap(gameState.map, neighbor.q, neighbor.r)) {
+        continue;
+      }
+
+      const occupant = getUnitAt(gameState, neighbor.q, neighbor.r);
+      if (occupant && occupant.id !== unit.id) {
+        continue;
+      }
+
+      const tile = getTileAt(gameState.map, neighbor.q, neighbor.r);
+      if (!tile || tile.blocksMovement) {
+        continue;
+      }
+
+      const nextCost = current.cost + tile.moveCost;
+      if (nextCost > unit.movementRemaining) {
+        continue;
+      }
+
+      const key = axialKey(neighbor);
+      const previousCost = bestCostByHex.get(key);
+      if (typeof previousCost === "number" && previousCost <= nextCost) {
+        continue;
+      }
+
+      bestCostByHex.set(key, nextCost);
+      previousByHex.set(key, currentKey);
+      frontier.push({ q: neighbor.q, r: neighbor.r, cost: nextCost });
+    }
+  }
+
+  return {
+    costByHex: bestCostByHex,
+    previousByHex,
+  };
 }

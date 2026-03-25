@@ -75,6 +75,9 @@ export class UIScene extends Phaser.Scene {
     this.productionDeltaLabel = this.createLabel("", 24, 76, "15px", "#2f7a41", 10);
     this.scienceLabel = this.createLabel("", 24, 100, "18px", "#2d2415", 10);
     this.scienceDeltaLabel = this.createLabel("", 24, 102, "15px", "#2f7a41", 10);
+    this.playbackPanel = this.add.rectangle(0, 0, 10, 10, 0xe9dcc1, 0.96).setDepth(11).setVisible(false);
+    this.playbackPanel.setStrokeStyle(2, 0x7d5a2f, 0.86);
+    this.playbackLabel = this.createLabel("", 0, 0, "15px", "#3f2d18", 12).setOrigin(0.5).setVisible(false);
 
     this.selectedPanel = this.add.rectangle(24, 0, 460, 92, 0xeadcc0, 0.95).setOrigin(0, 0).setDepth(10);
     this.selectedPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
@@ -499,6 +502,16 @@ export class UIScene extends Phaser.Scene {
     if (!this.latestState) {
       return null;
     }
+    const isGameplayAction =
+      actionId === "endTurn" ||
+      actionId === "nextUnit" ||
+      actionId.startsWith("unit-") ||
+      actionId.startsWith("city-") ||
+      actionId === "context-expand-toggle" ||
+      actionId === "context-pin-toggle";
+    if (this.latestState.animationState?.busy && isGameplayAction) {
+      return "Wait for the current animation to finish.";
+    }
     if (actionId === "endTurn") {
       return this.latestState.pendingCityResolution ? "Resolve city outcome first." : "Wait for the enemy turn to finish.";
     }
@@ -547,6 +560,14 @@ export class UIScene extends Phaser.Scene {
     this.productionLabel.setPosition(edgePadding, 74);
     this.scienceLabel.setPosition(edgePadding, 100);
     this.layoutResourceDeltas();
+    const playbackWidth = isCompact ? Math.max(220, Math.floor(gameSize.width * 0.58)) : 520;
+    const playbackX = gameSize.width / 2;
+    const playbackY = isCompact ? 24 : 26;
+    this.playbackPanel.setPosition(playbackX, playbackY);
+    this.playbackPanel.setSize(playbackWidth, 30);
+    this.playbackPanel.setDisplaySize(playbackWidth, 30);
+    this.playbackLabel.setPosition(playbackX, playbackY - 1);
+    this.playbackLabel.setWordWrapWidth(Math.max(160, playbackWidth - 20), true);
 
     this.notificationVisibleRows = isCompact ? 5 : this.notificationRows.length;
     const notificationWidth = isCompact ? Math.max(250, Math.floor(gameSize.width * 0.62)) : 380;
@@ -724,7 +745,14 @@ export class UIScene extends Phaser.Scene {
     const selectionKey = selectedUnit ? `unit:${selectedUnit.id}` : selectedCity ? `city:${selectedCity.id}` : "none";
     const phaseText = gameState.turnState.phase === "enemy" ? "Enemy" : "Player";
     const hasPendingCityResolution = !!gameState.pendingCityResolution;
-    const canIssueOrders = gameState.turnState.phase === "player" && gameState.match.status === "ongoing" && !hasPendingCityResolution;
+    const animationBusy = !!gameState.animationState?.busy;
+    const turnPlayback = gameState.turnPlayback ?? { active: false, stepIndex: 0, totalSteps: 0, message: null };
+    const canIssueOrders =
+      gameState.turnState.phase === "player" &&
+      gameState.match.status === "ongoing" &&
+      !hasPendingCityResolution &&
+      !animationBusy &&
+      !turnPlayback.active;
     const turnAssistant = gameState.uiTurnAssistant ?? { readyCount: 0, nextReadyUnitId: null, emptyQueueCityCount: 0 };
     const pendingQueues = turnAssistant.emptyQueueCityCount ?? 0;
     const pendingOrders = turnAssistant.readyCount + pendingQueues;
@@ -748,6 +776,15 @@ export class UIScene extends Phaser.Scene {
     this.scienceDeltaLabel.setColor(getDeltaColor(projected.science));
     this.layoutResourceDeltas();
 
+    this.playbackPanel.setVisible(!!turnPlayback.active);
+    this.playbackLabel.setVisible(!!turnPlayback.active);
+    if (turnPlayback.active) {
+      const message = turnPlayback.message ?? `Enemy action ${turnPlayback.stepIndex}/${Math.max(1, turnPlayback.totalSteps)}`;
+      this.playbackLabel.setText(message);
+    } else {
+      this.playbackLabel.setText("");
+    }
+
     this.selectedPanel.setVisible(hasSelection);
     this.selectedTitle.setVisible(hasSelection);
     this.selectedDetails.setVisible(hasSelection);
@@ -755,7 +792,17 @@ export class UIScene extends Phaser.Scene {
       this.selectedDetails.setText(this.getSelectedInfoText(selectedUnit, selectedCity));
     }
 
-    this.endTurnButton.label.setText(canIssueOrders ? "End Turn" : hasPendingCityResolution ? "Resolve..." : "Enemy...");
+    this.endTurnButton.label.setText(
+      canIssueOrders
+        ? "End Turn"
+        : hasPendingCityResolution
+          ? "Resolve..."
+          : turnPlayback.active
+            ? "Enemy..."
+            : animationBusy
+              ? "Animating..."
+              : "Enemy..."
+    );
     this.setButtonEnabled(this.endTurnButton, canIssueOrders);
     this.setButtonWarning(this.endTurnButton, canIssueOrders && pendingOrders > 0);
 

@@ -17,6 +17,7 @@
   - player attacker chooses `Capture`/`Raze` via modal,
 - AI attacker resolves deterministically by personality policy from `spec-008`.
 - Chosen: pure preview APIs mirror resolver math with no state mutation.
+- Chosen: combat presentation uses timeline clips over committed authoritative state (lunge/pulse/floating damage/defeat burst), with no simulation rewind.
 - Rejected for now: multi-retaliation chains, critical hits, flanking systems, city ranged strikes.
 
 ## Interfaces/types added
@@ -38,6 +39,7 @@
 - Runtime/testability payloads:
   - `lastCombatEvent`
   - `pendingCityResolution`
+  - enemy action playback metadata `EnemyActionSummary.presentation` (`from`/`to`/`target`) for deterministic render choreography
   - hooks: `attackCity`, `chooseCityOutcome`
 
 ## Behavior and acceptance criteria
@@ -57,6 +59,11 @@
 - Defeated city opens/executes outcome resolution and triggers immediate victory re-evaluation.
 - Capture preserves city economy/identity/queue fields and resets HP to full; raze removes the city.
 - Preview outputs match resolver outcomes while not mutating game state.
+- Combat readability timeline acceptance:
+  - unit attack clip shows attacker lunge + target hit pulse + floating damage
+  - counterattack (when triggered) shows responsive pulse/lunge + damage feedback
+  - city attacks pulse city health feedback and apply outcome burst on capture/raze
+  - defeats trigger short burst/screen-shake feedback even when entity removal is immediate
 
 ## Validation performed (tests/manual checks)
 
@@ -69,5 +76,5 @@
 ## Known gaps and next steps
 
 - No line-of-sight blocking for ranged attacks.
-- No dedicated combat timeline/animation UX beyond compact notification breakdowns.
+- Combat timeline is currently shape/tween based (no authored sprite-sheet/VFX pipeline yet).
 - No city garrison/fortification subsystem yet.

@@ -1,4 +1,4 @@
-import { ENEMY_PERSONALITY_ORDER, getTileAt, getUnitById } from "../core/gameState.js";
+import { cloneGameState, ENEMY_PERSONALITY_ORDER, getTileAt, getUnitById } from "../core/gameState.js";
 import { distance } from "../core/hexGrid.js";
 import { getUnitDefinition } from "../core/unitData.js";
 import { canFoundCity, foundCity, getAvailableProductionBuildings, getAvailableProductionUnits } from "./citySystem.js";
@@ -338,68 +338,310 @@ export function pickEnemyCityOutcome(attackerOwner, targetCity, gameState) {
 
 /**
  * @param {import("../core/types.js").GameState} gameState
+ * @returns {{
+ *   turn: number,
+ *   personality: import("../core/types.js").EnemyPersonality,
+ *   goal: import("../core/types.js").EnemyGoal,
+ *   selectedResearch: string|null,
+ *   queueRefills: Array<{ cityId: string, item: string }>,
+ *   steps: import("../core/types.js").EnemyActionSummary[]
+ * }}
+ */
+export function prepareEnemyTurnPlan(gameState) {
+  const planningState = cloneGameState(gameState);
+  const aiState = ensureEnemyAiState(planningState);
+  const enemyUnits = getAliveUnits(planningState, "enemy");
+  const playerPresence = hasFactionPresence(planningState, "player");
+  if (!playerPresence) {
+    return buildIdleTurnPlan(gameState, aiState.personality);
+  }
+
+  const prelude = resolveEnemyTurnPrelude(planningState, aiState.personality);
+  const steps = enemyUnits.length > 0 ? collectEnemyTurnSteps(planningState, prelude.goal, aiState.personality) : [];
+  return {
+    turn: gameState.turnState.turn,
+    personality: aiState.personality,
+    goal: prelude.goal,
+    selectedResearch: prelude.selectedResearch,
+    queueRefills: prelude.queueRefills,
+    steps,
+  };
+}
+
+/**
+ * @param {import("../core/types.js").GameState} gameState
+ * @param {{
+ *   selectedResearch?: string|null,
+ *   queueRefills?: Array<{ cityId: string, item: string }>
+ * }} plan
+ * @returns {{ selectedResearch: string|null, queueRefills: Array<{ cityId: string, item: string }> }}
+ */
+export function executeEnemyTurnPrelude(gameState, plan) {
+  let selectedResearch = null;
+  if (plan.selectedResearch) {
+    const selected = selectResearch(plan.selectedResearch, gameState);
+    if (selected.ok) {
+      selectedResearch = plan.selectedResearch;
+    }
+  }
+
+  const appliedQueueRefills = [];
+  for (const refill of plan.queueRefills ?? []) {
+    if (applyQueueRefillFromPlan(gameState, refill)) {
+      appliedQueueRefills.push({ cityId: refill.cityId, item: refill.item });
+    }
+  }
+
+  return {
+    selectedResearch,
+    queueRefills: appliedQueueRefills,
+  };
+}
+
+/**
+ * @param {import("../core/types.js").GameState} gameState
+ * @param {import("../core/types.js").EnemyActionSummary} step
+ * @returns {{
+ *   ok: boolean,
+ *   reason?: string,
+ *   detail?: string,
+ *   actionSummary?: import("../core/types.js").EnemyActionSummary,
+ *   result?: Record<string, any>
+ * }}
+ */
+export function executeEnemyTurnStep(gameState, step) {
+  if (!step || !step.action || !step.unitId) {
+    return { ok: false, reason: "invalid-step" };
+  }
+
+  const beforeUnit = getUnitById(gameState, step.unitId);
+  const from =
+    beforeUnit && Number.isFinite(beforeUnit.q) && Number.isFinite(beforeUnit.r)
+      ? { q: beforeUnit.q, r: beforeUnit.r }
+      : step.presentation?.from ?? null;
+
+  /** @type {Record<string, any>|null} */
+  let result = null;
+  if (step.action === "foundCity") {
+    result = foundCity(step.unitId, gameState);
+  } else if (step.action === "attackUnit") {
+    if (!step.targetId) {
+      return { ok: false, reason: "missing-target" };
+    }
+    result = resolveAttack(step.unitId, step.targetId, gameState);
+  } else if (step.action === "attackCity") {
+    if (!step.targetId) {
+      return { ok: false, reason: "missing-target" };
+    }
+    result = resolveCityAttack(step.unitId, step.targetId, gameState);
+  } else if (step.action === "move") {
+    if (!Number.isFinite(step.q) || !Number.isFinite(step.r)) {
+      return { ok: false, reason: "missing-destination" };
+    }
+    result = moveUnit(step.unitId, { q: step.q, r: step.r }, gameState);
+  } else if (step.action === "wait") {
+    const refreshed = getUnitById(gameState, step.unitId);
+    if (!refreshed) {
+      return { ok: false, reason: "unit-not-found" };
+    }
+    refreshed.hasActed = true;
+    refreshed.movementRemaining = 0;
+    result = { ok: true };
+  } else {
+    return { ok: false, reason: "unsupported-action" };
+  }
+
+  if (!result?.ok) {
+    return { ok: false, reason: result?.reason ?? "step-failed" };
+  }
+
+  const detail = getActionResultDetail(step.action, result);
+  const afterUnit = getUnitById(gameState, step.unitId);
+  const to =
+    afterUnit && Number.isFinite(afterUnit.q) && Number.isFinite(afterUnit.r)
+      ? { q: afterUnit.q, r: afterUnit.r }
+      : step.presentation?.to ?? from;
+  const targetHex =
+    Number.isFinite(step.q) && Number.isFinite(step.r) ? { q: Math.trunc(step.q), r: Math.trunc(step.r) } : null;
+
+  return {
+    ok: true,
+    detail,
+    result,
+    actionSummary: {
+      unitId: step.unitId,
+      action: step.action,
+      targetId: step.targetId ?? null,
+      q: targetHex ? targetHex.q : null,
+      r: targetHex ? targetHex.r : null,
+      score: Number.isFinite(step.score) ? step.score : 0,
+      cost: Number.isFinite(step.cost) ? step.cost : 0,
+      detail,
+      presentation: {
+        from,
+        to,
+        target: targetHex,
+      },
+    },
+  };
+}
+
+/**
+ * @param {import("../core/types.js").GameState} gameState
+ * @param {{
+ *   goal: import("../core/types.js").EnemyGoal,
+ *   selectedResearch?: string|null,
+ *   queueRefills?: Array<{ cityId: string, item: string }>
+ * }} plan
+ * @param {import("../core/types.js").EnemyActionSummary[]} actions
+ * @param {{ selectedResearch: string|null, queueRefills: Array<{ cityId: string, item: string }> }|null} [appliedPrelude]
+ * @returns {import("../core/types.js").EnemyTurnSummary}
+ */
+export function finalizeEnemyTurnPlan(gameState, plan, actions, appliedPrelude = null) {
+  const aiState = ensureEnemyAiState(gameState);
+  aiState.lastGoal = plan.goal;
+  aiState.lastTurnSummary = {
+    turn: gameState.turnState.turn,
+    goal: plan.goal,
+    selectedResearch: appliedPrelude?.selectedResearch ?? plan.selectedResearch ?? null,
+    queueRefills: appliedPrelude?.queueRefills ?? plan.queueRefills ?? [],
+    actions: [...actions],
+  };
+  return aiState.lastTurnSummary;
+}
+
+/**
+ * @param {import("../core/types.js").GameState} gameState
  * @returns {import("../core/types.js").GameState}
  */
 export function runEnemyTurn(gameState) {
-  const aiState = ensureEnemyAiState(gameState);
-  const enemyUnits = getAliveUnits(gameState, "enemy");
-  const playerPresence = hasFactionPresence(gameState, "player");
-
-  if (!playerPresence || enemyUnits.length === 0) {
-    aiState.lastGoal = "idle";
-    aiState.lastTurnSummary = {
-      turn: gameState.turnState.turn,
-      goal: "idle",
-      selectedResearch: null,
-      queueRefills: [],
-      actions: [],
-    };
-    return gameState;
-  }
-
-  const selectedResearch = maybeSelectEnemyResearch(gameState, aiState.personality);
-  const queueRefills = syncEnemyQueuesForPersonality(gameState, aiState.personality);
-  const goal = pickEnemyGoal(gameState, aiState.personality);
+  const plan = prepareEnemyTurnPlan(gameState);
+  const appliedPrelude = executeEnemyTurnPrelude(gameState, plan);
   const actions = [];
+  for (const step of plan.steps) {
+    const execution = executeEnemyTurnStep(gameState, step);
+    if (execution.ok && execution.actionSummary) {
+      actions.push(execution.actionSummary);
+    }
+  }
+  finalizeEnemyTurnPlan(gameState, plan, actions, appliedPrelude);
+  return gameState;
+}
 
+function buildIdleTurnPlan(gameState, personality) {
+  return {
+    turn: gameState.turnState.turn,
+    personality,
+    goal: "idle",
+    selectedResearch: null,
+    queueRefills: [],
+    steps: [],
+  };
+}
+
+function resolveEnemyTurnPrelude(gameState, personality) {
+  const selectedResearch = maybeSelectEnemyResearch(gameState, personality);
+  const queueRefills = syncEnemyQueuesForPersonality(gameState, personality);
+  const goal = pickEnemyGoal(gameState, personality);
+  return {
+    selectedResearch,
+    queueRefills,
+    goal,
+  };
+}
+
+function collectEnemyTurnSteps(gameState, goal, personality) {
+  const enemyUnits = getAliveUnits(gameState, "enemy");
+  const steps = [];
   for (const enemyUnit of orderEnemyUnits(enemyUnits, goal)) {
     const refreshedEnemy = getUnitById(gameState, enemyUnit.id);
     if (!refreshedEnemy || refreshedEnemy.health <= 0) {
       continue;
     }
 
-    const action = pickBestActionForUnit(refreshedEnemy, goal, aiState.personality, gameState);
+    const action = pickBestActionForUnit(refreshedEnemy, goal, personality, gameState);
     if (!action) {
       continue;
     }
 
+    const from = { q: refreshedEnemy.q, r: refreshedEnemy.r };
     const result = executeAction(action);
     if (!result.ok) {
       continue;
     }
+    const detail = result.detail ?? null;
 
-    actions.push({
+    const refreshedAfterAction = getUnitById(gameState, refreshedEnemy.id);
+    const to = refreshedAfterAction ? { q: refreshedAfterAction.q, r: refreshedAfterAction.r } : { ...from };
+    const target =
+      Number.isFinite(action.q) && Number.isFinite(action.r) ? { q: Math.trunc(action.q), r: Math.trunc(action.r) } : null;
+
+    steps.push({
       unitId: refreshedEnemy.id,
       action: action.type,
       targetId: action.targetId ?? null,
-      q: typeof action.q === "number" ? action.q : null,
-      r: typeof action.r === "number" ? action.r : null,
+      q: target ? target.q : null,
+      r: target ? target.r : null,
       score: action.score,
       cost: action.cost,
-      detail: result.detail ?? null,
+      detail,
+      presentation: {
+        from,
+        to,
+        target,
+      },
     });
   }
+  return steps;
+}
 
-  aiState.lastGoal = goal;
-  aiState.lastTurnSummary = {
-    turn: gameState.turnState.turn,
-    goal,
-    selectedResearch,
-    queueRefills,
-    actions,
-  };
+function applyQueueRefillFromPlan(gameState, refill) {
+  if (!refill || typeof refill.cityId !== "string" || typeof refill.item !== "string") {
+    return false;
+  }
 
-  return gameState;
+  const city = gameState.cities.find((candidate) => candidate.id === refill.cityId && candidate.owner === "enemy");
+  if (!city) {
+    return false;
+  }
+
+  city.queue = normalizeQueueItems(city.queue);
+  if (city.queue.length > 0) {
+    return false;
+  }
+
+  const [kind, ...idParts] = refill.item.split(":");
+  const id = idParts.join(":");
+  if ((kind !== "unit" && kind !== "building") || !id) {
+    return false;
+  }
+
+  city.queue = [{ kind, id }];
+  city.productionTab = kind === "building" ? "buildings" : "units";
+  return true;
+}
+
+function getActionResultDetail(actionType, result) {
+  if (actionType === "attackUnit") {
+    return result.targetDefeated ? "target-defeated" : "target-damaged";
+  }
+
+  if (actionType === "attackCity") {
+    if (result.outcomeChoice) {
+      return `city-${result.outcomeChoice}`;
+    }
+    return result.cityDefeated ? "city-defeated" : "city-damaged";
+  }
+
+  if (actionType === "foundCity") {
+    return result.cityId ? `founded-${result.cityId}` : "city-founded";
+  }
+
+  if (actionType === "move") {
+    return "moved";
+  }
+
+  return "waited";
 }
 
 function maybeSelectEnemyResearch(gameState, personality) {
@@ -626,29 +868,9 @@ function compareActionCandidates(a, b) {
 function executeAction(action) {
   const result = action.execute();
   if (!result?.ok) {
-    return { ok: false };
+    return { ok: false, reason: result?.reason ?? "action-failed", result };
   }
-
-  if (action.type === "attackUnit") {
-    return { ok: true, detail: result.targetDefeated ? "target-defeated" : "target-damaged" };
-  }
-
-  if (action.type === "attackCity") {
-    if (result.outcomeChoice) {
-      return { ok: true, detail: `city-${result.outcomeChoice}` };
-    }
-    return { ok: true, detail: result.cityDefeated ? "city-defeated" : "city-damaged" };
-  }
-
-  if (action.type === "foundCity") {
-    return { ok: true, detail: result.cityId ? `founded-${result.cityId}` : "city-founded" };
-  }
-
-  if (action.type === "move") {
-    return { ok: true, detail: "moved" };
-  }
-
-  return { ok: true, detail: "waited" };
+  return { ok: true, detail: getActionResultDetail(action.type, result), result };
 }
 
 function chooseMoveTarget(unit, goal, gameState) {

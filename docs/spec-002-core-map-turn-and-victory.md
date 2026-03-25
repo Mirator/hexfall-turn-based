@@ -12,7 +12,7 @@
 - Chosen: seeded `12x12` map generation with spawn metadata and faction-distance constraints.
 - Chosen: movement reachability uses path cost (Dijkstra-style), not flat distance.
 - Chosen: terrain model separates passable high-cost tiles from blocked tiles.
-- Chosen: turn flow remains `player -> enemy -> player` with deterministic state transitions.
+- Chosen: turn flow remains `player -> enemy -> player` with deterministic state transitions, but enemy phase now plays as ordered per-action playback instead of one deferred jump.
 - Chosen: only domination victory (`eliminate all enemy units and cities`); defeat is total player elimination.
 - Chosen: restart is available through pause menu + confirm path and produces a fresh seeded match.
 - Rejected for now: endurance/score victories and non-seeded/random tie-break session logic.
@@ -26,12 +26,19 @@
   - `MovementSystem.getReachable(unitId, gameState)`
   - `MovementSystem.getReachableCostMap(unitId, gameState)`
   - `MovementSystem.canMoveUnitTo(unitId, q, r, gameState)`
+  - `MovementSystem.getPathTo(unitId, destination, gameState)`
+  - `MovementSystem.moveUnit(...)` returns `{ ok, cost, path }` on success
 - Match/map generation interfaces:
   - `createInitialGameState({ seed, minFactionDistance })`
   - `map.seed`, `map.spawnMetadata`
 - Turn/victory interfaces:
   - `beginEnemyTurn(gameState)`
   - `beginPlayerTurn(gameState)`
+  - `prepareEnemyTurnPlan(gameState)`
+  - `executeEnemyTurnPrelude(gameState, plan)`
+  - `executeEnemyTurnStep(gameState, step)`
+  - `finalizeEnemyTurnPlan(gameState, plan, actions, appliedPrelude?)`
+  - `runEnemyTurn(gameState)` (compatibility wrapper)
   - `VictorySystem.evaluateMatchState(gameState)`
   - `restart-match-requested`, `ui-modal-state-changed`, `city-outcome-requested`
 
@@ -40,7 +47,7 @@
 - Player can select valid entities and move units to reachable hexes.
 - Reachable overlays reflect cumulative terrain movement cost.
 - Forest/hill are higher-cost passable terrain; mountain/water are blocked for current land units.
-- Ending turn enters enemy phase, resolves enemy turn logic, then returns to player phase with updated turn state.
+- Ending turn enters enemy phase, exposes active playback state, executes enemy actions sequentially, and returns to player phase only after playback and enemy post-processing complete.
 - Match state transitions to `won/lost` only through elimination checks.
 - Restart flow:
   - Esc opens pause menu.
@@ -57,8 +64,9 @@
   - `tests/integration/terrainMovement.test.js`
   - `tests/integration/matchGeneration.test.js`
   - `tests/integration/victorySystem.test.js`
+  - `tests/integration/enemyTurn.test.js`
 - E2E flow coverage:
-  - `tests/e2e/smoke.mjs`
+  - `tests/e2e/smoke.mjs` (real End Turn playback path + return-to-player transition)
 
 ## Known gaps and next steps
 
