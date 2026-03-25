@@ -10,8 +10,9 @@
 
 - Chosen: keep automation hooks on `window` for low-friction e2e and local debugging.
 - Chosen: keep one self-contained smoke runner (`tests/e2e/smoke.mjs`) that starts Vite, drives gameplay, asserts, and captures artifacts.
-- Chosen: expose UI layout/runtime surfaces in `render_game_to_text` so tests do not depend on pixel scraping.
+- Chosen: expose UI/runtime surfaces in `render_game_to_text` so tests do not depend on pixel scraping.
 - Chosen: harden e2e cleanup with signal-aware close and force-kill fallback for `chrome-headless-shell` on Windows.
+- Chosen: centralize testability as cross-spec authority for payload/hook contract, with gameplay authority remaining in domain specs (`spec-002`, `spec-005`, `spec-007`, `spec-008`, `spec-012`, `spec-014`).
 - Rejected for now: replacing hooks with a heavier bespoke automation protocol.
 
 ## Interfaces/types added
@@ -30,6 +31,13 @@
   - `window.__hexfallTest.confirmRestartConfirm()`
   - `window.__hexfallTest.getRestartModalState()`
   - `window.__hexfallTest.getNotificationCenterState()`
+  - `window.__hexfallTest.setNotificationFilter(filter)`
+  - `window.__hexfallTest.focusNotification(index)`
+  - `window.__hexfallTest.getActionPreviewState()`
+  - `window.__hexfallTest.hoverHex(q, r)`
+  - `window.__hexfallTest.getTurnAssistantState()`
+  - `window.__hexfallTest.nextReadyUnit()`
+  - `window.__hexfallTest.setContextPanelPinned(bool)`
   - `window.__hexfallTest.getCityResolutionModalState()`
   - `window.__hexfallTest.getCityPanelState()`
   - `window.__hexfallTest.selectUnit(unitId)`
@@ -59,43 +67,42 @@
 
 ## Behavior and acceptance criteria
 
-  - `render_game_to_text` includes:
+- `render_game_to_text` includes:
   - seed/hash/spawn metadata
   - units/cities/combat/research/economy snapshots
+  - `uiPreview`, `uiTurnAssistant`, `uiContextPanel`, `uiNotificationFilter`
+  - `threatHexes`
   - `cities[].health` + `cities[].maxHealth`
   - `pendingCityResolution`
   - top-left HUD resource payload (`current` + net `delta` + `grossDelta`)
   - selected info payload and context menu payload
   - pause/restart modal state
-  - `uiNotifications` feed payload
+  - `uiNotifications` feed payload with `category` and optional `focus`
+  - `cameraFocusHex` for notification jump verification
   - `ai.enemy` runtime payload (`personality`, `lastGoal`, `lastTurnSummary`)
   - `lastCombatEvent` breakdown payload
   - city production context details for units/buildings tabs and typed queue items
   - contextual `uiHints` + `uiActions`
 - `advanceTime` remains available for deterministic stepping.
 - Smoke scenario validates:
-  - settler-only opening assumptions
-  - pause menu open/close and restart confirm/cancel path
-  - unit context action (`Found City`) and invalid-action warning notification
-  - city context panel visibility with direct focus and queue controls
-  - unit/building tab switching and enqueue of typed queue items
-  - archery research unlock flow and archer ranged combat action path
-  - enemy AI personality payload presence and test override hooks
-  - enemy auto-founding behavior
-  - city assault and city-resolution modal path
+  - hover move and city-attack previews
+  - turn readiness assistant and deterministic next-ready action path
+  - context panel expanded/pinned behavior
+  - notification filtering and notification-focus camera jump
+  - founding, queue/focus management, research, combat, city resolution, restart/pause flows
   - no unexpected defeat during validated scenario flow
   - zero console/page errors
-- Smoke runner must close Playwright browser and Vite server on success/failure/interrupt; Windows fallback kills orphaned `chrome-headless-shell` if needed.
+- Smoke runner closes Playwright/browser/server reliably on success/failure/interrupt; Windows cleanup handles orphaned headless browser processes.
 
 ## Validation performed (tests/manual checks)
 
 - `npm run test:e2e` passes and captures `tests/e2e/artifacts/smoke.png`.
-- `npm test` validates hook-consumed systems via integration suites.
+- `npm test` validates hook-consumed systems via unit/integration suites.
 - Post-run process checks confirm no lingering `chrome-headless-shell` process.
-- Manual artifact review confirms updated HUD zones and contextual panel behavior.
+- Manual artifact review confirms HUD/context panel/notification interaction surfaces are visible and aligned.
 
 ## Known gaps and next steps
 
-- Add a dedicated e2e branch for explicit full-domination finish with deterministic kill helpers.
-- Add touch-driven notification scrolling coverage (currently mouse-wheel in smoke/manual checks).
-- Add snapshot assertions for compact/mobile layout state payloads.
+- Add a dedicated deterministic e2e branch for guaranteed full-domination finish.
+- Add touch-driven notification scrolling coverage.
+- Add more compact/mobile screenshot assertions in automated checks.

@@ -6,6 +6,8 @@ import { foundCity } from "../../src/systems/citySystem.js";
 import {
   canAttack,
   canAttackCity,
+  previewAttack,
+  previewCityAttack,
   resolveAttack,
   resolveCityAttack,
   resolveCityOutcome,
@@ -257,6 +259,82 @@ describe("combat system", () => {
       rawDamage: 3,
       damage: 3,
     });
+  });
+
+  it("previewAttack matches resolver damage/counter without mutating state", () => {
+    const gameState = createInitialGameState({ seed: 910 });
+    const attacker = gameState.units.find((unit) => unit.owner === "player");
+    const defender = gameState.units.find((unit) => unit.owner === "enemy");
+    expect(attacker && defender).toBeTruthy();
+    if (!attacker || !defender) {
+      return;
+    }
+
+    applyUnitType(attacker, "warrior");
+    applyUnitType(defender, "spearman");
+    attacker.q = 3;
+    attacker.r = 3;
+    defender.q = 4;
+    defender.r = 3;
+    setTerrain(gameState, attacker.q, attacker.r, "hill");
+    setTerrain(gameState, defender.q, defender.r, "forest");
+
+    const defenderHpBefore = defender.health;
+    const attackerHpBefore = attacker.health;
+    const prediction = previewAttack(attacker.id, defender.id, gameState);
+    expect(prediction.ok).toBe(true);
+    expect(defender.health).toBe(defenderHpBefore);
+    expect(attacker.health).toBe(attackerHpBefore);
+
+    const result = resolveAttack(attacker.id, defender.id, gameState);
+    expect(result.ok).toBe(true);
+    expect(result.damage).toBe(prediction.damage);
+    expect(result.breakdown).toEqual(prediction.breakdown);
+    expect(result.counterattack?.triggered).toBe(prediction.counterattack?.triggered);
+    if (result.counterattack?.triggered) {
+      expect(result.counterattack?.damage).toBe(prediction.counterattack?.damage);
+      expect(result.counterattack?.breakdown).toEqual(prediction.counterattack?.breakdown);
+    } else {
+      expect(result.counterattack?.reason).toBe(prediction.counterattack?.reason);
+    }
+  });
+
+  it("previewCityAttack matches city resolver damage without mutating state", () => {
+    const gameState = createInitialGameState({ seed: 911 });
+    const attacker = gameState.units.find((unit) => unit.owner === "player");
+    const enemySettler = gameState.units.find((unit) => unit.owner === "enemy");
+    expect(attacker && enemySettler).toBeTruthy();
+    if (!attacker || !enemySettler) {
+      return;
+    }
+
+    const founded = foundCity(enemySettler.id, gameState);
+    expect(founded.ok).toBe(true);
+    if (!founded.cityId) {
+      return;
+    }
+
+    const city = getCityById(gameState, founded.cityId);
+    expect(city).toBeTruthy();
+    if (!city) {
+      return;
+    }
+
+    applyUnitType(attacker, "warrior");
+    attacker.q = city.q - 1;
+    attacker.r = city.r;
+    setTerrain(gameState, attacker.q, attacker.r, "hill");
+    setTerrain(gameState, city.q, city.r, "forest");
+
+    const cityHpBefore = city.health;
+    const prediction = previewCityAttack(attacker.id, city.id, gameState);
+    expect(prediction.ok).toBe(true);
+    expect(city.health).toBe(cityHpBefore);
+
+    const result = resolveCityAttack(attacker.id, city.id, gameState);
+    expect(result.ok).toBe(true);
+    expect(result.damage).toBe(prediction.damage);
+    expect(result.breakdown).toEqual(prediction.breakdown);
   });
 
   it("supports city assault and player capture/raze resolution", () => {

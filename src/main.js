@@ -79,6 +79,34 @@ window.__hexfallTest = {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testGetNotificationCenterState() : null;
   },
+  getActionPreviewState() {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testGetActionPreviewState() : null;
+  },
+  hoverHex(q, r) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testHoverHex(q, r) : false;
+  },
+  getTurnAssistantState() {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testGetTurnAssistantState() : null;
+  },
+  nextReadyUnit() {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testNextReadyUnit() : false;
+  },
+  setContextPanelPinned(value) {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testSetContextPanelPinned(value) : false;
+  },
+  setNotificationFilter(filter) {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testSetNotificationFilter(filter) : false;
+  },
+  focusNotification(index) {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testFocusNotification(index) : false;
+  },
   selectUnit(unitId) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testSelectUnit(unitId) : false;

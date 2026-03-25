@@ -11,7 +11,7 @@ import {
   getUnitById,
   isInsideMap,
 } from "../core/gameState.js";
-import { axialKey, axialToWorld, neighbors, worldToAxial } from "../core/hexGrid.js";
+import { axialKey, axialToWorld, distance, neighbors, worldToAxial } from "../core/hexGrid.js";
 import { TERRAIN } from "../core/terrainData.js";
 import {
   CITY_QUEUE_MAX,
@@ -29,6 +29,8 @@ import {
 import {
   getAttackableCities,
   getAttackableTargets,
+  previewAttack,
+  previewCityAttack,
   resolveAttack,
   resolveCityAttack,
   resolveCityOutcome,
@@ -51,17 +53,23 @@ export class WorldScene extends Phaser.Scene {
     this.gameState = createInitialGameState({ seed: 1, minFactionDistance: RESTART_MIN_FACTION_DISTANCE });
     this.reachableHexes = [];
     this.reachableLookup = new Set();
+    this.reachableCostByKey = new Map();
     this.attackableTargets = [];
     this.attackableLookup = new Set();
     this.attackableCities = [];
     this.attackableCityLookup = new Set();
+    this.threatHexes = [];
+    this.threatLookup = new Set();
+    this.uiPreview = null;
     this.mapOrigin = { x: 0, y: 0 };
     this.manualTimeMs = 0;
     this.enemyTurnTimer = null;
     this.foundCityKeyBinding = null;
+    this.nextUnitKeyBinding = null;
     this.uiModalOpen = false;
     this.runtimeSeedCounter = 0;
     this.lastCombatEvent = null;
+    this.cameraFocusHex = null;
   }
 
   create() {
@@ -69,17 +77,23 @@ export class WorldScene extends Phaser.Scene {
     this.startNewMatch();
 
     this.mapGraphics = this.add.graphics();
+    this.threatGraphics = this.add.graphics();
     this.reachableGraphics = this.add.graphics();
     this.attackableGraphics = this.add.graphics();
+    this.previewGraphics = this.add.graphics();
     this.selectionGraphics = this.add.graphics();
     this.cityGraphics = this.add.graphics();
     this.unitGraphics = this.add.graphics();
 
     this.input.on("pointerdown", this.handlePointerDown, this);
+    this.input.on("pointermove", this.handlePointerMove, this);
     this.foundCityKeyBinding = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.F) ?? null;
+    this.nextUnitKeyBinding = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.TAB) ?? null;
     this.foundCityKeyBinding?.on("down", this.handleFoundCityRequested, this);
+    this.nextUnitKeyBinding?.on("down", this.handleNextReadyUnitRequested, this);
     this.scale.on("resize", this.handleResize, this);
     gameEvents.on("end-turn-requested", this.handleEndTurnRequested, this);
+    gameEvents.on("next-ready-unit-requested", this.handleNextReadyUnitRequested, this);
     gameEvents.on("found-city-requested", this.handleFoundCityRequested, this);
     gameEvents.on("research-cycle-requested", this.handleResearchCycleRequested, this);
     gameEvents.on("unit-action-requested", this.handleUnitActionRequested, this);
@@ -89,13 +103,17 @@ export class WorldScene extends Phaser.Scene {
     gameEvents.on("city-queue-remove-requested", this.handleCityQueueRemoveRequested, this);
     gameEvents.on("city-outcome-requested", this.handleCityOutcomeRequested, this);
     gameEvents.on("restart-match-requested", this.handleRestartRequested, this);
+    gameEvents.on("notification-focus-requested", this.handleNotificationFocusRequested, this);
     gameEvents.on("ui-modal-state-changed", this.handleUiModalStateChanged, this);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.input.off("pointerdown", this.handlePointerDown, this);
+      this.input.off("pointermove", this.handlePointerMove, this);
       this.foundCityKeyBinding?.off("down", this.handleFoundCityRequested, this);
+      this.nextUnitKeyBinding?.off("down", this.handleNextReadyUnitRequested, this);
       this.scale.off("resize", this.handleResize, this);
       gameEvents.off("end-turn-requested", this.handleEndTurnRequested, this);
+      gameEvents.off("next-ready-unit-requested", this.handleNextReadyUnitRequested, this);
       gameEvents.off("found-city-requested", this.handleFoundCityRequested, this);
       gameEvents.off("research-cycle-requested", this.handleResearchCycleRequested, this);
       gameEvents.off("unit-action-requested", this.handleUnitActionRequested, this);
@@ -105,6 +123,7 @@ export class WorldScene extends Phaser.Scene {
       gameEvents.off("city-queue-remove-requested", this.handleCityQueueRemoveRequested, this);
       gameEvents.off("city-outcome-requested", this.handleCityOutcomeRequested, this);
       gameEvents.off("restart-match-requested", this.handleRestartRequested, this);
+      gameEvents.off("notification-focus-requested", this.handleNotificationFocusRequested, this);
       gameEvents.off("ui-modal-state-changed", this.handleUiModalStateChanged, this);
       if (this.enemyTurnTimer) {
         this.enemyTurnTimer.remove(false);
@@ -119,6 +138,8 @@ export class WorldScene extends Phaser.Scene {
   handleResize(gameSize) {
     this.cameras.main.setSize(gameSize.width, gameSize.height);
     this.recalculateOrigin();
+    this.cameras.main.setScroll(0, 0);
+    this.cameraFocusHex = null;
     this.renderAll();
   }
 
@@ -142,6 +163,7 @@ export class WorldScene extends Phaser.Scene {
       const attackResult = resolveAttack(selectedUnit.id, clickedUnit.id, this.gameState);
       if (attackResult.ok) {
         this.handleUnitAttackResult(selectedUnit, clickedUnit, attackResult);
+        this.setUiPreview(null);
         this.evaluateAndPublish();
       }
       return;
@@ -155,6 +177,7 @@ export class WorldScene extends Phaser.Scene {
       if (cityAttackResult.ok) {
         this.recordCityAttackEvent(selectedUnit, clickedCity, cityAttackResult);
         this.handleCityAttackResult(cityAttackResult);
+        this.setUiPreview(null);
         this.evaluateAndPublish();
       }
       return;
@@ -163,6 +186,7 @@ export class WorldScene extends Phaser.Scene {
     if (selectedUnit && this.reachableLookup.has(axialKey(clickedHex))) {
       const moveResult = moveUnit(selectedUnit.id, clickedHex, this.gameState);
       if (moveResult.ok) {
+        this.setUiPreview(null);
         this.evaluateAndPublish();
       }
       return;
@@ -181,6 +205,41 @@ export class WorldScene extends Phaser.Scene {
     this.clearSelection();
   }
 
+  handlePointerMove(pointer) {
+    if (!this.canAcceptPlayerCommands()) {
+      if (this.setUiPreview(null)) {
+        this.renderAll();
+        this.publishState();
+      }
+      return;
+    }
+
+    const selectedUnit = getUnitById(this.gameState, this.gameState.selectedUnitId);
+    if (!selectedUnit || selectedUnit.owner !== "player") {
+      if (this.setUiPreview(null)) {
+        this.renderAll();
+        this.publishState();
+      }
+      return;
+    }
+
+    const worldPoint = pointer.positionToCamera(this.cameras.main);
+    const hoveredHex = worldToAxial(worldPoint.x, worldPoint.y, HEX_SIZE, this.mapOrigin.x, this.mapOrigin.y);
+    if (!isInsideMap(this.gameState.map, hoveredHex.q, hoveredHex.r)) {
+      if (this.setUiPreview(null)) {
+        this.renderAll();
+        this.publishState();
+      }
+      return;
+    }
+
+    const nextPreview = this.buildHoverPreview(selectedUnit, hoveredHex);
+    if (this.setUiPreview(nextPreview)) {
+      this.renderAll();
+      this.publishState();
+    }
+  }
+
   handleEndTurnRequested = () => {
     if (!this.canAcceptPlayerCommands() || this.enemyTurnTimer) {
       return;
@@ -189,30 +248,69 @@ export class WorldScene extends Phaser.Scene {
     this.enterEnemyPhase();
   };
 
+  handleNextReadyUnitRequested = (event) => {
+    event?.preventDefault?.();
+    if (!this.canAcceptPlayerCommands()) {
+      return false;
+    }
+    const nextReadyUnitId = this.getNextReadyUnitId();
+    if (!nextReadyUnitId) {
+      this.emitNotification("No ready units available.", {
+        level: "warning",
+        category: "System",
+      });
+      return false;
+    }
+
+    this.selectUnit(nextReadyUnitId);
+    return true;
+  };
+
+  handleNotificationFocusRequested = (payload) => {
+    const focus = payload?.focus ?? payload;
+    const resolved = this.resolveNotificationFocus(focus);
+    if (!resolved) {
+      this.emitNotification("Cannot focus this notification target anymore.", {
+        level: "warning",
+        category: "System",
+      });
+      return false;
+    }
+
+    this.focusCameraOnHex(resolved.q, resolved.r);
+    this.cameraFocusHex = { q: resolved.q, r: resolved.r };
+    this.renderAll();
+    this.publishState();
+    return true;
+  };
+
   handleFoundCityRequested = () => {
     if (!this.canAcceptPlayerCommands()) {
       return false;
     }
     const selectedUnitId = this.gameState.selectedUnitId;
     if (!selectedUnitId) {
-      gameEvents.emit("ui-toast-requested", {
-        message: getFoundCityReasonText("unit-not-found"),
+      this.emitNotification(getFoundCityReasonText("unit-not-found"), {
         level: "warning",
+        category: "City",
       });
       return false;
     }
     const result = foundCity(selectedUnitId, this.gameState);
     if (result.ok) {
       this.evaluateAndPublish();
-      gameEvents.emit("ui-toast-requested", {
-        message: "City founded.",
+      const foundedCity = result.cityId ? this.gameState.cities.find((city) => city.id === result.cityId) : null;
+      this.emitNotification("City founded.", {
         level: "info",
+        category: "City",
+        focus: foundedCity ? { cityId: foundedCity.id, q: foundedCity.q, r: foundedCity.r } : null,
       });
       return true;
     }
-    gameEvents.emit("ui-toast-requested", {
-      message: getFoundCityReasonText(result.reason),
+    this.emitNotification(getFoundCityReasonText(result.reason), {
       level: "warning",
+      category: "City",
+      focus: this.buildSelectionFocusPayload(),
     });
     return false;
   };
@@ -221,8 +319,19 @@ export class WorldScene extends Phaser.Scene {
     if (this.gameState.match.status !== "ongoing") {
       return;
     }
-    cycleResearch(this.gameState);
+    const result = cycleResearch(this.gameState);
     this.evaluateAndPublish();
+    if (result.selected) {
+      this.emitNotification(`Research selected: ${capitalizeLabel(result.selected)}.`, {
+        level: "info",
+        category: "Research",
+      });
+    } else {
+      this.emitNotification("No available research right now.", {
+        level: "warning",
+        category: "Research",
+      });
+    }
   };
 
   handleUnitActionRequested = (payload) => {
@@ -236,24 +345,26 @@ export class WorldScene extends Phaser.Scene {
     if (actionId === "skipUnit") {
       const selectedUnitId = this.gameState.selectedUnitId;
       if (!selectedUnitId) {
-        gameEvents.emit("ui-toast-requested", {
-          message: getSkipUnitReasonText("unit-not-found"),
+        this.emitNotification(getSkipUnitReasonText("unit-not-found"), {
           level: "warning",
+          category: "System",
         });
         return false;
       }
       const result = skipUnit(selectedUnitId, this.gameState);
       if (!result.ok) {
-        gameEvents.emit("ui-toast-requested", {
-          message: getSkipUnitReasonText(result.reason),
+        this.emitNotification(getSkipUnitReasonText(result.reason), {
           level: "warning",
+          category: "System",
+          focus: this.buildSelectionFocusPayload(),
         });
         return false;
       }
       this.evaluateAndPublish();
-      gameEvents.emit("ui-toast-requested", {
-        message: "Unit is waiting this turn.",
+      this.emitNotification("Unit is waiting this turn.", {
         level: "info",
+        category: "System",
+        focus: this.buildSelectionFocusPayload(),
       });
       return true;
     }
@@ -273,15 +384,17 @@ export class WorldScene extends Phaser.Scene {
     const result = setCityFocus(this.gameState.selectedCityId, focus, this.gameState);
     if (result.ok) {
       this.evaluateAndPublish();
-      gameEvents.emit("ui-toast-requested", {
-        message: `City focus: ${result.focus}.`,
+      const city = this.gameState.cities.find((candidate) => candidate.id === this.gameState.selectedCityId) ?? null;
+      this.emitNotification(`City focus: ${result.focus}.`, {
         level: "info",
+        category: "City",
+        focus: city ? { cityId: city.id, q: city.q, r: city.r } : null,
       });
       return;
     }
-    gameEvents.emit("ui-toast-requested", {
-      message: "Could not set city focus.",
+    this.emitNotification("Could not set city focus.", {
       level: "warning",
+      category: "City",
     });
   };
 
@@ -298,16 +411,17 @@ export class WorldScene extends Phaser.Scene {
     const result = setCityProductionTab(this.gameState.selectedCityId, tab, this.gameState);
     if (result.ok) {
       this.evaluateAndPublish();
-      gameEvents.emit("ui-toast-requested", {
-        message: `Production tab: ${tab}.`,
+      this.emitNotification(`Production tab: ${tab}.`, {
         level: "info",
+        category: "City",
+        focus: this.buildSelectionFocusPayload(),
       });
       return;
     }
 
-    gameEvents.emit("ui-toast-requested", {
-      message: "Could not switch production tab.",
+    this.emitNotification("Could not switch production tab.", {
       level: "warning",
+      category: "City",
     });
   };
 
@@ -324,9 +438,10 @@ export class WorldScene extends Phaser.Scene {
     const result = enqueueCityQueueItem(this.gameState.selectedCityId, queueItem, this.gameState);
     if (!result.ok) {
       const message = this.getQueueFailureMessage(result.reason);
-      gameEvents.emit("ui-toast-requested", {
-        message,
+      this.emitNotification(message, {
         level: "warning",
+        category: "City",
+        focus: this.buildSelectionFocusPayload(),
       });
       this.evaluateAndPublish();
       return;
@@ -335,9 +450,10 @@ export class WorldScene extends Phaser.Scene {
     this.evaluateAndPublish();
     const queuedLabel =
       queueItem.kind === "building" ? `${capitalizeLabel(queueItem.id)} building` : `${capitalizeLabel(queueItem.id)} unit`;
-    gameEvents.emit("ui-toast-requested", {
-      message: `${queuedLabel} added to queue (${result.queue?.length ?? 0}/${CITY_QUEUE_MAX}).`,
+    this.emitNotification(`${queuedLabel} added to queue (${result.queue?.length ?? 0}/${CITY_QUEUE_MAX}).`, {
       level: "info",
+      category: "City",
+      focus: this.buildSelectionFocusPayload(),
     });
   };
 
@@ -349,17 +465,18 @@ export class WorldScene extends Phaser.Scene {
     const slotIndex = Number(payload?.index);
     const result = removeCityQueueAt(this.gameState.selectedCityId, slotIndex, this.gameState);
     if (!result.ok) {
-      gameEvents.emit("ui-toast-requested", {
-        message: "Could not remove queue item.",
+      this.emitNotification("Could not remove queue item.", {
         level: "warning",
+        category: "City",
       });
       return;
     }
 
     this.evaluateAndPublish();
-    gameEvents.emit("ui-toast-requested", {
-      message: "Queue item removed.",
+    this.emitNotification("Queue item removed.", {
       level: "info",
+      category: "City",
+      focus: this.buildSelectionFocusPayload(),
     });
   };
 
@@ -376,18 +493,18 @@ export class WorldScene extends Phaser.Scene {
 
     const result = resolveCityOutcome(cityId, choice, this.gameState);
     if (!result.ok) {
-      gameEvents.emit("ui-toast-requested", {
-        message: "Could not resolve city outcome.",
+      this.emitNotification("Could not resolve city outcome.", {
         level: "warning",
+        category: "Combat",
       });
       this.evaluateAndPublish();
       return;
     }
 
     const message = choice === "capture" ? "City captured." : "City razed.";
-    gameEvents.emit("ui-toast-requested", {
-      message,
+    this.emitNotification(message, {
       level: "info",
+      category: "Combat",
     });
     this.evaluateAndPublish();
   };
@@ -401,14 +518,18 @@ export class WorldScene extends Phaser.Scene {
     this.startNewMatch(previousLayout);
     this.evaluateAndPublish();
     gameEvents.emit("ui-notifications-reset-requested");
-    gameEvents.emit("ui-toast-requested", {
-      message: "Match restarted.",
+    this.emitNotification("Match restarted.", {
       level: "info",
+      category: "System",
     });
   };
 
   handleUiModalStateChanged = (isOpen) => {
     this.uiModalOpen = !!isOpen;
+    const previewCleared = isOpen ? this.setUiPreview(null) : false;
+    if (previewCleared) {
+      this.renderAll();
+    }
     this.publishState();
   };
 
@@ -461,6 +582,11 @@ export class WorldScene extends Phaser.Scene {
     this.uiModalOpen = false;
     this.manualTimeMs = 0;
     this.lastCombatEvent = null;
+    this.threatHexes = [];
+    this.threatLookup = new Set();
+    this.setUiPreview(null);
+    this.cameraFocusHex = null;
+    this.cameras?.main?.setScroll(0, 0);
   }
 
   generateRuntimeSeed() {
@@ -497,6 +623,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   enterEnemyPhase() {
+    this.setUiPreview(null);
     beginEnemyTurn(this.gameState);
     this.evaluateAndPublish();
 
@@ -511,8 +638,16 @@ export class WorldScene extends Phaser.Scene {
     processCityTurn(this.gameState, "enemy");
     beginPlayerTurn(this.gameState);
     const cityTurnResult = processCityTurn(this.gameState, "player");
-    consumeScienceStock(this.gameState, "player", 1);
+    const researchResult = consumeScienceStock(this.gameState, "player", 1);
     this.gameState.economy.researchIncomeThisTurn = 1 + cityTurnResult.researchIncome;
+    if (researchResult.completedTechIds.length > 0) {
+      for (const techId of researchResult.completedTechIds) {
+        this.emitNotification(`Research completed: ${capitalizeLabel(techId)}.`, {
+          level: "info",
+          category: "Research",
+        });
+      }
+    }
 
     evaluateMatchState(this.gameState);
     this.evaluateAndPublish();
@@ -541,9 +676,10 @@ export class WorldScene extends Phaser.Scene {
     const message =
       `Hit ${target.id} for ${attackResult.damage ?? 0}${summary}.` +
       `${attackResult.targetDefeated ? " Target defeated." : ""}${counterSummary}`;
-    gameEvents.emit("ui-toast-requested", {
-      message,
+    this.emitNotification(message, {
       level: "info",
+      category: "Combat",
+      focus: { unitId: target.id, q: target.q, r: target.r },
     });
   }
 
@@ -561,9 +697,10 @@ export class WorldScene extends Phaser.Scene {
     };
 
     const summary = formatCombatBreakdownSummary(attackResult.breakdown);
-    gameEvents.emit("ui-toast-requested", {
-      message: `City attack dealt ${attackResult.damage ?? 0}${summary}.`,
+    this.emitNotification(`City attack dealt ${attackResult.damage ?? 0}${summary}.`, {
       level: "info",
+      category: "Combat",
+      focus: { cityId: city.id, q: city.q, r: city.r },
     });
   }
 
@@ -573,25 +710,26 @@ export class WorldScene extends Phaser.Scene {
     }
 
     if (attackResult.pendingResolution) {
-      gameEvents.emit("ui-toast-requested", {
-        message: "City defenses broken. Choose Capture or Raze.",
+      this.emitNotification("City defenses broken. Choose Capture or Raze.", {
         level: "info",
+        category: "Combat",
+        focus: this.gameState.pendingCityResolution ? { cityId: this.gameState.pendingCityResolution.cityId } : null,
       });
       return;
     }
 
     if (attackResult.outcomeChoice === "capture") {
-      gameEvents.emit("ui-toast-requested", {
-        message: "Enemy captured a city.",
+      this.emitNotification("Enemy captured a city.", {
         level: "warning",
+        category: "Combat",
       });
       return;
     }
 
     if (attackResult.outcomeChoice === "raze") {
-      gameEvents.emit("ui-toast-requested", {
-        message: "Enemy razed a city.",
+      this.emitNotification("Enemy razed a city.", {
         level: "warning",
+        category: "Combat",
       });
     }
   }
@@ -608,12 +746,14 @@ export class WorldScene extends Phaser.Scene {
   selectUnit(unitId) {
     this.gameState.selectedUnitId = unitId;
     this.gameState.selectedCityId = null;
+    this.setUiPreview(null);
     this.evaluateAndPublish();
   }
 
   selectCity(cityId) {
     this.gameState.selectedCityId = cityId;
     this.gameState.selectedUnitId = null;
+    this.setUiPreview(null);
     this.evaluateAndPublish();
   }
 
@@ -623,6 +763,7 @@ export class WorldScene extends Phaser.Scene {
     }
     this.gameState.selectedUnitId = null;
     this.gameState.selectedCityId = null;
+    this.setUiPreview(null);
     this.evaluateAndPublish();
   }
 
@@ -631,19 +772,25 @@ export class WorldScene extends Phaser.Scene {
     if (!selectedUnit || !this.canAcceptPlayerCommands() || selectedUnit.owner !== "player") {
       this.reachableHexes = [];
       this.reachableLookup = new Set();
+      this.reachableCostByKey = new Map();
       this.attackableTargets = [];
       this.attackableLookup = new Set();
       this.attackableCities = [];
       this.attackableCityLookup = new Set();
+      this.threatHexes = [];
+      this.threatLookup = new Set();
+      this.setUiPreview(null);
       return;
     }
 
     this.reachableHexes = getReachable(selectedUnit.id, this.gameState);
     this.reachableLookup = new Set(this.reachableHexes.map((hex) => axialKey(hex)));
+    this.reachableCostByKey = new Map(this.reachableHexes.map((hex) => [axialKey(hex), hex.cost]));
     this.attackableTargets = getAttackableTargets(selectedUnit.id, this.gameState);
-    this.attackableLookup = new Set(this.attackableTargets.map((unit) => axialKey(unit)));
+    this.attackableLookup = new Set(this.attackableTargets.map((unit) => unit.id));
     this.attackableCities = getAttackableCities(selectedUnit.id, this.gameState);
     this.attackableCityLookup = new Set(this.attackableCities.map((city) => city.id));
+    this.refreshThreatOverlay(selectedUnit);
   }
 
   evaluateAndPublish() {
@@ -675,12 +822,21 @@ export class WorldScene extends Phaser.Scene {
     }
     );
     const uiRuntime = this.getUiRuntimeState();
+    const uiTurnAssistant = this.getTurnAssistantState();
+    const uiContextPanel = {
+      expanded: !!uiRuntime.contextPanelExpanded,
+      pinned: !!uiRuntime.contextPanelPinned,
+    };
     return {
       ...snapshot,
       projectedIncome,
       projectedNetIncome,
       selectedInfo: this.buildSelectedInfo(selectedUnit, selectedCity),
       contextMenu: this.buildContextMenuPayload(uiSurface, selectedUnit, selectedCity),
+      uiPreview: this.buildUiPreviewPayload(),
+      uiTurnAssistant,
+      uiContextPanel,
+      uiNotificationFilter: uiRuntime.notificationFilter ?? "All",
       uiHints: uiSurface.uiHints,
       uiActions: uiSurface.uiActions,
       uiModalOpen: this.uiModalOpen,
@@ -689,6 +845,7 @@ export class WorldScene extends Phaser.Scene {
         restartConfirmOpen: uiRuntime.restartConfirmOpen,
       },
       uiNotifications: uiRuntime.notifications,
+      cameraFocusHex: this.cameraFocusHex,
       lastCombatEvent: this.lastCombatEvent,
     };
   }
@@ -710,8 +867,10 @@ export class WorldScene extends Phaser.Scene {
 
   renderAll() {
     this.renderMap();
+    this.renderThreat();
     this.renderReachable();
     this.renderAttackable();
+    this.renderPreview();
     this.renderSelection();
     this.renderCities();
     this.renderUnits();
@@ -737,9 +896,9 @@ export class WorldScene extends Phaser.Scene {
         center.y,
         HEX_SIZE * 0.93,
         COLORS.reachableFill,
-        0.42,
+        0.48,
         COLORS.reachableStroke,
-        1
+        1.4
       );
     }
   }
@@ -754,9 +913,9 @@ export class WorldScene extends Phaser.Scene {
         center.y,
         HEX_SIZE * 0.92,
         COLORS.attackableFill,
-        0.44,
+        0.52,
         COLORS.attackableStroke,
-        1.4
+        2
       );
     }
 
@@ -768,12 +927,49 @@ export class WorldScene extends Phaser.Scene {
         center.y,
         HEX_SIZE * 0.9,
         COLORS.attackableFill,
-        0.24,
+        0.32,
         COLORS.attackableStroke,
-        1.8
+        2.2
       );
       this.attackableGraphics.lineStyle(2, COLORS.attackableStroke, 1);
       this.attackableGraphics.strokeRect(center.x - 16, center.y - 16, 32, 32);
+    }
+  }
+
+  renderThreat() {
+    this.threatGraphics.clear();
+    for (const hex of this.threatHexes) {
+      const center = this.hexToWorld(hex.q, hex.r);
+      drawHex(this.threatGraphics, center.x, center.y, HEX_SIZE * 0.84, 0xd36f63, 0.2, 0x9a3a2b, 1);
+    }
+  }
+
+  renderPreview() {
+    this.previewGraphics.clear();
+    const preview = this.uiPreview;
+    if (!preview || !preview.mode) {
+      return;
+    }
+
+    if (preview.mode === "move" && typeof preview.q === "number" && typeof preview.r === "number") {
+      const center = this.hexToWorld(preview.q, preview.r);
+      drawHex(this.previewGraphics, center.x, center.y, HEX_SIZE * 0.97, 0x7ac6db, 0.48, 0x276f86, 2.8);
+      return;
+    }
+
+    if (
+      (preview.mode === "attack-unit" || preview.mode === "attack-city") &&
+      typeof preview.q === "number" &&
+      typeof preview.r === "number"
+    ) {
+      const center = this.hexToWorld(preview.q, preview.r);
+      drawHex(this.previewGraphics, center.x, center.y, HEX_SIZE * 0.97, 0xf1998f, 0.4, 0xa03e32, 2.8);
+      const attacker = getUnitById(this.gameState, preview.attackerId ?? null);
+      if (attacker) {
+        const attackerCenter = this.hexToWorld(attacker.q, attacker.r);
+        this.previewGraphics.lineStyle(2, 0xa03e32, 0.9);
+        this.previewGraphics.lineBetween(attackerCenter.x, attackerCenter.y, center.x, center.y);
+      }
     }
   }
 
@@ -884,6 +1080,14 @@ export class WorldScene extends Phaser.Scene {
       reachableHexes: this.reachableHexes.map((hex) => ({ q: hex.q, r: hex.r, cost: hex.cost })),
       attackableTargets: this.attackableTargets.map((unit) => ({ id: unit.id, q: unit.q, r: unit.r })),
       attackableCities: this.attackableCities.map((city) => ({ id: city.id, q: city.q, r: city.r })),
+      threatHexes: this.threatHexes.map((hex) => ({ q: hex.q, r: hex.r })),
+      uiPreview: this.buildUiPreviewPayload(),
+      uiTurnAssistant: this.getTurnAssistantState(),
+      uiContextPanel: {
+        expanded: !!uiRuntime.contextPanelExpanded,
+        pinned: !!uiRuntime.contextPanelPinned,
+      },
+      uiNotificationFilter: uiRuntime.notificationFilter ?? "All",
       units: this.gameState.units.map((unit) => ({
         id: unit.id,
         owner: unit.owner,
@@ -965,6 +1169,7 @@ export class WorldScene extends Phaser.Scene {
         restartConfirmOpen: uiRuntime.restartConfirmOpen,
       },
       uiNotifications: uiRuntime.notifications,
+      cameraFocusHex: this.cameraFocusHex,
       unlocks: {
         units: [...this.gameState.unlocks.units],
       },
@@ -1090,6 +1295,9 @@ export class WorldScene extends Phaser.Scene {
       pauseMenuOpen: false,
       restartConfirmOpen: false,
       notifications: [],
+      contextPanelExpanded: true,
+      contextPanelPinned: false,
+      notificationFilter: "All",
     };
     if (!this.scene.isActive("UIScene")) {
       return defaults;
@@ -1099,6 +1307,210 @@ export class WorldScene extends Phaser.Scene {
       return defaults;
     }
     return uiScene.getRuntimeUiState();
+  }
+
+  emitNotification(message, options = {}) {
+    if (!message) {
+      return;
+    }
+    gameEvents.emit("ui-toast-requested", {
+      message,
+      level: options.level ?? "info",
+      category: options.category ?? "System",
+      focus: options.focus ?? null,
+    });
+  }
+
+  buildSelectionFocusPayload() {
+    const selectedUnit = getUnitById(this.gameState, this.gameState.selectedUnitId);
+    if (selectedUnit) {
+      return {
+        unitId: selectedUnit.id,
+        q: selectedUnit.q,
+        r: selectedUnit.r,
+      };
+    }
+    const selectedCity = this.gameState.cities.find((city) => city.id === this.gameState.selectedCityId) ?? null;
+    if (selectedCity) {
+      return {
+        cityId: selectedCity.id,
+        q: selectedCity.q,
+        r: selectedCity.r,
+      };
+    }
+    return null;
+  }
+
+  setUiPreview(nextPreview) {
+    const normalized = nextPreview && nextPreview.mode && nextPreview.mode !== "none" ? sanitizePreview(nextPreview) : null;
+    if (arePreviewsEqual(this.uiPreview, normalized)) {
+      return false;
+    }
+    this.uiPreview = normalized;
+    return true;
+  }
+
+  buildUiPreviewPayload() {
+    return this.uiPreview ? structuredClone(this.uiPreview) : { mode: "none" };
+  }
+
+  buildHoverPreview(selectedUnit, hoveredHex) {
+    const hoveredUnit = getUnitAt(this.gameState, hoveredHex.q, hoveredHex.r);
+    if (hoveredUnit && hoveredUnit.owner !== selectedUnit.owner && this.attackableLookup.has(hoveredUnit.id)) {
+      const prediction = previewAttack(selectedUnit.id, hoveredUnit.id, this.gameState);
+      if (!prediction.ok) {
+        return null;
+      }
+      return {
+        mode: "attack-unit",
+        attackerId: selectedUnit.id,
+        targetId: hoveredUnit.id,
+        q: hoveredUnit.q,
+        r: hoveredUnit.r,
+        damage: prediction.damage ?? 0,
+        targetRemainingHealth: prediction.targetRemainingHealth ?? hoveredUnit.health,
+        counterattack: prediction.counterattack ?? null,
+        breakdown: prediction.breakdown ?? null,
+      };
+    }
+
+    const hoveredCity = getCityAt(this.gameState, hoveredHex.q, hoveredHex.r);
+    if (hoveredCity && hoveredCity.owner !== selectedUnit.owner && this.attackableCityLookup.has(hoveredCity.id)) {
+      const prediction = previewCityAttack(selectedUnit.id, hoveredCity.id, this.gameState);
+      if (!prediction.ok) {
+        return null;
+      }
+      return {
+        mode: "attack-city",
+        attackerId: selectedUnit.id,
+        cityId: hoveredCity.id,
+        q: hoveredCity.q,
+        r: hoveredCity.r,
+        damage: prediction.damage ?? 0,
+        cityRemainingHealth: prediction.cityRemainingHealth ?? hoveredCity.health,
+        breakdown: prediction.breakdown ?? null,
+      };
+    }
+
+    const hoveredKey = axialKey(hoveredHex);
+    if (this.reachableLookup.has(hoveredKey)) {
+      const moveCost = this.reachableCostByKey.get(hoveredKey) ?? 0;
+      return {
+        mode: "move",
+        unitId: selectedUnit.id,
+        q: hoveredHex.q,
+        r: hoveredHex.r,
+        moveCost,
+        movementRemainingAfter: Math.max(0, selectedUnit.movementRemaining - moveCost),
+      };
+    }
+
+    return null;
+  }
+
+  getReadyPlayerUnits() {
+    return this.gameState.units
+      .filter((unit) => unit.owner === "player" && unit.health > 0 && !unit.hasActed && unit.movementRemaining > 0)
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  getNextReadyUnitId() {
+    const readyUnits = this.getReadyPlayerUnits();
+    if (readyUnits.length === 0) {
+      return null;
+    }
+
+    const currentId = this.gameState.selectedUnitId;
+    const currentIndex = readyUnits.findIndex((unit) => unit.id === currentId);
+    if (currentIndex === -1) {
+      return readyUnits[0].id;
+    }
+
+    const nextIndex = (currentIndex + 1) % readyUnits.length;
+    return readyUnits[nextIndex].id;
+  }
+
+  getTurnAssistantState() {
+    if (
+      this.gameState.match.status !== "ongoing" ||
+      this.gameState.turnState.phase !== "player" ||
+      !!this.gameState.pendingCityResolution
+    ) {
+      return {
+        readyCount: 0,
+        nextReadyUnitId: null,
+      };
+    }
+    const readyUnits = this.getReadyPlayerUnits();
+    return {
+      readyCount: readyUnits.length,
+      nextReadyUnitId: this.getNextReadyUnitId(),
+    };
+  }
+
+  refreshThreatOverlay(selectedUnit) {
+    const candidateHexes = new Map();
+    candidateHexes.set(axialKey(selectedUnit), { q: selectedUnit.q, r: selectedUnit.r });
+    for (const hex of this.reachableHexes) {
+      candidateHexes.set(axialKey(hex), { q: hex.q, r: hex.r });
+    }
+
+    const threatHexes = [];
+    const threatLookup = new Set();
+    for (const candidate of candidateHexes.values()) {
+      if (this.isHexThreatenedByEnemy(candidate)) {
+        threatHexes.push(candidate);
+        threatLookup.add(axialKey(candidate));
+      }
+    }
+    this.threatHexes = threatHexes;
+    this.threatLookup = threatLookup;
+  }
+
+  isHexThreatenedByEnemy(hex) {
+    for (const enemyUnit of this.gameState.units) {
+      if (enemyUnit.owner !== "enemy" || enemyUnit.health <= 0) {
+        continue;
+      }
+      const minRange = Math.max(1, enemyUnit.minAttackRange ?? 1);
+      const maxRange = Math.max(minRange, enemyUnit.attackRange ?? 1);
+      const distanceToHex = distance(enemyUnit, hex);
+      if (distanceToHex >= minRange && distanceToHex <= maxRange) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  resolveNotificationFocus(focus) {
+    if (!focus || typeof focus !== "object") {
+      return null;
+    }
+    if (typeof focus.unitId === "string") {
+      const targetUnit = getUnitById(this.gameState, focus.unitId);
+      if (targetUnit) {
+        return { q: targetUnit.q, r: targetUnit.r };
+      }
+    }
+    if (typeof focus.cityId === "string") {
+      const targetCity = this.gameState.cities.find((city) => city.id === focus.cityId) ?? null;
+      if (targetCity) {
+        return { q: targetCity.q, r: targetCity.r };
+      }
+    }
+    if (Number.isFinite(focus.q) && Number.isFinite(focus.r)) {
+      const q = Math.round(focus.q);
+      const r = Math.round(focus.r);
+      if (isInsideMap(this.gameState.map, q, r)) {
+        return { q, r };
+      }
+    }
+    return null;
+  }
+
+  focusCameraOnHex(q, r) {
+    const center = this.hexToWorld(q, r);
+    this.cameras.main.centerOn(center.x, center.y);
   }
 
   computeTerrainHash(tiles) {
@@ -1114,6 +1526,33 @@ export class WorldScene extends Phaser.Scene {
   }
 
   // Test-oriented helpers used through window.__hexfallTest
+  testGetActionPreviewState() {
+    return this.buildUiPreviewPayload();
+  }
+
+  testHoverHex(q, r) {
+    if (!isInsideMap(this.gameState.map, q, r)) {
+      return false;
+    }
+    const selectedUnit = getUnitById(this.gameState, this.gameState.selectedUnitId);
+    if (!selectedUnit || selectedUnit.owner !== "player" || !this.canAcceptPlayerCommands()) {
+      return false;
+    }
+    const nextPreview = this.buildHoverPreview(selectedUnit, { q, r });
+    this.setUiPreview(nextPreview);
+    this.renderAll();
+    this.publishState();
+    return true;
+  }
+
+  testGetTurnAssistantState() {
+    return this.getTurnAssistantState();
+  }
+
+  testNextReadyUnit() {
+    return this.handleNextReadyUnitRequested();
+  }
+
   testSelectUnit(unitId) {
     if (!getUnitById(this.gameState, unitId)) {
       return false;
@@ -1455,6 +1894,20 @@ function normalizeIncomingQueueItem(payload) {
   }
 
   return null;
+}
+
+function sanitizePreview(preview) {
+  return structuredClone(preview);
+}
+
+function arePreviewsEqual(a, b) {
+  if (!a && !b) {
+    return true;
+  }
+  if (!a || !b) {
+    return false;
+  }
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function drawHex(graphics, x, y, size, fillColor, fillAlpha, strokeColor, strokeWidth) {

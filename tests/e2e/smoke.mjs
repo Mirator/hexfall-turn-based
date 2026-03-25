@@ -138,6 +138,9 @@ async function run() {
     assert.equal(initialEnemySettlers.length, 1, "enemy should start with one settler");
     assert.equal(initialState.units.some((unit) => unit.type === "warrior"), false, "no warriors at match start");
     assert.equal(initialState.contextMenu?.type, "none", "context menu should be hidden before selection");
+    assert.equal(initialState.uiPreview?.mode ?? "none", "none", "preview should be empty without hover selection");
+    assert.equal(initialState.uiNotificationFilter, "All", "notification filter should default to All");
+    assert.ok(initialState.uiTurnAssistant, "turn assistant payload should exist");
     assert.ok(initialState.hudTopLeft?.resources?.food, "top-left food resource display should exist");
     assert.ok(initialState.hudTopLeft?.resources?.production, "top-left production resource display should exist");
     assert.ok(initialState.hudTopLeft?.resources?.science, "top-left science resource display should exist");
@@ -181,6 +184,31 @@ async function run() {
 
       // Found player city.
       window.__hexfallTest.selectUnit(playerSettler.id);
+      const selectedSettlerState = getState();
+      const reachablePreviewHex = selectedSettlerState.reachableHexes.find((hex) => (hex.cost ?? 0) > 0);
+      if (!reachablePreviewHex) {
+        return { ok: false, reason: "missing-reachable-hex-for-preview" };
+      }
+      if (!window.__hexfallTest.hoverHex(reachablePreviewHex.q, reachablePreviewHex.r)) {
+        return { ok: false, reason: "hover-hex-hook-failed" };
+      }
+      const movePreview = window.__hexfallTest.getActionPreviewState();
+      if (
+        movePreview?.mode !== "move" ||
+        movePreview.q !== reachablePreviewHex.q ||
+        movePreview.r !== reachablePreviewHex.r
+      ) {
+        return { ok: false, reason: "move-preview-missing-or-invalid" };
+      }
+
+      const turnAssistantBeforeFound = window.__hexfallTest.getTurnAssistantState();
+      if (!turnAssistantBeforeFound || turnAssistantBeforeFound.readyCount < 1) {
+        return { ok: false, reason: "turn-assistant-ready-count-invalid" };
+      }
+      if (!window.__hexfallTest.nextReadyUnit()) {
+        return { ok: false, reason: "next-ready-unit-action-failed" };
+      }
+
       const founded = window.__hexfallTest.triggerUnitAction("foundCity");
       if (!founded) {
         return { ok: false, reason: "player-founding-failed" };
@@ -189,9 +217,37 @@ async function run() {
         return { ok: false, reason: "player-city-missing" };
       }
       const cityPanel = window.__hexfallTest.getCityPanelState();
-      if (!cityPanel?.visible || cityPanel.mode !== "city" || cityPanel.cityFocusButtons.filter((button) => button.visible).length !== 4) {
+      if (
+        !cityPanel?.visible ||
+        cityPanel.mode !== "city" ||
+        cityPanel.cityFocusButtons.filter((button) => button.visible).length !== 4
+      ) {
         return { ok: false, reason: "city-panel-not-visible-after-founding" };
       }
+      if (!cityPanel.expanded) {
+        return { ok: false, reason: "city-panel-should-auto-expand-on-selection" };
+      }
+      const pinned = window.__hexfallTest.setContextPanelPinned(true);
+      const pinnedState = window.__hexfallTest.getCityPanelState();
+      if (!pinned || !pinnedState?.pinned) {
+        return { ok: false, reason: "context-panel-pin-failed" };
+      }
+
+      if (!window.__hexfallTest.setNotificationFilter("City")) {
+        return { ok: false, reason: "notification-filter-city-failed" };
+      }
+      const cityFeed = window.__hexfallTest.getNotificationCenterState();
+      if ((cityFeed?.filteredCount ?? 0) < 1) {
+        return { ok: false, reason: "notification-city-filter-empty" };
+      }
+      if (!window.__hexfallTest.focusNotification(0)) {
+        return { ok: false, reason: "notification-focus-failed" };
+      }
+      const focusState = getState();
+      if (!focusState.cameraFocusHex) {
+        return { ok: false, reason: "camera-focus-payload-missing-after-notification-focus" };
+      }
+      window.__hexfallTest.setNotificationFilter("All");
 
       // Direct focus + tabs + typed queue flow.
       const focusResult = window.__hexfallTest.setCityFocus("production");
@@ -401,6 +457,13 @@ async function run() {
         return { ok: false, reason: "failed-to-position-archer-for-ranged-attack" };
       }
       window.__hexfallTest.selectUnit(playerArcher.id);
+      if (!window.__hexfallTest.hoverHex(enemyCity.q, enemyCity.r)) {
+        return { ok: false, reason: "failed-to-hover-city-for-attack-preview" };
+      }
+      const cityAttackPreview = window.__hexfallTest.getActionPreviewState();
+      if (cityAttackPreview?.mode !== "attack-city" || cityAttackPreview.cityId !== enemyCity.id) {
+        return { ok: false, reason: "missing-city-attack-preview" };
+      }
       if (!window.__hexfallTest.attackCity(enemyCity.id)) {
         return { ok: false, reason: "archer-ranged-city-attack-failed" };
       }
@@ -414,6 +477,9 @@ async function run() {
       const unitPanel = window.__hexfallTest.getCityPanelState();
       if (!unitPanel?.visible || unitPanel.mode !== "unit") {
         return { ok: false, reason: "unit-context-panel-not-visible" };
+      }
+      if (!unitPanel.expanded || !unitPanel.pinned) {
+        return { ok: false, reason: "context-panel-pin-should-persist-across-selection" };
       }
       window.__hexfallTest.triggerUnitAction("foundCity");
       const notificationState = window.__hexfallTest.getNotificationCenterState();

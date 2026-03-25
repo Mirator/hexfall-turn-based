@@ -9,11 +9,15 @@ const CITY_PANEL_TAB_WIDTH = 102;
 const CITY_PANEL_ACTION_WIDTH = 78;
 const CITY_PANEL_BUTTON_HEIGHT = 30;
 const UNIT_PANEL_ACTION_WIDTH = 160;
-const CONTEXT_PANEL_HEIGHT = 150;
+const CONTEXT_PANEL_COLLAPSED_HEIGHT = 76;
+const CONTEXT_PANEL_EXPANDED_HEIGHT = 188;
+const CONTEXT_PANEL_EXPANDED_HEIGHT_COMPACT = 226;
+const CONTEXT_PANEL_WIDTH_PADDING = 560;
 const FOCUS_MODES = ["balanced", "food", "production", "science"];
 const PRODUCTION_TABS = ["units", "buildings"];
 const UNIT_PRODUCTION_TYPES = ["warrior", "settler", "spearman", "archer"];
 const BUILDING_PRODUCTION_TYPES = ["granary", "workshop", "monument"];
+const NOTIFICATION_FILTERS = ["All", "Combat", "City", "Research", "System"];
 
 const FOCUS_LABELS = {
   balanced: "Balanced",
@@ -56,6 +60,11 @@ export class UIScene extends Phaser.Scene {
     this.notificationNextId = 1;
     this.notificationScroll = 0;
     this.notificationVisibleRows = 8;
+    this.notificationFilter = "All";
+    this.notificationVisibleSlice = [];
+    this.contextPanelExpanded = false;
+    this.contextPanelPinned = false;
+    this.lastContextSelectionKey = null;
   }
 
   create() {
@@ -73,12 +82,44 @@ export class UIScene extends Phaser.Scene {
     this.selectedDetails = this.createLabel("No selection", 38, 0, "15px", "#3f2d18", 11);
 
     this.endTurnButton = this.createButton("End Turn", "endTurn", () => gameEvents.emit("end-turn-requested"));
+    this.turnAssistantPanel = this.add.rectangle(0, 0, 220, 64, 0xf0e4cb, 0.95).setDepth(12);
+    this.turnAssistantPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
+    this.turnAssistantLabel = this.createLabel("Units ready: 0", 0, 0, "16px", "#3f2d18", 13);
+    this.nextUnitButton = this.createButton("Next Unit", "nextUnit", () => gameEvents.emit("next-ready-unit-requested"), {
+      width: 130,
+      height: 30,
+      fontSize: "14px",
+      enabledFill: 0x4f6b4a,
+      hoverFill: 0x5d8156,
+      disabledFill: 0x6f776d,
+      stroke: 0xe6dbbf,
+    });
 
     this.contextPanel = this.add.rectangle(0, 0, 10, 10, 0xead7b1, 0.95).setDepth(12).setVisible(false);
     this.contextPanel.setStrokeStyle(2, 0x7d5a2f, 0.9);
     this.contextPanelTitle = this.createLabel("", 0, 0, "16px", "#3d2a14", 13);
     this.contextPanelTitle.setOrigin(0.5);
     this.contextPanelTitle.setVisible(false);
+    this.contextPanelExpandButton = this.createButton("^", "context-expand-toggle", () => this.toggleContextPanelExpanded(), {
+      width: 36,
+      height: 26,
+      fontSize: "16px",
+      enabledFill: 0x6f6d63,
+      hoverFill: 0x848175,
+      activeFill: 0x4d7e56,
+      stroke: 0xe9d9b4,
+    });
+    this.contextPanelPinButton = this.createButton("Pin", "context-pin-toggle", () => this.toggleContextPanelPinned(), {
+      width: 62,
+      height: 26,
+      fontSize: "13px",
+      enabledFill: 0x6f6d63,
+      hoverFill: 0x848175,
+      activeFill: 0x2f7a41,
+      stroke: 0xe9d9b4,
+    });
+    this.contextPanelMetaPrimary = this.createLabel("", 0, 0, "14px", "#3f2d18", 13).setOrigin(0.5).setVisible(false);
+    this.contextPanelMetaSecondary = this.createLabel("", 0, 0, "13px", "#5a4224", 13).setOrigin(0.5).setVisible(false);
 
     this.cityFocusButtons = FOCUS_MODES.map((focus) =>
       this.createButton(
@@ -189,6 +230,10 @@ export class UIScene extends Phaser.Scene {
     );
     this.setCityControlsVisible(false);
     this.setUnitControlsVisible(false);
+    this.setCompositeVisible(this.contextPanelExpandButton, false);
+    this.setCompositeVisible(this.contextPanelPinButton, false);
+    this.contextPanelMetaPrimary.setVisible(false);
+    this.contextPanelMetaSecondary.setVisible(false);
 
     this.hintPanel = this.add.rectangle(0, 0, 440, 74, 0xf0e4cb, 0.95).setDepth(20).setVisible(false);
     this.hintPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
@@ -196,13 +241,38 @@ export class UIScene extends Phaser.Scene {
     this.hintPrimary.setOrigin(0.5).setVisible(false);
     this.hintSecondary = this.createLabel("", 0, 0, "14px", "#5a4224", 21);
     this.hintSecondary.setOrigin(0.5).setVisible(false);
+    this.previewPanel = this.add.rectangle(0, 0, 360, 66, 0xf0e4cb, 0.95).setDepth(22).setVisible(false);
+    this.previewPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
+    this.previewTitle = this.createLabel("", 0, 0, "15px", "#3f2d18", 23);
+    this.previewTitle.setOrigin(0.5).setVisible(false);
+    this.previewDetails = this.createLabel("", 0, 0, "13px", "#5a4224", 23);
+    this.previewDetails.setOrigin(0.5).setVisible(false);
 
     this.notificationPanel = this.add.rectangle(0, 0, 360, 236, 0xeadcc0, 0.95).setDepth(16);
     this.notificationPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
     this.notificationTitle = this.createLabel("Notifications", 0, 0, "17px", "#4a3318", 17);
-    this.notificationRows = Array.from({ length: 8 }, () =>
-      this.createLabel("", 0, 0, "14px", "#3f2d18", 17).setVisible(false)
+    this.notificationFilterButtons = NOTIFICATION_FILTERS.map((filterName) =>
+      this.createButton(filterName, `notif-filter-${filterName}`, () => this.setNotificationFilter(filterName), {
+        width: filterName === "Research" ? 78 : 66,
+        height: 24,
+        fontSize: "12px",
+        enabledFill: 0x6f6d63,
+        hoverFill: 0x848175,
+        activeFill: 0x355e94,
+        disabledFill: 0x6f6d63,
+        stroke: 0xe9d9b4,
+      })
     );
+    for (const filterButton of this.notificationFilterButtons) {
+      filterButton.rectangle.setDepth(18);
+      filterButton.label.setDepth(19);
+    }
+    this.notificationRows = Array.from({ length: 8 }, (_unused, index) => {
+      const row = this.createLabel("", 0, 0, "14px", "#3f2d18", 17).setVisible(false);
+      row.setInteractive({ useHandCursor: true });
+      row.on("pointerdown", () => this.focusNotificationByRow(index));
+      return row;
+    });
 
     this.modalBackdrop = this.add
       .rectangle(0, 0, 10, 10, 0x2a1b10, 0.34)
@@ -346,12 +416,14 @@ export class UIScene extends Phaser.Scene {
       enabledFill: options.enabledFill ?? 0x355e94,
       hoverFill: options.hoverFill ?? 0x4a76ae,
       activeFill: options.activeFill ?? options.enabledFill ?? 0x355e94,
+      warningFill: options.warningFill ?? 0x8a5b2f,
       disabledFill: options.disabledFill ?? 0x6d747e,
       stroke: options.stroke ?? 0xe9d9b4,
       textColor: options.textColor ?? "#fff8e8",
       enabledAlpha: options.enabledAlpha ?? 0.96,
       hoverAlpha: options.hoverAlpha ?? 1,
       activeAlpha: options.activeAlpha ?? 0.98,
+      warningAlpha: options.warningAlpha ?? 0.98,
       disabledAlpha: options.disabledAlpha ?? 0.85,
     };
 
@@ -371,6 +443,7 @@ export class UIScene extends Phaser.Scene {
       actionId,
       enabled: true,
       isActive: false,
+      warning: false,
       onClick,
       palette: resolvedPalette,
       width,
@@ -428,6 +501,10 @@ export class UIScene extends Phaser.Scene {
     if (actionId === "endTurn") {
       return this.latestState.pendingCityResolution ? "Resolve city outcome first." : "Wait for the enemy turn to finish.";
     }
+    if (actionId === "nextUnit") {
+      const readyCount = this.latestState.uiTurnAssistant?.readyCount ?? 0;
+      return readyCount > 0 ? null : "No ready units to cycle.";
+    }
     if (actionId === "unit-found-city") {
       return this.latestState.uiActions?.foundCityReason ?? "Cannot found a city right now.";
     }
@@ -448,12 +525,21 @@ export class UIScene extends Phaser.Scene {
     if (actionId.startsWith("city-focus-")) {
       return "Focus cannot be changed right now.";
     }
+    if (actionId === "context-expand-toggle") {
+      return "No contextual panel to expand.";
+    }
+    if (actionId === "context-pin-toggle") {
+      return "Select a city or unit to pin this panel.";
+    }
     return null;
   }
 
   layout(gameSize) {
     const isCompact = gameSize.width < COMPACT_BREAKPOINT;
     const edgePadding = isCompact ? 10 : 24;
+    const menuType = this.latestState?.uiActions?.contextMenuType ?? null;
+    const contextVisible = menuType !== null && this.latestState?.match?.status === "ongoing";
+    const contextExpanded = contextVisible ? this.contextPanelExpanded : false;
 
     this.turnLabel.setPosition(edgePadding, 16);
     this.foodLabel.setPosition(edgePadding, 48);
@@ -461,28 +547,41 @@ export class UIScene extends Phaser.Scene {
     this.scienceLabel.setPosition(edgePadding, 100);
     this.layoutResourceDeltas();
 
-    this.notificationVisibleRows = isCompact ? 4 : this.notificationRows.length;
-    const notificationWidth = isCompact ? Math.max(170, Math.floor(gameSize.width * 0.46)) : 360;
-    const notificationHeight = isCompact ? 44 + this.notificationVisibleRows * 20 : 236;
+    this.notificationVisibleRows = isCompact ? 5 : this.notificationRows.length;
+    const notificationWidth = isCompact ? Math.max(250, Math.floor(gameSize.width * 0.62)) : 380;
+    const notificationHeight = Math.max(70, this.notificationPanel.displayHeight || 70);
     const notificationLeft = gameSize.width - edgePadding - notificationWidth;
     this.notificationPanel.setPosition(notificationLeft + notificationWidth / 2, edgePadding + notificationHeight / 2);
     this.notificationPanel.setSize(notificationWidth, notificationHeight);
     this.notificationPanel.setDisplaySize(notificationWidth, notificationHeight);
     this.notificationTitle.setPosition(notificationLeft + 12, edgePadding + 10);
-    const rowStartY = edgePadding + 34;
+
+    if (isCompact) {
+      this.layoutButtonRow(this.notificationFilterButtons.slice(0, 3), notificationLeft + notificationWidth / 2, edgePadding + 38, 4);
+      this.layoutButtonRow(this.notificationFilterButtons.slice(3), notificationLeft + notificationWidth / 2, edgePadding + 64, 6);
+    } else {
+      this.layoutButtonRow(this.notificationFilterButtons, notificationLeft + notificationWidth / 2, edgePadding + 40, 6);
+    }
+
+    const rowStartY = edgePadding + (isCompact ? 94 : 68);
     for (let i = 0; i < this.notificationRows.length; i += 1) {
       const row = this.notificationRows[i];
       row.setPosition(notificationLeft + 12, rowStartY + i * 20);
-      row.setWordWrapWidth(Math.max(100, notificationWidth - 20), true);
       if (i >= this.notificationVisibleRows) {
         row.setVisible(false);
       }
     }
 
-    const contextHeight = isCompact ? 206 : CONTEXT_PANEL_HEIGHT;
-    const contextWidth = isCompact ? gameSize.width - edgePadding * 2 : Math.max(400, Math.min(760, gameSize.width - 560));
+    const contextHeight = contextExpanded
+      ? isCompact
+        ? CONTEXT_PANEL_EXPANDED_HEIGHT_COMPACT
+        : CONTEXT_PANEL_EXPANDED_HEIGHT
+      : CONTEXT_PANEL_COLLAPSED_HEIGHT;
+    const contextWidth = isCompact
+      ? gameSize.width - edgePadding * 2
+      : Math.max(420, Math.min(780, gameSize.width - CONTEXT_PANEL_WIDTH_PADDING));
     const contextX = gameSize.width / 2;
-    const contextY = gameSize.height - contextHeight / 2 - (isCompact ? 10 : 12);
+    const contextY = gameSize.height - contextHeight / 2 - (isCompact ? 8 : 12);
     const contextTop = contextY - contextHeight / 2;
     const activeCityProductionButtons =
       (this.latestState?.uiActions?.cityProductionTab ?? "units") === "buildings"
@@ -490,47 +589,87 @@ export class UIScene extends Phaser.Scene {
         : this.cityProductionButtons;
     this.contextPanel.setPosition(contextX, contextY);
     this.contextPanel.setSize(contextWidth, contextHeight);
-    this.contextPanelTitle.setPosition(contextX, contextY - (isCompact ? 84 : 58));
+    this.contextPanelTitle.setPosition(contextX, contextExpanded ? contextY - (isCompact ? 92 : 70) : contextY - 4);
+    this.contextPanelMetaPrimary.setPosition(contextX, contextY - (isCompact ? 66 : 48));
+    this.contextPanelMetaSecondary.setPosition(contextX, contextY - (isCompact ? 48 : 30));
+    this.contextPanelMetaPrimary.setWordWrapWidth(Math.max(120, contextWidth - 18), true);
+    this.contextPanelMetaSecondary.setWordWrapWidth(Math.max(120, contextWidth - 18), true);
 
-    if (isCompact) {
-      this.layoutButtonRow(this.cityFocusButtons, contextX, contextY - 58, 6);
-      this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY - 24, 8);
-      this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 10, 6);
-      this.layoutButtonRow(this.cityQueueButtons, contextX, contextY + 44, 6);
-      this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 20, 10);
+    const contextButtonY = contextY - contextHeight / 2 + 16;
+    const contextExpandX = contextX + contextWidth / 2 - 82;
+    const contextPinX = contextX + contextWidth / 2 - 38;
+    this.contextPanelExpandButton.rectangle.setPosition(contextExpandX, contextButtonY);
+    this.contextPanelExpandButton.label.setPosition(contextExpandX, contextButtonY);
+    this.contextPanelPinButton.rectangle.setPosition(contextPinX, contextButtonY);
+    this.contextPanelPinButton.label.setPosition(contextPinX, contextButtonY);
+
+    if (contextExpanded) {
+      if (isCompact) {
+        this.layoutButtonRow(this.cityFocusButtons, contextX, contextY - 50, 6);
+        this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY - 16, 8);
+        this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 18, 6);
+        this.layoutButtonRow(this.cityQueueButtons, contextX, contextY + 52, 6);
+        this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 24, 10);
+      } else {
+        this.layoutButtonRow(this.cityFocusButtons, contextX, contextY - 24, 6);
+        this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY + 8, 8);
+        this.layoutButtonRow([...activeCityProductionButtons, ...this.cityQueueButtons], contextX, contextY + 42, 6);
+        this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 24, 16);
+      }
     } else {
-      this.layoutButtonRow(this.cityFocusButtons, contextX, contextY - 34, 6);
-      this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY, 8);
-      this.layoutButtonRow([...activeCityProductionButtons, ...this.cityQueueButtons], contextX, contextY + 34, 6);
-      this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 16, 16);
+      this.layoutButtonRow(this.cityFocusButtons, contextX, contextY + 36, 6);
+      this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY + 36, 8);
+      this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 36, 6);
+      this.layoutButtonRow(this.cityQueueButtons, contextX, contextY + 36, 6);
+      this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 36, 16);
     }
 
-    const endTurnWidth = isCompact ? 150 : BUTTON_WIDTH;
-    this.endTurnButton.width = endTurnWidth;
-    this.endTurnButton.rectangle.setSize(endTurnWidth, BUTTON_HEIGHT);
     const selectedPanelWidth = isCompact ? Math.max(150, Math.min(230, Math.floor(gameSize.width * 0.5))) : 460;
     const selectedPanelHeight = isCompact ? 88 : 92;
-    const selectedPanelY = isCompact ? contextTop - selectedPanelHeight - 8 : gameSize.height - 118;
+    const selectedPanelY = contextVisible ? contextTop - selectedPanelHeight - 8 : gameSize.height - selectedPanelHeight - 14;
     this.selectedPanel.setPosition(edgePadding, selectedPanelY);
     this.selectedPanel.setSize(selectedPanelWidth, selectedPanelHeight);
     this.selectedTitle.setPosition(edgePadding + 14, selectedPanelY + 12);
     this.selectedDetails.setPosition(edgePadding + 14, selectedPanelY + 38);
     this.selectedDetails.setWordWrapWidth(Math.max(120, selectedPanelWidth - 24), true);
 
+    const endTurnWidth = isCompact ? 146 : BUTTON_WIDTH;
+    this.endTurnButton.width = endTurnWidth;
+    this.endTurnButton.rectangle.setSize(endTurnWidth, BUTTON_HEIGHT);
     const endTurnX = gameSize.width - edgePadding - endTurnWidth / 2;
-    const endTurnY = isCompact ? selectedPanelY + selectedPanelHeight / 2 : gameSize.height - 34;
+    const endTurnY = gameSize.height - 34;
     this.endTurnButton.rectangle.setPosition(endTurnX, endTurnY);
     this.endTurnButton.label.setPosition(endTurnX, endTurnY);
 
+    const assistantWidth = isCompact ? 196 : 220;
+    const assistantHeight = 64;
+    const assistantX = Math.max(edgePadding + assistantWidth / 2, endTurnX - endTurnWidth / 2 - assistantWidth / 2 - 12);
+    const assistantY = isCompact ? gameSize.height - 80 : endTurnY;
+    this.turnAssistantPanel.setPosition(assistantX, assistantY);
+    this.turnAssistantPanel.setSize(assistantWidth, assistantHeight);
+    this.turnAssistantLabel.setPosition(assistantX, assistantY - 16);
+    this.nextUnitButton.rectangle.setPosition(assistantX, assistantY + 12);
+    this.nextUnitButton.label.setPosition(assistantX, assistantY + 12);
+
     const hintWidth = isCompact ? gameSize.width - edgePadding * 2 : 440;
     const hintHeight = isCompact ? 82 : 74;
-    const hintY = isCompact ? Math.max(178, notificationHeight + edgePadding + hintHeight / 2) : 56;
+    const hintY = isCompact ? Math.max(178, notificationHeight + edgePadding + hintHeight / 2 + 16) : 56;
     this.hintPanel.setPosition(gameSize.width / 2, hintY);
     this.hintPanel.setSize(hintWidth, hintHeight);
     this.hintPrimary.setPosition(gameSize.width / 2, hintY - 12);
     this.hintSecondary.setPosition(gameSize.width / 2, hintY + 10);
     this.hintPrimary.setWordWrapWidth(Math.max(140, hintWidth - 20), true);
     this.hintSecondary.setWordWrapWidth(Math.max(120, hintWidth - 20), true);
+
+    const previewWidth = isCompact ? Math.max(190, gameSize.width - edgePadding * 2) : 360;
+    const previewHeight = 66;
+    const previewY = hintY + (isCompact ? 82 : 74);
+    this.previewPanel.setPosition(gameSize.width / 2, previewY);
+    this.previewPanel.setSize(previewWidth, previewHeight);
+    this.previewTitle.setPosition(gameSize.width / 2, previewY - 12);
+    this.previewDetails.setPosition(gameSize.width / 2, previewY + 10);
+    this.previewTitle.setWordWrapWidth(Math.max(120, previewWidth - 16), true);
+    this.previewDetails.setWordWrapWidth(Math.max(120, previewWidth - 16), true);
 
     this.modalBackdrop.setPosition(gameSize.width / 2, gameSize.height / 2);
     this.modalBackdrop.setSize(gameSize.width + 4, gameSize.height + 4);
@@ -581,11 +720,18 @@ export class UIScene extends Phaser.Scene {
     const selectedUnit = gameState.units.find((unit) => unit.id === gameState.selectedUnitId) ?? null;
     const selectedCity = gameState.cities.find((city) => city.id === gameState.selectedCityId) ?? null;
     const hasSelection = !!selectedUnit || !!selectedCity;
+    const selectionKey = selectedUnit ? `unit:${selectedUnit.id}` : selectedCity ? `city:${selectedCity.id}` : "none";
     const phaseText = gameState.turnState.phase === "enemy" ? "Enemy" : "Player";
     const hasPendingCityResolution = !!gameState.pendingCityResolution;
     const canIssueOrders = gameState.turnState.phase === "player" && gameState.match.status === "ongoing" && !hasPendingCityResolution;
+    const turnAssistant = gameState.uiTurnAssistant ?? { readyCount: 0, nextReadyUnitId: null };
     const projected = gameState.projectedNetIncome ?? gameState.projectedIncome ?? { food: 0, production: 0, science: 1 };
     const economy = gameState.economy?.player ?? { foodStock: 0, productionStock: 0, scienceStock: 0 };
+
+    if (!this.contextPanelPinned && selectionKey !== this.lastContextSelectionKey && selectionKey !== "none") {
+      this.contextPanelExpanded = true;
+    }
+    this.lastContextSelectionKey = selectionKey;
 
     this.turnLabel.setText(`Turn ${gameState.turnState.turn} - ${phaseText}`);
     this.foodLabel.setText(`Food: ${economy.foodStock}`);
@@ -608,10 +754,19 @@ export class UIScene extends Phaser.Scene {
 
     this.endTurnButton.label.setText(canIssueOrders ? "End Turn" : hasPendingCityResolution ? "Resolve..." : "Enemy...");
     this.setButtonEnabled(this.endTurnButton, canIssueOrders);
+    this.setButtonWarning(this.endTurnButton, canIssueOrders && turnAssistant.readyCount > 0);
+
+    this.turnAssistantPanel.setVisible(gameState.match.status === "ongoing");
+    this.turnAssistantLabel.setVisible(gameState.match.status === "ongoing");
+    this.turnAssistantLabel.setText(`Units ready: ${turnAssistant.readyCount}`);
+    this.setCompositeVisible(this.nextUnitButton, gameState.match.status === "ongoing");
+    this.setButtonEnabled(this.nextUnitButton, canIssueOrders && turnAssistant.readyCount > 0);
 
     this.syncContextMenu(gameState, selectedUnit, selectedCity, canIssueOrders);
     this.syncCityResolutionModal(gameState.pendingCityResolution);
+    this.updatePreviewCard(gameState.uiPreview ?? { mode: "none" });
     this.updateContextualHint();
+    this.layout(this.scale.gameSize);
     this.updateNotificationCenter();
 
     const hasResult = gameState.match.status !== "ongoing";
@@ -632,18 +787,41 @@ export class UIScene extends Phaser.Scene {
     const menuType = gameState.uiActions?.contextMenuType ?? null;
     this.contextMenuMode = menuType;
     const visible = menuType !== null && gameState.match.status === "ongoing";
+    const expanded = visible ? this.contextPanelExpanded : false;
     this.contextPanel.setVisible(visible);
     this.contextPanelTitle.setVisible(visible);
+    this.setCompositeVisible(this.contextPanelExpandButton, visible);
+    this.setCompositeVisible(this.contextPanelPinButton, visible);
+    this.contextPanelMetaPrimary.setVisible(visible && expanded);
+    this.contextPanelMetaSecondary.setVisible(visible && expanded);
+    this.setButtonEnabled(this.contextPanelExpandButton, visible);
+    this.setButtonEnabled(this.contextPanelPinButton, visible);
+    this.setButtonActive(this.contextPanelPinButton, this.contextPanelPinned);
+    this.setButtonLabel(this.contextPanelExpandButton, expanded ? "v" : "^");
+    this.setButtonLabel(this.contextPanelPinButton, this.contextPanelPinned ? "Unpin" : "Pin");
+
     if (!visible) {
       this.setCityControlsVisible(false);
       this.setUnitControlsVisible(false);
+      this.contextPanelMetaPrimary.setText("");
+      this.contextPanelMetaSecondary.setText("");
       return;
     }
 
     if (menuType === "city" && selectedCity) {
-      this.contextPanelTitle.setText(`City Commands  Pop ${selectedCity.population}  Queue ${selectedCity.queue.length}/${gameState.uiActions.cityQueueMax}`);
-      this.setCityControlsVisible(true);
+      this.contextPanelTitle.setText(
+        `City Commands  Pop ${selectedCity.population}  Queue ${selectedCity.queue.length}/${gameState.uiActions.cityQueueMax}`
+      );
+      this.setCityControlsVisible(expanded);
       this.setUnitControlsVisible(false);
+
+      if (expanded) {
+        const localYield = selectedCity.yieldLastTurn ?? { food: 0, production: 0, science: 0 };
+        this.contextPanelMetaPrimary.setText(
+          `Focus ${selectedCity.focus} | Local F/P/S ${localYield.food}/${localYield.production}/${localYield.science} | Identity ${selectedCity.identity}`
+        );
+        this.contextPanelMetaSecondary.setText(this.buildCityQueueSummary(selectedCity, gameState));
+      }
 
       for (let i = 0; i < this.cityFocusButtons.length; i += 1) {
         const focus = FOCUS_MODES[i];
@@ -668,8 +846,8 @@ export class UIScene extends Phaser.Scene {
         const button = this.cityProductionButtons[i];
         const cost = choice?.cost ?? 0;
         this.setButtonLabel(button, `${formatUnitLabel(unitType)} ${cost}`);
-        this.setCompositeVisible(button, productionTab === "units");
-        this.setButtonEnabled(button, productionTab === "units" && canQueueUnits && !!choice?.unlocked);
+        this.setCompositeVisible(button, expanded && productionTab === "units");
+        this.setButtonEnabled(button, expanded && productionTab === "units" && canQueueUnits && !!choice?.unlocked);
         if (button.enabled && !choice?.affordable) {
           button.label.setAlpha(0.9);
         }
@@ -683,10 +861,11 @@ export class UIScene extends Phaser.Scene {
         const button = this.cityBuildingButtons[i];
         const cost = choice?.cost ?? 0;
         this.setButtonLabel(button, `${formatBuildingLabel(buildingId)} ${cost}`);
-        this.setCompositeVisible(button, productionTab === "buildings");
+        this.setCompositeVisible(button, expanded && productionTab === "buildings");
         this.setButtonEnabled(
           button,
-          productionTab === "buildings" &&
+          expanded &&
+            productionTab === "buildings" &&
             canQueueBuildings &&
             !!choice?.unlocked &&
             !choice?.alreadyBuilt &&
@@ -701,7 +880,7 @@ export class UIScene extends Phaser.Scene {
         const button = this.cityQueueButtons[i];
         const queueItem = selectedCity.queue[i] ?? null;
         this.setButtonLabel(button, queueItem ? `${i + 1}: ${this.getQueueItemLabel(queueItem)}` : `${i + 1}: --`);
-        this.setButtonEnabled(button, canIssueOrders && !!queueItem);
+        this.setButtonEnabled(button, expanded && canIssueOrders && !!queueItem);
       }
       return;
     }
@@ -709,9 +888,16 @@ export class UIScene extends Phaser.Scene {
     if (menuType === "unit" && selectedUnit) {
       this.contextPanelTitle.setText(`Unit Commands  ${formatUnitLabel(selectedUnit.type)}`);
       this.setCityControlsVisible(false);
-      this.setUnitControlsVisible(true);
-      this.setButtonEnabled(this.unitFoundCityButton, canIssueOrders && !!gameState.uiActions?.canFoundCity);
-      this.setButtonEnabled(this.unitSkipButton, canIssueOrders && !!gameState.uiActions?.canSkipUnit);
+      this.setUnitControlsVisible(expanded);
+      if (expanded) {
+        const previewSummary = summarizePreview(gameState.uiPreview);
+        this.contextPanelMetaPrimary.setText(
+          `Move ${selectedUnit.movementRemaining}/${selectedUnit.maxMovement} | Atk ${selectedUnit.attack} | Range ${selectedUnit.minAttackRange}-${selectedUnit.attackRange} | Armor ${selectedUnit.armor}`
+        );
+        this.contextPanelMetaSecondary.setText(previewSummary || "Hover reachable or attackable hexes for action previews.");
+      }
+      this.setButtonEnabled(this.unitFoundCityButton, expanded && canIssueOrders && !!gameState.uiActions?.canFoundCity);
+      this.setButtonEnabled(this.unitSkipButton, expanded && canIssueOrders && !!gameState.uiActions?.canSkipUnit);
       return;
     }
 
@@ -766,6 +952,77 @@ export class UIScene extends Phaser.Scene {
     return formatUnitLabel(queueItem.id);
   }
 
+  buildCityQueueSummary(selectedCity, gameState) {
+    const productionChoices = new Map((gameState.uiActions?.cityProductionChoices ?? []).map((choice) => [choice.type, choice]));
+    const buildingChoices = new Map((gameState.uiActions?.cityBuildingChoices ?? []).map((choice) => [choice.id, choice]));
+    const productionRate = Math.max(1, selectedCity.yieldLastTurn?.production ?? 0);
+    const productionStock = gameState.economy?.player?.productionStock ?? 0;
+
+    const parts = [];
+    for (let i = 0; i < selectedCity.queue.length; i += 1) {
+      const item = selectedCity.queue[i];
+      const normalized = normalizeQueueItem(item);
+      if (!normalized) {
+        continue;
+      }
+      const label = normalized.kind === "building" ? formatBuildingLabel(normalized.id) : formatUnitLabel(normalized.id);
+      const cost =
+        normalized.kind === "building"
+          ? buildingChoices.get(normalized.id)?.cost ?? 0
+          : productionChoices.get(normalized.id)?.cost ?? 0;
+      const etaTurns = Math.max(0, Math.ceil(Math.max(0, cost - productionStock) / productionRate));
+      parts.push(`${i + 1}.${label} ${cost} (${etaTurns}t)`);
+    }
+
+    if (parts.length === 0) {
+      return "Queue empty. Add units/buildings from the buttons below.";
+    }
+    return parts.join("  |  ");
+  }
+
+  updatePreviewCard(uiPreview) {
+    const mode = uiPreview?.mode ?? "none";
+    const isVisible = mode !== "none" && this.latestState?.match?.status === "ongoing";
+    this.previewPanel.setVisible(isVisible);
+    this.previewTitle.setVisible(isVisible);
+    this.previewDetails.setVisible(isVisible);
+    if (!isVisible) {
+      return;
+    }
+
+    if (mode === "move") {
+      this.previewTitle.setText(`Move Preview -> (${uiPreview.q}, ${uiPreview.r})`);
+      this.previewDetails.setText(
+        `Cost ${uiPreview.moveCost ?? 0} | Remaining movement ${uiPreview.movementRemainingAfter ?? 0}`
+      );
+      this.previewDetails.setColor("#2f5f74");
+      return;
+    }
+
+    if (mode === "attack-unit") {
+      const counter = uiPreview.counterattack;
+      const counterText = counter?.triggered
+        ? `Counter ${counter.damage ?? 0}`
+        : counter?.reason === "out-of-range"
+          ? "No counter (out of range)"
+          : "No counter";
+      this.previewTitle.setText(`Attack Preview -> ${uiPreview.targetId ?? "target"}`);
+      this.previewDetails.setText(`Damage ${uiPreview.damage ?? 0} | ${counterText}`);
+      this.previewDetails.setColor("#7b3024");
+      return;
+    }
+
+    if (mode === "attack-city") {
+      this.previewTitle.setText(`City Assault Preview -> ${uiPreview.cityId ?? "city"}`);
+      this.previewDetails.setText(`Damage ${uiPreview.damage ?? 0} | City HP after hit ${uiPreview.cityRemainingHealth ?? "?"}`);
+      this.previewDetails.setColor("#7b3024");
+      return;
+    }
+
+    this.previewTitle.setText("");
+    this.previewDetails.setText("");
+  }
+
   updateContextualHint() {
     if (!this.latestState) {
       this.setHint(null, null, null);
@@ -802,16 +1059,86 @@ export class UIScene extends Phaser.Scene {
     }
   }
 
+  toggleContextPanelExpanded() {
+    if (this.contextMenuMode === null || this.latestState?.match?.status !== "ongoing") {
+      return false;
+    }
+    this.contextPanelExpanded = !this.contextPanelExpanded;
+    this.updateFromState(this.latestState);
+    return this.contextPanelExpanded;
+  }
+
+  toggleContextPanelPinned() {
+    if (this.contextMenuMode === null || this.latestState?.match?.status !== "ongoing") {
+      return false;
+    }
+    this.contextPanelPinned = !this.contextPanelPinned;
+    this.updateFromState(this.latestState);
+    return this.contextPanelPinned;
+  }
+
+  testSetContextPanelPinned(value) {
+    this.contextPanelPinned = !!value;
+    if (!this.contextPanelPinned && this.contextMenuMode !== null) {
+      this.contextPanelExpanded = true;
+    }
+    if (this.latestState) {
+      this.updateFromState(this.latestState);
+    }
+    return this.contextPanelPinned;
+  }
+
+  setNotificationFilter(filterName) {
+    if (!NOTIFICATION_FILTERS.includes(filterName)) {
+      return false;
+    }
+    this.notificationFilter = filterName;
+    this.notificationScroll = 0;
+    this.updateNotificationCenter();
+    if (this.latestState) {
+      this.updateFromState(this.latestState);
+    }
+    return true;
+  }
+
+  getFilteredNotifications() {
+    if (this.notificationFilter === "All") {
+      return this.notifications;
+    }
+    return this.notifications.filter((entry) => entry.category === this.notificationFilter);
+  }
+
+  focusNotificationByRow(rowIndex) {
+    const entry = this.notificationVisibleSlice[rowIndex];
+    if (!entry) {
+      return false;
+    }
+    if (!entry.focus) {
+      this.handleNotificationRequested({
+        message: "This notification has no map focus target.",
+        level: "warning",
+        category: "System",
+      });
+      return false;
+    }
+    gameEvents.emit("notification-focus-requested", { focus: entry.focus, id: entry.id });
+    return true;
+  }
+
   handleNotificationRequested(payload) {
     const message = typeof payload === "string" ? payload : payload?.message;
     if (!message) {
       return;
     }
     const level = typeof payload === "object" ? payload.level ?? "info" : "info";
+    const categoryInput = typeof payload === "object" ? payload.category : null;
+    const category = normalizeNotificationCategory(categoryInput, message);
     this.notifications.unshift({
       id: `n-${this.notificationNextId}`,
       level,
       message,
+      category,
+      focus: typeof payload === "object" ? normalizeNotificationFocus(payload.focus) : null,
       createdAtMs: Date.now(),
     });
     this.notificationNextId += 1;
@@ -821,22 +1148,33 @@ export class UIScene extends Phaser.Scene {
   handleNotificationsReset = () => {
     this.notifications = [];
     this.notificationScroll = 0;
+    this.notificationFilter = "All";
     this.updateNotificationCenter();
   };
 
   updateNotificationCenter() {
+    const filtered = this.getFilteredNotifications();
     const visibleCount = this.notificationVisibleRows || this.notificationRows.length;
-    const maxScroll = Math.max(0, this.notifications.length - visibleCount);
+    const maxScroll = Math.max(0, filtered.length - visibleCount);
     this.notificationScroll = Phaser.Math.Clamp(this.notificationScroll, 0, maxScroll);
-    const slice = this.notifications.slice(this.notificationScroll, this.notificationScroll + visibleCount);
+    const slice = filtered.slice(this.notificationScroll, this.notificationScroll + visibleCount);
+    this.notificationVisibleSlice = slice;
     const shownRows = slice.length;
+    const filterHeight = this.scale.width < COMPACT_BREAKPOINT ? 60 : 34;
     const contentHeight = shownRows > 0 ? shownRows * 20 + 14 : 0;
-    const panelHeight = 40 + contentHeight;
+    const panelHeight = 34 + filterHeight + contentHeight;
     const bounds = this.notificationPanel.getBounds();
     this.notificationPanel.setSize(this.notificationPanel.displayWidth, panelHeight);
     this.notificationPanel.setDisplaySize(this.notificationPanel.displayWidth, panelHeight);
     this.notificationPanel.setPosition(bounds.centerX, bounds.top + panelHeight / 2);
     this.notificationTitle.setPosition(bounds.left + 12, bounds.top + 10);
+
+    for (const filterButton of this.notificationFilterButtons) {
+      const filterName = filterButton.actionId.replace("notif-filter-", "");
+      this.setButtonActive(filterButton, this.notificationFilter === filterName);
+      this.setButtonEnabled(filterButton, true);
+      filterButton.label.setAlpha(1);
+    }
 
     for (let i = 0; i < this.notificationRows.length; i += 1) {
       const row = this.notificationRows[i];
@@ -849,9 +1187,10 @@ export class UIScene extends Phaser.Scene {
         row.setVisible(false);
         continue;
       }
-      row.setPosition(bounds.left + 12, bounds.top + 34 + i * 20);
+      row.setPosition(bounds.left + 12, bounds.top + 34 + filterHeight + i * 20);
       row.setVisible(true);
-      row.setText(`${entry.level === "warning" ? "[Warning]" : "[Info]"} ${entry.message}`);
+      const line = `[${entry.category}] ${entry.level === "warning" ? "[Warning]" : "[Info]"} ${entry.message}`;
+      row.setText(truncateText(line, Math.max(36, Math.floor((this.notificationPanel.displayWidth - 24) / 7))));
       row.setColor(entry.level === "warning" ? "#7b3024" : "#3f2d18");
     }
   }
@@ -861,11 +1200,12 @@ export class UIScene extends Phaser.Scene {
       return;
     }
     const visibleCount = this.notificationVisibleRows || this.notificationRows.length;
-    if (this.notifications.length <= visibleCount) {
+    const filtered = this.getFilteredNotifications();
+    if (filtered.length <= visibleCount) {
       return;
     }
     const next = this.notificationScroll + (deltaY > 0 ? 1 : -1);
-    this.notificationScroll = Phaser.Math.Clamp(next, 0, Math.max(0, this.notifications.length - visibleCount));
+    this.notificationScroll = Phaser.Math.Clamp(next, 0, Math.max(0, filtered.length - visibleCount));
     this.updateNotificationCenter();
   }
 
@@ -982,9 +1322,18 @@ export class UIScene extends Phaser.Scene {
     this.applyButtonVisualState(button);
   }
 
+  setButtonWarning(button, warning) {
+    button.warning = warning;
+    this.applyButtonVisualState(button);
+  }
+
   applyButtonVisualState(button) {
     if (!button.enabled) {
       button.rectangle.setFillStyle(button.palette.disabledFill, button.palette.disabledAlpha);
+      return;
+    }
+    if (button.warning) {
+      button.rectangle.setFillStyle(button.palette.warningFill, button.palette.warningAlpha);
       return;
     }
     if (button.isActive) {
@@ -1041,6 +1390,9 @@ export class UIScene extends Phaser.Scene {
       pauseMenuOpen: this.pauseMenuOpen,
       restartConfirmOpen: this.restartConfirmOpen,
       notifications: this.notifications.map((entry) => ({ ...entry })),
+      notificationFilter: this.notificationFilter,
+      contextPanelExpanded: this.contextPanelExpanded,
+      contextPanelPinned: this.contextPanelPinned,
     };
   }
 
@@ -1113,6 +1465,10 @@ export class UIScene extends Phaser.Scene {
     return {
       visible: this.contextPanel.visible,
       mode: this.contextMenuMode,
+      expanded: this.contextPanelExpanded,
+      pinned: this.contextPanelPinned,
+      metaPrimary: this.contextPanelMetaPrimary.text,
+      metaSecondary: this.contextPanelMetaSecondary.text,
       cityFocusButtons: this.cityFocusButtons.map((button) => ({
         actionId: button.actionId,
         visible: button.rectangle.visible && button.label.visible,
@@ -1157,7 +1513,34 @@ export class UIScene extends Phaser.Scene {
     return {
       count: this.notifications.length,
       scroll: this.notificationScroll,
-      entries: this.notifications.slice(0, 12).map((entry) => ({ ...entry })),
+      filter: this.notificationFilter,
+      filteredCount: this.getFilteredNotifications().length,
+      entries: this.notifications.slice(0, 20).map((entry) => ({ ...entry })),
+    };
+  }
+
+  testSetNotificationFilter(filterName) {
+    return this.setNotificationFilter(filterName);
+  }
+
+  testFocusNotification(index) {
+    const filtered = this.getFilteredNotifications();
+    const entry = filtered[index];
+    if (!entry) {
+      return false;
+    }
+    if (!entry.focus) {
+      return false;
+    }
+    gameEvents.emit("notification-focus-requested", { focus: entry.focus, id: entry.id });
+    return true;
+  }
+
+  testGetContextPanelState() {
+    return {
+      expanded: this.contextPanelExpanded,
+      pinned: this.contextPanelPinned,
+      mode: this.contextMenuMode,
     };
   }
 }
@@ -1189,4 +1572,96 @@ function capitalizeLabel(value) {
     return "";
   }
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function normalizeQueueItem(queueItem) {
+  if (!queueItem) {
+    return null;
+  }
+  if (typeof queueItem === "string") {
+    return { kind: "unit", id: queueItem };
+  }
+  if ((queueItem.kind === "unit" || queueItem.kind === "building") && typeof queueItem.id === "string") {
+    return { kind: queueItem.kind, id: queueItem.id };
+  }
+  return null;
+}
+
+function normalizeNotificationCategory(input, message = "") {
+  const normalizedInput = typeof input === "string" ? input.trim().toLowerCase() : "";
+  if (normalizedInput === "combat") {
+    return "Combat";
+  }
+  if (normalizedInput === "city") {
+    return "City";
+  }
+  if (normalizedInput === "research") {
+    return "Research";
+  }
+  if (normalizedInput === "system") {
+    return "System";
+  }
+
+  const text = message.toLowerCase();
+  if (text.includes("research") || text.includes("tech")) {
+    return "Research";
+  }
+  if (text.includes("city") || text.includes("queue") || text.includes("focus")) {
+    return "City";
+  }
+  if (text.includes("attack") || text.includes("captured") || text.includes("razed") || text.includes("combat")) {
+    return "Combat";
+  }
+  return "System";
+}
+
+function normalizeNotificationFocus(focus) {
+  if (!focus || typeof focus !== "object") {
+    return null;
+  }
+  const normalized = {};
+  if (typeof focus.unitId === "string") {
+    normalized.unitId = focus.unitId;
+  }
+  if (typeof focus.cityId === "string") {
+    normalized.cityId = focus.cityId;
+  }
+  if (Number.isFinite(focus.q)) {
+    normalized.q = Math.round(focus.q);
+  }
+  if (Number.isFinite(focus.r)) {
+    normalized.r = Math.round(focus.r);
+  }
+  if (Object.keys(normalized).length === 0) {
+    return null;
+  }
+  return normalized;
+}
+
+function summarizePreview(uiPreview) {
+  const mode = uiPreview?.mode ?? "none";
+  if (mode === "move") {
+    return `Move preview -> cost ${uiPreview.moveCost ?? 0}, remaining ${uiPreview.movementRemainingAfter ?? 0}.`;
+  }
+  if (mode === "attack-unit") {
+    const counter = uiPreview.counterattack;
+    if (counter?.triggered) {
+      return `Attack preview -> ${uiPreview.damage ?? 0} damage, counter ${counter.damage ?? 0}.`;
+    }
+    return `Attack preview -> ${uiPreview.damage ?? 0} damage, no counter.`;
+  }
+  if (mode === "attack-city") {
+    return `City assault preview -> ${uiPreview.damage ?? 0} damage, city HP after hit ${uiPreview.cityRemainingHealth ?? "?"}.`;
+  }
+  return "";
+}
+
+function truncateText(value, maxChars) {
+  if (typeof value !== "string" || value.length <= maxChars) {
+    return value;
+  }
+  if (maxChars <= 1) {
+    return value.slice(0, maxChars);
+  }
+  return `${value.slice(0, Math.max(0, maxChars - 3))}...`;
 }

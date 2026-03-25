@@ -279,3 +279,70 @@ Original prompt: I want to make civilization like easy game in JS. Let's init th
 - Additional broad check: `npx vitest run tests/integration` currently has one pre-existing/parallel-work failure outside Worker 2 scope:
   - `tests/integration/enemyTurn.test.js` -> `enemy can counter-attack adjacent player units` (`expected 7 to be less than 7`).
   - Worker 2-owned suites still pass.
+## 2026-03-25 (Spec-017/018/019 Gameplay UI/UX upgrade pack)
+- Implemented action preview layer in world/runtime:
+  - hover move preview (`mode: move`) with cost + remaining movement,
+  - hover unit/city attack previews (`mode: attack-unit` / `attack-city`) with predicted damage and counter data,
+  - preview clears on selection/phase/modal transitions.
+- Added pure combat prediction APIs in `combatSystem`:
+  - `previewAttack(attackerId, targetId, gameState)`
+  - `previewCityAttack(attackerId, cityId, gameState)`
+  - resolver paths now share preview math parity.
+- Map clarity pass:
+  - stronger reachable/attackable contrast,
+  - dedicated preview highlight layer,
+  - contextual enemy threat overlay when player unit is selected.
+- Turn readiness assistant + deterministic cycling:
+  - bottom-right assistant (`Units ready: N`, `Next Unit`),
+  - End Turn warning tint when ready units remain,
+  - `Tab` key + event path for next actionable unit.
+- Expanded context panel controls:
+  - visible expand/collapse + `Pin/Unpin`,
+  - auto-expand on new valid selection,
+  - pin persists expanded mode across selection changes,
+  - expanded city metadata (focus/yields/queue ETA snapshot),
+  - expanded unit metadata (combat stats + preview summary).
+- Notification Center v2:
+  - categories (`All/Combat/City/Research/System`),
+  - filter chips,
+  - category/focus metadata on entries,
+  - click-to-jump path via `notification-focus-requested` and world camera focusing,
+  - readable one-line truncated entries to avoid overlap.
+- Added/extended test hooks:
+  - `getActionPreviewState`, `hoverHex`, `getTurnAssistantState`, `nextReadyUnit`,
+  - `setContextPanelPinned`, `setNotificationFilter`, `focusNotification`.
+- Extended runtime payload surfaces in `render_game_to_text`/snapshot:
+  - `uiPreview`, `uiTurnAssistant`, `uiContextPanel`, `uiNotificationFilter`, `threatHexes`, `cameraFocusHex`.
+- Updated tests:
+  - integration: combat preview/resolver parity (unit + city) in `tests/integration/combat.test.js`.
+  - e2e smoke: preview hooks, turn assistant, context-panel pin persistence, notification filtering and focus jump assertions.
+- Added docs:
+  - `docs/spec-017-action-previews-and-map-clarity.md`
+  - `docs/spec-018-turn-readiness-and-expanded-context-panel.md`
+  - `docs/spec-019-notification-center-filters-and-jump.md`
+- Updated docs:
+  - `docs/spec-003-testability.md`
+  - `docs/spec-013-hud-layout-context-actions-and-notification-center.md`
+  - `docs/README.md`
+- Validation:
+  - `npm run lint`
+  - `npm test`
+  - `npm run test:e2e`
+  - `npm run build`
+  - visual review: `tests/e2e/artifacts/smoke.png`.
+## 2026-03-25 (Docs consolidation to 8 domain bundles)
+- Consolidated specs from 19 to 8 domain-oriented documents using lowest-ID reuse strategy.
+- Added new consolidated docs:
+  - `docs/spec-001-bootstrap-and-runtime-foundation.md`
+  - `docs/spec-002-core-map-turn-and-victory.md`
+  - `docs/spec-005-combat-siege-and-ranged.md`
+  - `docs/spec-007-city-economy-production-and-specialization.md`
+  - `docs/spec-008-tech-tree-and-unlocks.md`
+  - `docs/spec-012-hud-context-panels-and-notifications.md`
+  - `docs/spec-014-ai-personalities-and-strategy.md`
+- Kept and refreshed `docs/spec-003-testability.md` as centralized hook/payload authority.
+- Updated `docs/README.md` to list only the consolidated spec set and added consolidation note.
+- Hard-deleted superseded milestone specs and old file-name variants (no stubs/archive).
+- Validation sweep:
+  - verified deleted spec filenames are no longer referenced in `docs/*.md`.
+  - verified each remaining spec includes all 6 required template sections.

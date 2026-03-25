@@ -149,73 +149,42 @@ export function canAttackCity(attackerId, cityId, gameState) {
  * }}
  */
 export function resolveAttack(attackerId, targetId, gameState) {
-  const check = canAttack(attackerId, targetId, gameState);
-  if (!check.ok) {
-    return check;
-  }
-
   const attacker = getUnitById(gameState, attackerId);
   const target = getUnitById(gameState, targetId);
   if (!attacker || !target) {
     return { ok: false, reason: "units-missing" };
   }
 
-  const breakdown = buildUnitCombatBreakdown(attacker, target, gameState);
-  const damage = breakdown.damage;
+  const preview = previewAttack(attackerId, targetId, gameState);
+  if (!preview.ok) {
+    return preview;
+  }
+
+  const breakdown = preview.breakdown;
+  const damage = preview.damage;
+  if (!breakdown || typeof damage !== "number") {
+    return { ok: false, reason: "preview-missing-breakdown" };
+  }
+
   target.health = Math.max(0, target.health - damage);
 
   attacker.hasActed = true;
   attacker.movementRemaining = 0;
 
-  const targetDefeated = target.health <= 0;
+  const targetDefeated = !!preview.targetDefeated;
   if (targetDefeated) {
     removeUnitById(gameState, target.id);
   }
 
-  /** @type {{
-   *   triggered: boolean,
-   *   reason?: string,
-   *   damage?: number,
-   *   attackerDefeated?: boolean,
-   *   breakdown?: {
-   *     baseAttack: number,
-   *     roleBonus: number,
-   *     terrainAttackBonus: number,
-   *     defenderArmor: number,
-   *     terrainDefenseBonus: number,
-   *     rawDamage: number,
-   *     damage: number
-   *   }
-   * }} */
-  let counterattack = { triggered: false };
+  const counterattack = preview.counterattack ?? { triggered: false };
   let attackerDefeated = false;
-
-  if (!targetDefeated) {
-    if (isTargetInAttackRange(target, attacker)) {
-      const counterBreakdown = buildUnitCombatBreakdown(target, attacker, gameState);
-      const counterDamage = counterBreakdown.damage;
-      attacker.health = Math.max(0, attacker.health - counterDamage);
-      attackerDefeated = attacker.health <= 0;
-      if (attackerDefeated) {
-        removeUnitById(gameState, attacker.id);
-      }
-      counterattack = {
-        triggered: true,
-        damage: counterDamage,
-        attackerDefeated,
-        breakdown: counterBreakdown,
-      };
-    } else {
-      counterattack = {
-        triggered: false,
-        reason: "out-of-range",
-      };
+  if (counterattack.triggered && typeof counterattack.damage === "number") {
+    attacker.health = Math.max(0, attacker.health - counterattack.damage);
+    attackerDefeated = attacker.health <= 0;
+    if (attackerDefeated) {
+      removeUnitById(gameState, attacker.id);
     }
-  } else {
-    counterattack = {
-      triggered: false,
-      reason: "target-defeated",
-    };
+    counterattack.attackerDefeated = attackerDefeated;
   }
 
   return { ok: true, damage, targetDefeated, attackerDefeated, breakdown, counterattack };
@@ -244,24 +213,28 @@ export function resolveAttack(attackerId, targetId, gameState) {
  * }}
  */
 export function resolveCityAttack(attackerId, cityId, gameState) {
-  const check = canAttackCity(attackerId, cityId, gameState);
-  if (!check.ok) {
-    return check;
-  }
-
   const attacker = getUnitById(gameState, attackerId);
   const city = getCityById(gameState, cityId);
   if (!attacker || !city) {
     return { ok: false, reason: "entities-missing" };
   }
 
-  const breakdown = buildCityCombatBreakdown(attacker, city, gameState);
-  const damage = breakdown.damage;
+  const preview = previewCityAttack(attackerId, cityId, gameState);
+  if (!preview.ok) {
+    return preview;
+  }
+
+  const breakdown = preview.breakdown;
+  const damage = preview.damage;
+  if (!breakdown || typeof damage !== "number") {
+    return { ok: false, reason: "preview-missing-breakdown" };
+  }
+
   city.health = Math.max(0, city.health - damage);
   attacker.hasActed = true;
   attacker.movementRemaining = 0;
 
-  if (city.health > 0) {
+  if (!preview.cityDefeated) {
     return { ok: true, damage, breakdown, cityDefeated: false };
   }
 
@@ -289,6 +262,132 @@ export function resolveCityAttack(attackerId, cityId, gameState) {
     cityDefeated: true,
     pendingResolution: false,
     outcomeChoice: aiChoice,
+  };
+}
+
+/**
+ * @param {string} attackerId
+ * @param {string} targetId
+ * @param {import("../core/types.js").GameState} gameState
+ * @returns {{
+ *   ok: boolean,
+ *   reason?: string,
+ *   damage?: number,
+ *   targetDefeated?: boolean,
+ *   attackerDefeated?: boolean,
+ *   targetRemainingHealth?: number,
+ *   attackerRemainingHealth?: number,
+ *   breakdown?: {
+ *     baseAttack: number,
+ *     roleBonus: number,
+ *     terrainAttackBonus: number,
+ *     defenderArmor: number,
+ *     terrainDefenseBonus: number,
+ *     rawDamage: number,
+ *     damage: number
+ *   },
+ *   counterattack?: {
+ *     triggered: boolean,
+ *     reason?: string,
+ *     damage?: number,
+ *     attackerDefeated?: boolean,
+ *     attackerRemainingHealth?: number,
+ *     breakdown?: {
+ *       baseAttack: number,
+ *       roleBonus: number,
+ *       terrainAttackBonus: number,
+ *       defenderArmor: number,
+ *       terrainDefenseBonus: number,
+ *       rawDamage: number,
+ *       damage: number
+ *     }
+ *   }
+ * }}
+ */
+export function previewAttack(attackerId, targetId, gameState) {
+  const check = canAttack(attackerId, targetId, gameState);
+  if (!check.ok) {
+    return check;
+  }
+
+  const attacker = getUnitById(gameState, attackerId);
+  const target = getUnitById(gameState, targetId);
+  if (!attacker || !target) {
+    return { ok: false, reason: "units-missing" };
+  }
+
+  const breakdown = buildUnitCombatBreakdown(attacker, target, gameState);
+  const damage = breakdown.damage;
+  const targetRemainingHealth = Math.max(0, target.health - damage);
+  const targetDefeated = targetRemainingHealth <= 0;
+  const counterattack = buildCounterattackPreview(attacker, target, targetDefeated, gameState);
+  const attackerRemainingHealth = counterattack.triggered
+    ? Math.max(0, attacker.health - (counterattack.damage ?? 0))
+    : attacker.health;
+  const attackerDefeated = attackerRemainingHealth <= 0;
+
+  if (counterattack.triggered) {
+    counterattack.attackerDefeated = attackerDefeated;
+    counterattack.attackerRemainingHealth = attackerRemainingHealth;
+  }
+
+  return {
+    ok: true,
+    damage,
+    targetDefeated,
+    attackerDefeated,
+    targetRemainingHealth,
+    attackerRemainingHealth,
+    breakdown,
+    counterattack,
+  };
+}
+
+/**
+ * @param {string} attackerId
+ * @param {string} cityId
+ * @param {import("../core/types.js").GameState} gameState
+ * @returns {{
+ *   ok: boolean,
+ *   reason?: string,
+ *   damage?: number,
+ *   cityDefeated?: boolean,
+ *   cityRemainingHealth?: number,
+ *   attackerRemainingHealth?: number,
+ *   breakdown?: {
+ *     baseAttack: number,
+ *     roleBonus: number,
+ *     terrainAttackBonus: number,
+ *     defenderArmor: number,
+ *     terrainDefenseBonus: number,
+ *     rawDamage: number,
+ *     damage: number
+ *   }
+ * }}
+ */
+export function previewCityAttack(attackerId, cityId, gameState) {
+  const check = canAttackCity(attackerId, cityId, gameState);
+  if (!check.ok) {
+    return check;
+  }
+
+  const attacker = getUnitById(gameState, attackerId);
+  const city = getCityById(gameState, cityId);
+  if (!attacker || !city) {
+    return { ok: false, reason: "entities-missing" };
+  }
+
+  const breakdown = buildCityCombatBreakdown(attacker, city, gameState);
+  const damage = breakdown.damage;
+  const cityRemainingHealth = Math.max(0, city.health - damage);
+
+  return {
+    ok: true,
+    damage,
+    cityDefeated: cityRemainingHealth <= 0,
+    cityRemainingHealth,
+    attackerRemainingHealth: attacker.health,
+    breakdown,
   };
 }
 
@@ -367,6 +466,29 @@ function isTargetInAttackRange(attacker, target) {
   const minRange = getMinAttackRange(attacker);
   const maxRange = getMaxAttackRange(attacker, minRange);
   return distanceToTarget >= minRange && distanceToTarget <= maxRange;
+}
+
+function buildCounterattackPreview(attacker, target, targetDefeated, gameState) {
+  if (targetDefeated) {
+    return {
+      triggered: false,
+      reason: "target-defeated",
+    };
+  }
+
+  if (!isTargetInAttackRange(target, attacker)) {
+    return {
+      triggered: false,
+      reason: "out-of-range",
+    };
+  }
+
+  const breakdown = buildUnitCombatBreakdown(target, attacker, gameState);
+  return {
+    triggered: true,
+    damage: breakdown.damage,
+    breakdown,
+  };
 }
 
 function getMinAttackRange(unit) {
