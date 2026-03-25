@@ -322,16 +322,19 @@ export class WorldScene extends Phaser.Scene {
     if (!this.canAcceptPlayerCommands()) {
       return false;
     }
-    const nextReadyUnitId = this.getNextReadyUnitId();
-    if (!nextReadyUnitId) {
-      this.emitNotification("No ready units available.", {
+    const nextAttentionTarget = this.getNextAttentionTarget();
+    if (!nextAttentionTarget) {
+      this.emitNotification("No units or city queues need attention.", {
         level: "warning",
         category: "System",
       });
       return false;
     }
-
-    this.selectUnit(nextReadyUnitId);
+    if (nextAttentionTarget.kind === "unit") {
+      this.selectUnit(nextAttentionTarget.id);
+    } else {
+      this.selectCity(nextAttentionTarget.id);
+    }
     return true;
   };
 
@@ -1584,6 +1587,37 @@ export class WorldScene extends Phaser.Scene {
 
     const nextIndex = (currentIndex + 1) % readyUnits.length;
     return readyUnits[nextIndex].id;
+  }
+
+  getAttentionTargets() {
+    const targets = [];
+    for (const unit of this.getReadyPlayerUnits()) {
+      targets.push({ kind: "unit", id: unit.id });
+    }
+    for (const city of this.getPlayerCitiesWithEmptyQueue()) {
+      targets.push({ kind: "city", id: city.id });
+    }
+    return targets;
+  }
+
+  getNextAttentionTarget() {
+    const targets = this.getAttentionTargets();
+    if (targets.length === 0) {
+      return null;
+    }
+
+    const currentSelectionKey = this.gameState.selectedUnitId
+      ? `unit:${this.gameState.selectedUnitId}`
+      : this.gameState.selectedCityId
+        ? `city:${this.gameState.selectedCityId}`
+        : null;
+    const currentIndex = currentSelectionKey
+      ? targets.findIndex((target) => `${target.kind}:${target.id}` === currentSelectionKey)
+      : -1;
+    if (currentIndex === -1) {
+      return targets[0];
+    }
+    return targets[(currentIndex + 1) % targets.length];
   }
 
   getTurnAssistantState() {

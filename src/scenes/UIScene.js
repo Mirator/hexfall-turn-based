@@ -84,6 +84,8 @@ export class UIScene extends Phaser.Scene {
     this.endTurnButton = this.createButton("End Turn", "endTurn", () => gameEvents.emit("end-turn-requested"));
     this.turnAssistantPanel = this.add.rectangle(0, 0, 220, 64, 0xf0e4cb, 0.95).setDepth(12);
     this.turnAssistantPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
+    this.turnAssistantPanel.setInteractive({ useHandCursor: true });
+    this.turnAssistantPanel.on("pointerdown", () => gameEvents.emit("next-ready-unit-requested"));
     this.turnAssistantLabel = this.createLabel("Units ready: 0", 0, 0, "16px", "#3f2d18", 13).setOrigin(0.5);
     this.nextUnitButton = this.createButton("Next Unit", "nextUnit", () => gameEvents.emit("next-ready-unit-requested"), {
       width: 130,
@@ -642,19 +644,13 @@ export class UIScene extends Phaser.Scene {
     this.endTurnButton.label.setPosition(endTurnX, endTurnY);
 
     const statusWidth = endTurnWidth;
-    const statusHeight = isCompact ? 30 : 32;
-    const nextUnitY = endTurnY - BUTTON_HEIGHT - (isCompact ? 10 : 12);
-    const statusY = nextUnitY - BUTTON_HEIGHT / 2 - statusHeight / 2 - 8;
+    const statusHeight = isCompact ? 34 : 36;
+    const statusY = endTurnY - BUTTON_HEIGHT / 2 - statusHeight / 2 - (isCompact ? 8 : 10);
 
     this.turnAssistantPanel.setPosition(endTurnX, statusY);
     this.turnAssistantPanel.setSize(statusWidth, statusHeight);
     this.turnAssistantPanel.setDisplaySize(statusWidth, statusHeight);
     this.turnAssistantLabel.setPosition(endTurnX, statusY);
-
-    this.nextUnitButton.width = endTurnWidth;
-    this.nextUnitButton.rectangle.setSize(endTurnWidth, BUTTON_HEIGHT);
-    this.nextUnitButton.rectangle.setPosition(endTurnX, nextUnitY);
-    this.nextUnitButton.label.setPosition(endTurnX, nextUnitY);
 
     const hintWidth = isCompact ? gameSize.width - edgePadding * 2 : 440;
     const hintHeight = isCompact ? 82 : 74;
@@ -766,8 +762,19 @@ export class UIScene extends Phaser.Scene {
     this.turnAssistantPanel.setVisible(gameState.match.status === "ongoing");
     this.turnAssistantLabel.setVisible(gameState.match.status === "ongoing");
     this.turnAssistantLabel.setText(`Attention needed (${pendingOrders})`);
-    this.setCompositeVisible(this.nextUnitButton, gameState.match.status === "ongoing");
-    this.setButtonEnabled(this.nextUnitButton, canIssueOrders && turnAssistant.readyCount > 0);
+    this.setCompositeVisible(this.nextUnitButton, false);
+    this.setButtonEnabled(this.nextUnitButton, false);
+    if (gameState.match.status === "ongoing" && canIssueOrders && pendingOrders > 0) {
+      this.turnAssistantPanel.setInteractive({ useHandCursor: true });
+      this.turnAssistantPanel.setFillStyle(0xf0e4cb, 0.97);
+      this.turnAssistantPanel.setStrokeStyle(2, 0x7d5a2f, 0.9);
+      this.turnAssistantLabel.setColor("#3f2d18");
+    } else {
+      this.turnAssistantPanel.disableInteractive();
+      this.turnAssistantPanel.setFillStyle(0xe6dcc9, 0.95);
+      this.turnAssistantPanel.setStrokeStyle(2, 0x8b7a5e, 0.85);
+      this.turnAssistantLabel.setColor("#6a5b43");
+    }
 
     this.syncContextMenu(gameState, selectedUnit, selectedCity, canIssueOrders);
     this.syncCityResolutionModal(gameState.pendingCityResolution);
