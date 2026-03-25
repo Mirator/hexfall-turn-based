@@ -14,7 +14,7 @@
 - Chosen: production queue is now a typed shared queue (`unit`/`building`) with up to 3 slots (extended by `spec-016`).
 - Chosen: player queues do not auto-refill; enemy refill behavior is personality-aware and handled by AI planning (`spec-014`).
 - Chosen: discoverability relies on contextual hints/toasts and `F` shortcut (no persistent tutorial blocks).
-- Rejected for now: border expansion, manual worker placement, and building branches in this milestone.
+- Rejected in original milestone scope: border expansion, manual worker placement, and building branches (building branch later delivered in `spec-016`).
 
 ## Interfaces/types added
 
@@ -51,6 +51,6 @@
 
 ## Known gaps and next steps
 
-- Building queue branch now exists in `spec-016` using shared typed queue items.
+- Building queue branch is delivered in `spec-016`; this spec remains the founding/opening baseline.
 - No city placement preview pathing.
 - No dedicated early-game advisor/tutorial sequence.

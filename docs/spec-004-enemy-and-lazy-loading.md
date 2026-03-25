@@ -1,17 +1,19 @@
 # spec-004-enemy-and-lazy-loading
 
+Status: historical baseline milestone. Current enemy combat/strategy behavior is defined by `spec-014` and `spec-015`.
+
 ## Goal and scope
 
-- Add a minimal enemy turn stub to the playable loop.
+- Add a minimal enemy turn stub to the playable loop (baseline at the time of this milestone).
 - Refactor startup so Phaser is loaded lazily and bundled into separate chunks.
 - Keep existing test hooks and automated smoke coverage stable.
 
 ## Decisions made (and alternatives rejected)
 
-- Chosen: one deterministic enemy unit that moves one hex toward the nearest player unit per enemy phase.
+- Chosen (at milestone time): one deterministic enemy unit that moves one hex toward the nearest player unit per enemy phase.
 - Chosen: explicit phase transitions (`player -> enemy -> player`) with a short delay for readability.
 - Chosen: dynamic import of game bootstrap from `main.js` and manual chunk splitting in Vite.
-- Rejected for now: full enemy pathfinding/combat and complex AI behavior.
+- Rejected in this milestone: full enemy pathfinding/combat and complex AI behavior (later delivered in `spec-014`/`spec-015`).
 
 ## Interfaces/types added
 
@@ -27,7 +29,7 @@
 ## Behavior and acceptance criteria
 
 - On End Turn, game enters enemy phase and ignores player input.
-- Enemy unit performs one deterministic movement step.
+- Enemy unit performs one deterministic movement step (baseline behavior for this milestone).
 - Turn then returns to player phase, increments turn counter, and resets player movement.
 - Phaser runtime is not in the initial entry bundle and loads through dynamic import.
 
@@ -45,6 +47,7 @@
 
 ## Known gaps and next steps
 
-- Enemy logic currently only chases nearest player unit and does not attack.
-- No terrain cost/path blockers in enemy movement yet.
+- At this milestone, enemy logic only chased nearest player unit and did not attack.
+- At this milestone, enemy movement did not yet consider full terrain/path constraints.
+- Current enemy behavior is superseded by `spec-014` and `spec-015`.
 - Consider adding separate enemy unit visuals/animation states for richer readability.

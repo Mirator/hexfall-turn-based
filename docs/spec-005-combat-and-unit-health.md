@@ -8,9 +8,9 @@
 ## Decisions made (and alternatives rejected)
 
 - Chosen: each unit can perform one primary action per turn (`hasActed` gate).
-- Chosen: attacks are range-based (adjacent for current units) and apply direct damage.
+- Chosen (baseline milestone): attacks are range-based, with adjacent-only behavior at this stage.
 - Chosen: defeated units are removed immediately from game state.
-- Chosen baseline has since been extended by `spec-015` with armor, role bonuses, terrain modifiers, ranged min/max range, and one-step counterattack.
+- Chosen baseline has since been extended by `spec-015` with armor, role bonuses, terrain modifiers, ranged min/max range, and one-step counterattack (authoritative for current combat math).
 - Rejected for now: retaliation chains beyond one-step, status effects, and critical hits.
 
 ## Interfaces/types added
@@ -27,7 +27,7 @@
 - Player can click enemy units in attack range when a valid unit is selected.
 - Attacks reduce target HP.
 - Targets at 0 HP are removed from the map.
-- Enemy turn can attack adjacent player units (counter-pressure on enemy phase).
+- Baseline milestone behavior includes adjacent enemy attacks; current range/armor/terrain/counter rules are governed by `spec-015`.
 
 ## Validation performed (tests/manual checks)
 

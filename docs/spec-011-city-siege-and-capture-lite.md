@@ -8,10 +8,10 @@
 ## Decisions made (and alternatives rejected)
 
 - Chosen: cities have HP (`12/12`) and can be attacked by units in normal attack range.
-- Chosen: city attack damage equals attacker unit attack value and consumes attacker action.
+- Chosen: city attack uses the combat damage model defined in `spec-015` (terrain/range/modifier aware) and consumes attacker action.
 - Chosen: defeated city triggers outcome flow:
   - player attacker gets `Capture` / `Raze` modal choice,
-  - AI resolves deterministically: capture if it owns no cities, otherwise raze.
+  - AI resolves deterministically using personality policy from `spec-014` (`raider`, `expansionist`, `guardian`).
 - Chosen: capture transfers ownership and restores city HP to full.
 - Chosen: raze removes city from map/state.
 - Rejected for now: city garrisons, city ranged strikes, multi-turn sieges, occupation resistance.
@@ -38,7 +38,7 @@
 - Enemy city in range is highlighted as attackable when a player unit is selected.
 - City assault reduces city HP and consumes attacking unit action.
 - On city defeat by player, turn flow pauses until capture/raze choice is made.
-- On city defeat by AI, outcome resolves immediately via deterministic policy.
+- On city defeat by AI, outcome resolves immediately via deterministic personality policy (`spec-014`).
 - Capture preserves city queue/population/focus/economy fields with new owner.
 - Raze removes city and updates elimination checks immediately.
 - Domination victory continues to require removal of all enemy units and cities.
@@ -48,10 +48,10 @@
 - Integration: `tests/integration/combat.test.js` (city assault + capture/raze + AI policy)
 - Integration: `tests/integration/enemyTurn.test.js` (enemy opening and attack behavior)
 - Integration: `tests/integration/uiSurface.test.js` (pending-resolution hint state)
-- E2E: `tests/e2e/smoke.mjs` validates city assault, modal visibility state, outcome selection, and domination completion
+- E2E: `tests/e2e/smoke.mjs` validates city assault/resolution flow, modal visibility state, and outcome selection in the multi-turn scenario.
 
 ## Known gaps and next steps
 
-- No explicit city-defense modifiers by terrain/buildings.
 - No separate city-attack animation layer yet.
 - No capture/raze confirmation sub-step (single click resolves).
+- No city garrison or city-ranged-strike subsystem yet.
