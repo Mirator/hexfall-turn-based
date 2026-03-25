@@ -4,6 +4,7 @@ import { distance } from "../../src/core/hexGrid.js";
 import { applyTerrainDefinition } from "../../src/core/terrainData.js";
 import {
   CITY_QUEUE_MAX,
+  enqueueCityBuilding,
   enqueueCityQueue,
   foundCity,
   processTurn,
@@ -29,6 +30,8 @@ describe("city economy and identity", () => {
     expect(city.workedHexes.length).toBeGreaterThan(0);
     expect(city.yieldLastTurn).toEqual(expect.objectContaining({ food: expect.any(Number), production: expect.any(Number) }));
     expect(["agricultural", "industrial", "scholarly", "balanced"]).toContain(city.identity);
+    expect(city.specialization).toBe("balanced");
+    expect(city.queue).toEqual([{ kind: "unit", id: "warrior" }]);
     expect("storedProduction" in city).toBe(false);
     expect("storedFood" in city).toBe(false);
   });
@@ -164,14 +167,20 @@ describe("city economy and identity", () => {
 
     const removed = removeCityQueueAt(city.id, 1, gameState);
     expect(removed.ok).toBe(true);
-    expect(city.queue).toEqual(["warrior", "warrior"]);
+    expect(city.queue).toEqual([
+      { kind: "unit", id: "warrior" },
+      { kind: "unit", id: "warrior" },
+    ]);
   });
 
   it("consumes player queue front item after successful production", () => {
     const gameState = createInitialGameState({ seed: 445 });
     gameState.units = [];
     gameState.cities = [createCity("player-city-1", "player", 2, 2)];
-    gameState.cities[0].queue = ["warrior", "settler"];
+    gameState.cities[0].queue = [
+      { kind: "unit", id: "warrior" },
+      { kind: "unit", id: "settler" },
+    ];
     ensureLocalPassableArea(gameState, 2, 2);
 
     gameState.economy.player.foodStock = 0;
@@ -180,14 +189,14 @@ describe("city economy and identity", () => {
 
     const firstTurn = processTurn(gameState, "player");
     expect(firstTurn.produced.length).toBe(1);
-    expect(gameState.cities[0].queue).toEqual(["settler"]);
+    expect(gameState.cities[0].queue).toEqual([{ kind: "unit", id: "settler" }]);
 
     const secondTurn = processTurn(gameState, "player");
     expect(secondTurn.produced.length).toBe(1);
     expect(gameState.cities[0].queue).toEqual([]);
   });
 
-  it("auto-refills enemy empty queue with the cheapest unlocked unit", () => {
+  it("does not auto-refill enemy empty queues inside city turn processing", () => {
     const gameState = createInitialGameState({ seed: 446 });
     gameState.units = [];
     gameState.cities = [createCity("enemy-city-1", "enemy", 2, 2)];
@@ -200,8 +209,59 @@ describe("city economy and identity", () => {
     gameState.economy.enemy.scienceStock = 0;
 
     const result = processTurn(gameState, "enemy");
-    expect(result.produced.length).toBe(1);
-    expect(gameState.cities[0].queue).toEqual(["warrior"]);
+    expect(result.produced.length).toBe(0);
+    expect(gameState.cities[0].queue).toEqual([]);
+  });
+
+  it("produces buildings from the shared queue and blocks duplicates per city", () => {
+    const gameState = createInitialGameState({ seed: 447 });
+    gameState.units = [];
+    gameState.cities = [createCity("player-city-1", "player", 2, 2)];
+    ensureLocalPassableArea(gameState, 2, 2);
+    gameState.cities[0].queue = [];
+
+    const enqueue = enqueueCityBuilding("player-city-1", "granary", gameState);
+    expect(enqueue.ok).toBe(true);
+
+    const duplicateQueued = enqueueCityBuilding("player-city-1", "granary", gameState);
+    expect(duplicateQueued.ok).toBe(false);
+    expect(duplicateQueued.reason).toBe("building-already-queued");
+
+    gameState.economy.player.foodStock = 0;
+    gameState.economy.player.productionStock = 20;
+    gameState.economy.player.scienceStock = 0;
+
+    const result = processTurn(gameState, "player");
+    expect(result.produced.some((entry) => entry.includes("building:granary"))).toBe(true);
+
+    const city = gameState.cities[0];
+    expect(city.buildings).toContain("granary");
+    expect(city.specialization).toBe("agricultural");
+    expect(city.yieldLastTurn.food).toBeGreaterThanOrEqual(3);
+
+    const duplicateBuilt = enqueueCityBuilding("player-city-1", "granary", gameState);
+    expect(duplicateBuilt.ok).toBe(false);
+    expect(duplicateBuilt.reason).toBe("building-already-built");
+  });
+
+  it("derives specialization from building priority (scholarly > industrial > agricultural)", () => {
+    const gameState = createInitialGameState({ seed: 448 });
+    gameState.units = [];
+    gameState.cities = [createCity("player-city-1", "player", 2, 2)];
+    ensureLocalPassableArea(gameState, 2, 2);
+    const city = gameState.cities[0];
+    city.buildings = ["granary"];
+
+    processTurn(gameState, "player");
+    expect(city.specialization).toBe("agricultural");
+
+    city.buildings.push("workshop");
+    processTurn(gameState, "player");
+    expect(city.specialization).toBe("industrial");
+
+    city.buildings.push("monument");
+    processTurn(gameState, "player");
+    expect(city.specialization).toBe("scholarly");
   });
 
   it("does not spend production when a city has no valid spawn hex", () => {
@@ -246,10 +306,13 @@ function createCity(id, owner, q, r) {
     workedHexes: [{ q, r }],
     yieldLastTurn: { food: 0, production: 0, science: 0 },
     identity: "balanced",
+    specialization: "balanced",
     growthProgress: 0,
     health: 12,
     maxHealth: 12,
-    queue: ["warrior"],
+    productionTab: "units",
+    buildings: [],
+    queue: [{ kind: "unit", id: "warrior" }],
   };
 }
 

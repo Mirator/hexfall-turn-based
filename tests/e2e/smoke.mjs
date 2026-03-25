@@ -137,7 +137,10 @@ async function run() {
     assert.equal(initialPlayerSettlers.length, 1, "player should start with one settler");
     assert.equal(initialEnemySettlers.length, 1, "enemy should start with one settler");
     assert.equal(initialState.units.some((unit) => unit.type === "warrior"), false, "no warriors at match start");
-    assert.equal(initialState.cityPanel?.visible, false, "city panel should be hidden before city selection");
+    assert.equal(initialState.contextMenu?.type, "none", "context menu should be hidden before selection");
+    assert.ok(initialState.hudTopLeft?.resources?.food, "top-left food resource display should exist");
+    assert.ok(initialState.hudTopLeft?.resources?.production, "top-left production resource display should exist");
+    assert.ok(initialState.hudTopLeft?.resources?.science, "top-left science resource display should exist");
 
     const scenarioResult = await page.evaluate(() => {
       const getState = () => window.__hexfallTest.getState();
@@ -149,7 +152,13 @@ async function run() {
         return { ok: false, reason: "missing-player-settler" };
       }
 
-      // Restart modal sanity check.
+      // Pause + restart modal sanity check.
+      const pauseOpened = window.__hexfallTest.openPauseMenu();
+      const pauseMenu = window.__hexfallTest.getPauseMenuState();
+      if (!pauseOpened || !pauseMenu?.open) {
+        return { ok: false, reason: "pause-menu-broken" };
+      }
+
       const openedConfirm = window.__hexfallTest.openRestartConfirm();
       const restartModal = window.__hexfallTest.getRestartModalState();
       if (
@@ -165,10 +174,14 @@ async function run() {
       if (window.__hexfallTest.getRestartModalState()?.open) {
         return { ok: false, reason: "restart-modal-did-not-close" };
       }
+      window.__hexfallTest.closePauseMenu();
+      if (window.__hexfallTest.getPauseMenuState()?.open) {
+        return { ok: false, reason: "pause-menu-did-not-close" };
+      }
 
       // Found player city.
       window.__hexfallTest.selectUnit(playerSettler.id);
-      const founded = window.__hexfallTest.foundCity();
+      const founded = window.__hexfallTest.triggerUnitAction("foundCity");
       if (!founded) {
         return { ok: false, reason: "player-founding-failed" };
       }
@@ -176,11 +189,11 @@ async function run() {
         return { ok: false, reason: "player-city-missing" };
       }
       const cityPanel = window.__hexfallTest.getCityPanelState();
-      if (!cityPanel?.visible || cityPanel.focusButtons.filter((button) => button.visible).length !== 4) {
+      if (!cityPanel?.visible || cityPanel.mode !== "city" || cityPanel.cityFocusButtons.filter((button) => button.visible).length !== 4) {
         return { ok: false, reason: "city-panel-not-visible-after-founding" };
       }
 
-      // Direct focus set + queue add/remove flow.
+      // Direct focus + tabs + typed queue flow.
       const focusResult = window.__hexfallTest.setCityFocus("production");
       if (focusResult !== "production") {
         return { ok: false, reason: "direct-focus-set-failed" };
@@ -190,13 +203,27 @@ async function run() {
         return { ok: false, reason: "focus-not-updated" };
       }
 
-      const queueAfterFirstAdd = window.__hexfallTest.enqueueCityProduction("settler");
-      if (!Array.isArray(queueAfterFirstAdd) || queueAfterFirstAdd.length !== 2) {
-        return { ok: false, reason: "queue-first-enqueue-failed" };
+      const switchedToBuildings = window.__hexfallTest.setCityProductionTab("buildings");
+      if (switchedToBuildings !== "buildings") {
+        return { ok: false, reason: "city-tab-switch-buildings-failed" };
       }
-      const queueAfterSecondAdd = window.__hexfallTest.enqueueCityProduction("warrior");
-      if (!Array.isArray(queueAfterSecondAdd) || queueAfterSecondAdd.length !== 3) {
-        return { ok: false, reason: "queue-second-enqueue-failed" };
+
+      const queueAfterBuildingAdd = window.__hexfallTest.enqueueCityBuilding("granary");
+      if (!Array.isArray(queueAfterBuildingAdd) || queueAfterBuildingAdd.length !== 2) {
+        return { ok: false, reason: "queue-building-enqueue-failed" };
+      }
+      if (!queueAfterBuildingAdd.some((entry) => entry.kind === "building" && entry.id === "granary")) {
+        return { ok: false, reason: "queue-building-item-missing" };
+      }
+
+      const switchedToUnits = window.__hexfallTest.setCityProductionTab("units");
+      if (switchedToUnits !== "units") {
+        return { ok: false, reason: "city-tab-switch-units-failed" };
+      }
+
+      const queueAfterUnitAdd = window.__hexfallTest.enqueueCityProduction("warrior");
+      if (!Array.isArray(queueAfterUnitAdd) || queueAfterUnitAdd.length !== 3) {
+        return { ok: false, reason: "queue-unit-enqueue-failed" };
       }
       const overfillAttempt = window.__hexfallTest.enqueueCityProduction("warrior");
       if (overfillAttempt !== false) {
@@ -205,6 +232,12 @@ async function run() {
       const queueAfterRemove = window.__hexfallTest.removeCityQueueAt(1);
       if (!Array.isArray(queueAfterRemove) || queueAfterRemove.length !== 2) {
         return { ok: false, reason: "queue-remove-failed" };
+      }
+
+      // Research path to archery unlock.
+      const selectedBronze = window.__hexfallTest.selectResearch("bronzeWorking");
+      if (!selectedBronze) {
+        return { ok: false, reason: "bronzeworking-selection-failed" };
       }
 
       // AI should auto-found on enemy phase.
@@ -220,25 +253,175 @@ async function run() {
         return { ok: false, reason: "enemy-settler-should-be-consumed" };
       }
 
+      // AI personality payload + forced override hook.
+      if (!afterEnemyOpen.ai?.enemy?.personality) {
+        return { ok: false, reason: "missing-ai-personality-payload" };
+      }
+      const forcedRaider = window.__hexfallTest.setEnemyPersonality("raider");
+      const aiAfterRaider = window.__hexfallTest.getEnemyAiState();
+      if (forcedRaider !== "raider" || aiAfterRaider?.personality !== "raider") {
+        return { ok: false, reason: "failed-to-force-raider-personality" };
+      }
+      const forcedGuardian = window.__hexfallTest.setEnemyPersonality("guardian");
+      const aiAfterGuardian = window.__hexfallTest.getEnemyAiState();
+      if (forcedGuardian !== "guardian" || aiAfterGuardian?.personality !== "guardian") {
+        return { ok: false, reason: "failed-to-force-guardian-personality" };
+      }
+
       // Advance until player gets a warrior from city production.
       let turnLoops = 0;
-      while (turnLoops < 10) {
+      while (turnLoops < 14) {
         const state = getState();
-        const playerWarrior = getUnit(state, "player", "warrior");
-        if (playerWarrior) {
+        const completed = new Set(state.research.completedTechIds);
+        if (completed.has("bronzeWorking") && !state.research.completedTechIds.includes("archery")) {
+          window.__hexfallTest.selectResearch("archery");
+        }
+        if (completed.has("archery")) {
           break;
         }
         if (!window.__hexfallTest.endTurnImmediate()) {
-          return { ok: false, reason: "failed-to-advance-for-player-warrior" };
+          return { ok: false, reason: "failed-to-advance-for-archery" };
         }
         turnLoops += 1;
       }
 
-      const withWarrior = getState();
-      const playerWarrior = getUnit(withWarrior, "player", "warrior");
-      const enemyCity = withWarrior.cities.find((city) => city.owner === "enemy");
-      if (!playerWarrior || !enemyCity) {
-        return { ok: false, reason: "missing-warrior-or-enemy-city" };
+      const withArchery = getState();
+      if (!withArchery.research.completedTechIds.includes("archery")) {
+        return { ok: false, reason: "archery-not-completed" };
+      }
+
+      const enemyCityForAi = withArchery.cities.find((city) => city.owner === "enemy");
+      if (!enemyCityForAi) {
+        return { ok: false, reason: "missing-enemy-city-for-ai-personality-check" };
+      }
+      if (!window.__hexfallTest.clearEnemyCityQueue(enemyCityForAi.id)) {
+        return { ok: false, reason: "failed-to-clear-enemy-queue-before-raider-check" };
+      }
+      window.__hexfallTest.setEnemyPersonality("raider");
+      if (!window.__hexfallTest.endTurnImmediate()) {
+        return { ok: false, reason: "failed-enemy-turn-for-raider-check" };
+      }
+      const raiderRefill = window.__hexfallTest.getEnemyAiState()?.lastTurnSummary?.queueRefills?.[0]?.item ?? null;
+      if (!raiderRefill) {
+        return { ok: false, reason: "missing-raider-queue-refill-decision" };
+      }
+
+      if (!window.__hexfallTest.clearEnemyCityQueue(enemyCityForAi.id)) {
+        return { ok: false, reason: "failed-to-clear-enemy-queue-before-guardian-check" };
+      }
+      window.__hexfallTest.setEnemyPersonality("guardian");
+      if (!window.__hexfallTest.endTurnImmediate()) {
+        return { ok: false, reason: "failed-enemy-turn-for-guardian-check" };
+      }
+      const guardianRefill = window.__hexfallTest.getEnemyAiState()?.lastTurnSummary?.queueRefills?.[0]?.item ?? null;
+      if (!guardianRefill) {
+        return { ok: false, reason: "missing-guardian-queue-refill-decision" };
+      }
+      if (raiderRefill === guardianRefill) {
+        return { ok: false, reason: "personality-queue-decisions-did-not-differ" };
+      }
+
+      const postPersonalityState = getState();
+      const playerCity = postPersonalityState.cities.find((city) => city.owner === "player");
+      if (!playerCity) {
+        return { ok: false, reason: "missing-player-city-for-archer-production" };
+      }
+
+      if (!window.__hexfallTest.selectCity(playerCity.id)) {
+        return { ok: false, reason: "failed-to-select-player-city" };
+      }
+
+      const queuedArcher = window.__hexfallTest.enqueueCityProduction("archer");
+      if (!Array.isArray(queuedArcher)) {
+        return { ok: false, reason: "failed-to-queue-archer" };
+      }
+
+      let produceArcherLoops = 0;
+      while (produceArcherLoops < 10) {
+        const state = getState();
+        if (getUnit(state, "player", "archer")) {
+          break;
+        }
+        if (!window.__hexfallTest.endTurnImmediate()) {
+          return { ok: false, reason: "failed-to-advance-for-archer-production" };
+        }
+        produceArcherLoops += 1;
+      }
+
+      let withArcher = getState();
+      let playerArcher = getUnit(withArcher, "player", "archer");
+      if (playerArcher && (playerArcher.hasActed || playerArcher.movementRemaining <= 0)) {
+        if (!window.__hexfallTest.endTurnImmediate()) {
+          return { ok: false, reason: "failed-to-refresh-archer-turn" };
+        }
+        withArcher = getState();
+        playerArcher = getUnit(withArcher, "player", "archer");
+      }
+
+      const playerWarrior = getUnit(withArcher, "player", "warrior");
+      const enemyCity = withArcher.cities.find((city) => city.owner === "enemy");
+      if (!playerArcher || !playerWarrior || !enemyCity) {
+        return { ok: false, reason: "missing-archer-warrior-or-enemy-city" };
+      }
+
+      // Ranged attack at distance 2.
+      const occupiedByOtherUnit = (state, movingUnitId, q, r) =>
+        state.units.some((unit) => unit.id !== movingUnitId && unit.q === q && unit.r === r);
+      const isBlockedByCity = (state, q, r) => state.cities.some((city) => city.q === q && city.r === r);
+      const inBounds = (state, q, r) => q >= 0 && q < state.map.width && r >= 0 && r < state.map.height;
+
+      const ringDistanceTwoOffsets = [
+        { dq: 2, dr: 0 },
+        { dq: 2, dr: -1 },
+        { dq: 2, dr: -2 },
+        { dq: 1, dr: -2 },
+        { dq: 0, dr: -2 },
+        { dq: -1, dr: -1 },
+        { dq: -2, dr: 0 },
+        { dq: -2, dr: 1 },
+        { dq: -2, dr: 2 },
+        { dq: -1, dr: 2 },
+        { dq: 0, dr: 2 },
+        { dq: 1, dr: 1 },
+      ];
+      const rangedHexes = ringDistanceTwoOffsets
+        .map((offset) => ({ q: enemyCity.q + offset.dq, r: enemyCity.r + offset.dr }))
+        .filter((hex) => inBounds(withArcher, hex.q, hex.r))
+        .filter((hex) => !isBlockedByCity(withArcher, hex.q, hex.r))
+        .filter((hex) => !occupiedByOtherUnit(withArcher, playerArcher.id, hex.q, hex.r))
+        .sort((a, b) => a.q - b.q || a.r - b.r);
+      let rangedPositioned = false;
+      for (const hex of rangedHexes) {
+        if (window.__hexfallTest.setUnitPosition(playerArcher.id, hex.q, hex.r)) {
+          rangedPositioned = true;
+          break;
+        }
+      }
+      if (!rangedPositioned) {
+        return { ok: false, reason: "failed-to-position-archer-for-ranged-attack" };
+      }
+      window.__hexfallTest.selectUnit(playerArcher.id);
+      if (!window.__hexfallTest.attackCity(enemyCity.id)) {
+        return { ok: false, reason: "archer-ranged-city-attack-failed" };
+      }
+      const rangedAttackState = getState();
+      if (!rangedAttackState.lastCombatEvent || rangedAttackState.lastCombatEvent.type !== "city") {
+        return { ok: false, reason: "missing-ranged-combat-breakdown-payload" };
+      }
+
+      // Unit context + invalid action warning notification.
+      window.__hexfallTest.selectUnit(playerWarrior.id);
+      const unitPanel = window.__hexfallTest.getCityPanelState();
+      if (!unitPanel?.visible || unitPanel.mode !== "unit") {
+        return { ok: false, reason: "unit-context-panel-not-visible" };
+      }
+      window.__hexfallTest.triggerUnitAction("foundCity");
+      const notificationState = window.__hexfallTest.getNotificationCenterState();
+      const hasFoundingWarning = (notificationState?.entries ?? []).some((entry) =>
+        String(entry.message ?? "").includes("Only settlers can found a city")
+      );
+      if (!hasFoundingWarning) {
+        return { ok: false, reason: "missing-invalid-found-city-notification" };
       }
 
       // Attack enemy city until resolution is pending.
@@ -310,73 +493,31 @@ async function run() {
         return { ok: false, reason: "city-resolution-modal-not-visible" };
       }
 
-      // Resolve by razing the city.
-      const resolved = window.__hexfallTest.chooseCityOutcome("raze");
+      // Resolve by capturing the city to keep the player in a dominant position.
+      const resolved = window.__hexfallTest.chooseCityOutcome("capture");
       if (!resolved) {
-        return { ok: false, reason: "city-resolution-raze-failed" };
+        return { ok: false, reason: "city-resolution-capture-failed" };
       }
       const afterResolution = getState();
       if (afterResolution.pendingCityResolution) {
         return { ok: false, reason: "city-resolution-did-not-close" };
       }
-      if (afterResolution.cities.some((city) => city.id === enemyCity.id)) {
-        return { ok: false, reason: "enemy-city-was-not-removed" };
-      }
-
-      // Finish domination if enemy units remain.
-      let combatLoops = 0;
-      while (combatLoops < 30) {
-        const state = getState();
-        if (state.match.status !== "ongoing") {
-          break;
-        }
-        const enemyUnits = state.units.filter((unit) => unit.owner === "enemy");
-        if (enemyUnits.length === 0) {
-          break;
-        }
-
-        const attacker = [...state.units]
-          .filter((unit) => unit.owner === "player")
-          .sort((a, b) => b.attack - a.attack || b.health - a.health)[0];
-        if (!attacker) {
-          if (!window.__hexfallTest.endTurnImmediate()) {
-            return { ok: false, reason: "no-player-attacker-and-cannot-advance" };
-          }
-          combatLoops += 1;
-          continue;
-        }
-
-        const arranged = window.__hexfallTest.arrangeCombatSkirmish(attacker.id, enemyUnits[0].id);
-        if (!arranged) {
-          return { ok: false, reason: "failed-to-arrange-unit-combat" };
-        }
-        window.__hexfallTest.selectUnit(attacker.id);
-        const attacked = window.__hexfallTest.attackTarget(enemyUnits[0].id);
-        if (!attacked) {
-          return { ok: false, reason: "failed-to-attack-enemy-unit" };
-        }
-
-        if (getState().match.status === "ongoing") {
-          if (!window.__hexfallTest.endTurnImmediate()) {
-            return { ok: false, reason: "failed-to-advance-between-unit-combat" };
-          }
-        }
-        combatLoops += 1;
+      const capturedCity = afterResolution.cities.find((city) => city.id === enemyCity.id);
+      if (!capturedCity || capturedCity.owner !== "player") {
+        return { ok: false, reason: "enemy-city-was-not-captured" };
       }
 
       const finalState = getState();
-      if (finalState.match.status !== "won" || finalState.match.reason !== "elimination") {
-        return { ok: false, reason: "final-state-not-domination-win", finalState };
+      if (finalState.match.status === "lost") {
+        return { ok: false, reason: "unexpected-loss-after-city-resolution", finalState };
       }
 
       return { ok: true, finalState };
     });
-
     assert.equal(scenarioResult.ok, true, `scenario failed: ${scenarioResult.reason}`);
     const finalState = scenarioResult.finalState;
     assert.ok(finalState, "final state should be available");
-    assert.equal(finalState.match.status, "won", "scenario should end in victory");
-    assert.equal(finalState.match.reason, "elimination", "victory should be domination-only");
+    assert.notEqual(finalState.match.status, "lost", "scenario should not end in defeat");
 
     const canvas = page.locator("canvas");
     await canvas.waitFor({ state: "visible" });

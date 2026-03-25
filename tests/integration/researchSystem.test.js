@@ -3,7 +3,7 @@ import { createInitialGameState } from "../../src/core/gameState.js";
 import { consumeScienceStock, selectResearch } from "../../src/systems/researchSystem.js";
 
 describe("research progression with empire science stock", () => {
-  it("consumes pooled science and carries overflow into the next tech", () => {
+  it("consumes pooled science and carries overflow into archery", () => {
     const gameState = createInitialGameState({ seed: 88 });
 
     const selectResult = selectResearch("bronzeWorking", gameState);
@@ -15,18 +15,32 @@ describe("research progression with empire science stock", () => {
     expect(result.spentScience).toBe(7);
     expect(gameState.research.completedTechIds).toContain("bronzeWorking");
     expect(gameState.unlocks.units).toContain("spearman");
-    expect(gameState.research.activeTechId).toBe("masonry");
+    expect(gameState.research.activeTechId).toBe("archery");
     expect(gameState.research.progress).toBe(1);
     expect(gameState.economy.player.scienceStock).toBe(0);
   });
 
-  it("keeps leftover science in stock when no tech is selectable", () => {
+  it("unlocks archer when archery is completed", () => {
     const gameState = createInitialGameState({ seed: 99 });
     selectResearch("bronzeWorking", gameState);
 
     const result = consumeScienceStock(gameState, "player", 12);
-    expect(result.completedTechIds).toEqual(["bronzeWorking", "masonry"]);
-    expect(gameState.research.completedTechIds).toEqual(["bronzeWorking", "masonry"]);
+    expect(result.completedTechIds).toEqual(["bronzeWorking", "archery"]);
+    expect(gameState.research.completedTechIds).toEqual(["bronzeWorking", "archery"]);
+    expect(gameState.unlocks.units).toContain("archer");
+    expect(gameState.research.activeTechId).toBe("masonry");
+    expect(gameState.research.progress).toBe(0);
+    expect(gameState.economy.player.scienceStock).toBe(0);
+    expect(result.remainingScience).toBe(0);
+  });
+
+  it("keeps leftover science in stock when no tech remains selectable", () => {
+    const gameState = createInitialGameState({ seed: 100 });
+    selectResearch("bronzeWorking", gameState);
+
+    const result = consumeScienceStock(gameState, "player", 18);
+    expect(result.completedTechIds).toEqual(["bronzeWorking", "archery", "masonry"]);
+    expect(gameState.research.completedTechIds).toEqual(["bronzeWorking", "archery", "masonry"]);
     expect(gameState.research.activeTechId).toBe(null);
     expect(gameState.research.progress).toBe(0);
     expect(gameState.economy.player.scienceStock).toBe(1);

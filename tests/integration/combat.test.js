@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createInitialGameState, getCityById, getUnitById } from "../../src/core/gameState.js";
+import { applyTerrainDefinition } from "../../src/core/terrainData.js";
+import { getUnitDefinition } from "../../src/core/unitData.js";
 import { foundCity } from "../../src/systems/citySystem.js";
 import {
   canAttack,
@@ -8,6 +10,34 @@ import {
   resolveCityAttack,
   resolveCityOutcome,
 } from "../../src/systems/combatSystem.js";
+
+function setTerrain(gameState, q, r, terrainType) {
+  const tile = gameState.map.tiles.find((candidate) => candidate.q === q && candidate.r === r);
+  expect(tile).toBeTruthy();
+  if (!tile) {
+    return;
+  }
+  applyTerrainDefinition(tile, terrainType);
+}
+
+function applyUnitType(unit, type) {
+  const definition = getUnitDefinition(type);
+  expect(definition).toBeTruthy();
+  if (!definition) {
+    return;
+  }
+  unit.type = type;
+  unit.health = definition.maxHealth;
+  unit.maxHealth = definition.maxHealth;
+  unit.attack = definition.attack;
+  unit.armor = definition.armor;
+  unit.attackRange = definition.attackRange;
+  unit.minAttackRange = definition.minAttackRange;
+  unit.maxMovement = definition.maxMovement;
+  unit.movementRemaining = definition.maxMovement;
+  unit.role = definition.role;
+  unit.hasActed = false;
+}
 
 describe("combat system", () => {
   it("allows adjacent unit attacks and reduces health", () => {
@@ -25,14 +55,20 @@ describe("combat system", () => {
     playerSettler.r = 2;
     enemySettler.q = 4;
     enemySettler.r = 2;
+    setTerrain(gameState, playerSettler.q, playerSettler.r, "plains");
+    setTerrain(gameState, enemySettler.q, enemySettler.r, "plains");
 
     const canAttackResult = canAttack(playerSettler.id, enemySettler.id, gameState);
     expect(canAttackResult.ok).toBe(true);
 
     const hpBefore = enemySettler.health;
+    const attackerHpBefore = playerSettler.health;
     const attackResult = resolveAttack(playerSettler.id, enemySettler.id, gameState);
     expect(attackResult.ok).toBe(true);
     expect(enemySettler.health).toBeLessThan(hpBefore);
+    expect(attackResult.breakdown?.damage).toBe(1);
+    expect(attackResult.counterattack?.triggered).toBe(true);
+    expect(playerSettler.health).toBeLessThan(attackerHpBefore);
   });
 
   it("removes defeated units", () => {
@@ -50,12 +86,177 @@ describe("combat system", () => {
     playerSettler.r = 2;
     enemySettler.q = 4;
     enemySettler.r = 2;
+    setTerrain(gameState, playerSettler.q, playerSettler.r, "plains");
+    setTerrain(gameState, enemySettler.q, enemySettler.r, "plains");
     enemySettler.health = 1;
 
     const attackResult = resolveAttack(playerSettler.id, enemySettler.id, gameState);
     expect(attackResult.ok).toBe(true);
     expect(attackResult.targetDefeated).toBe(true);
     expect(getUnitById(gameState, enemySettler.id)).toBeNull();
+  });
+
+  it("enforces min and max attack range gates", () => {
+    const gameState = createInitialGameState({ seed: 905 });
+    const playerSettler = gameState.units.find((unit) => unit.owner === "player");
+    const enemySettler = gameState.units.find((unit) => unit.owner === "enemy");
+    expect(playerSettler && enemySettler).toBeTruthy();
+    if (!playerSettler || !enemySettler) {
+      return;
+    }
+
+    applyUnitType(playerSettler, "archer");
+    playerSettler.q = 2;
+    playerSettler.r = 2;
+    enemySettler.q = 3;
+    enemySettler.r = 2;
+
+    expect(canAttack(playerSettler.id, enemySettler.id, gameState)).toEqual({ ok: false, reason: "out-of-range" });
+
+    enemySettler.q = 4;
+    enemySettler.r = 2;
+    expect(canAttack(playerSettler.id, enemySettler.id, gameState)).toEqual({ ok: true });
+  });
+
+  it("applies role, terrain, and armor modifiers in damage formula", () => {
+    const gameState = createInitialGameState({ seed: 906 });
+    const attacker = gameState.units.find((unit) => unit.owner === "player");
+    const defender = gameState.units.find((unit) => unit.owner === "enemy");
+    expect(attacker && defender).toBeTruthy();
+    if (!attacker || !defender) {
+      return;
+    }
+
+    applyUnitType(attacker, "warrior");
+    applyUnitType(defender, "archer");
+    attacker.q = 3;
+    attacker.r = 3;
+    defender.q = 4;
+    defender.r = 3;
+    setTerrain(gameState, attacker.q, attacker.r, "hill");
+    setTerrain(gameState, defender.q, defender.r, "forest");
+
+    const result = resolveAttack(attacker.id, defender.id, gameState);
+    expect(result.ok).toBe(true);
+    expect(result.breakdown).toMatchObject({
+      baseAttack: 4,
+      roleBonus: 1,
+      terrainAttackBonus: 1,
+      defenderArmor: 0,
+      terrainDefenseBonus: 1,
+      rawDamage: 5,
+      damage: 5,
+    });
+    expect(result.damage).toBe(5);
+    expect(result.counterattack).toMatchObject({
+      triggered: false,
+      reason: "out-of-range",
+    });
+  });
+
+  it("applies one-step counterattack when defender can attack back", () => {
+    const gameState = createInitialGameState({ seed: 907 });
+    const attacker = gameState.units.find((unit) => unit.owner === "player");
+    const defender = gameState.units.find((unit) => unit.owner === "enemy");
+    expect(attacker && defender).toBeTruthy();
+    if (!attacker || !defender) {
+      return;
+    }
+
+    applyUnitType(attacker, "warrior");
+    applyUnitType(defender, "spearman");
+    attacker.q = 3;
+    attacker.r = 3;
+    defender.q = 4;
+    defender.r = 3;
+    setTerrain(gameState, attacker.q, attacker.r, "plains");
+    setTerrain(gameState, defender.q, defender.r, "plains");
+
+    const result = resolveAttack(attacker.id, defender.id, gameState);
+    expect(result.ok).toBe(true);
+    expect(result.damage).toBe(2);
+    expect(defender.health).toBe(10);
+    expect(result.counterattack).toMatchObject({
+      triggered: true,
+      damage: 5,
+      attackerDefeated: false,
+    });
+    expect(result.counterattack?.breakdown).toMatchObject({
+      baseAttack: 5,
+      roleBonus: 1,
+      terrainAttackBonus: 0,
+      defenderArmor: 1,
+      terrainDefenseBonus: 0,
+      rawDamage: 5,
+      damage: 5,
+    });
+    expect(attacker.health).toBe(5);
+  });
+
+  it("removes attacker when a counterattack defeats it", () => {
+    const gameState = createInitialGameState({ seed: 908 });
+    const attacker = gameState.units.find((unit) => unit.owner === "player");
+    const defender = gameState.units.find((unit) => unit.owner === "enemy");
+    expect(attacker && defender).toBeTruthy();
+    if (!attacker || !defender) {
+      return;
+    }
+
+    applyUnitType(attacker, "warrior");
+    applyUnitType(defender, "spearman");
+    attacker.q = 3;
+    attacker.r = 3;
+    defender.q = 4;
+    defender.r = 3;
+    setTerrain(gameState, attacker.q, attacker.r, "plains");
+    setTerrain(gameState, defender.q, defender.r, "plains");
+    attacker.health = 1;
+
+    const result = resolveAttack(attacker.id, defender.id, gameState);
+    expect(result.ok).toBe(true);
+    expect(result.counterattack?.triggered).toBe(true);
+    expect(result.attackerDefeated).toBe(true);
+    expect(getUnitById(gameState, attacker.id)).toBeNull();
+  });
+
+  it("applies terrain defense bonus to cities", () => {
+    const gameState = createInitialGameState({ seed: 909 });
+    const playerUnit = gameState.units.find((unit) => unit.owner === "player");
+    const enemySettler = gameState.units.find((unit) => unit.owner === "enemy");
+    expect(playerUnit && enemySettler).toBeTruthy();
+    if (!playerUnit || !enemySettler) {
+      return;
+    }
+
+    const enemyFound = foundCity(enemySettler.id, gameState);
+    expect(enemyFound.ok).toBe(true);
+    if (!enemyFound.cityId) {
+      return;
+    }
+    const city = getCityById(gameState, enemyFound.cityId);
+    expect(city).toBeTruthy();
+    if (!city) {
+      return;
+    }
+
+    applyUnitType(playerUnit, "warrior");
+    playerUnit.q = city.q - 1;
+    playerUnit.r = city.r;
+    setTerrain(gameState, playerUnit.q, playerUnit.r, "plains");
+    setTerrain(gameState, city.q, city.r, "forest");
+
+    const result = resolveCityAttack(playerUnit.id, city.id, gameState);
+    expect(result.ok).toBe(true);
+    expect(result.damage).toBe(3);
+    expect(result.breakdown).toMatchObject({
+      baseAttack: 4,
+      roleBonus: 0,
+      terrainAttackBonus: 0,
+      defenderArmor: 0,
+      terrainDefenseBonus: 1,
+      rawDamage: 3,
+      damage: 3,
+    });
   });
 
   it("supports city assault and player capture/raze resolution", () => {
@@ -112,8 +313,8 @@ describe("combat system", () => {
     expect(getCityById(gameState, city.id)).toBeNull();
   });
 
-  it("applies AI capture-first-city policy on defeated cities", () => {
-    const gameState = createInitialGameState({ seed: 904 });
+  it("applies raider capture-first-city policy on defeated cities", () => {
+    const gameState = createInitialGameState({ seed: 904, enemyPersonality: "raider" });
     const playerSettler = gameState.units.find((unit) => unit.owner === "player");
     const enemySettler = gameState.units.find((unit) => unit.owner === "enemy");
     expect(playerSettler && enemySettler).toBeTruthy();
@@ -154,10 +355,13 @@ describe("combat system", () => {
       workedHexes: [{ q: Math.max(0, playerCity.q - 2), r: playerCity.r }],
       yieldLastTurn: { food: 0, production: 0, science: 0 },
       identity: "balanced",
+      specialization: "balanced",
       growthProgress: 0,
       health: 12,
       maxHealth: 12,
-      queue: ["warrior"],
+      productionTab: "units",
+      buildings: [],
+      queue: [{ kind: "unit", id: "warrior" }],
     };
     gameState.cities.push(secondCity);
     enemySettler.q = secondCity.q + 1;

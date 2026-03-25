@@ -47,6 +47,6 @@
 
 ## Known gaps and next steps
 
-- No terrain combat modifiers yet.
+- Terrain combat modifiers now exist (see `spec-015`); movement and combat terrain effects are currently separate but compatible.
 - No roads/improvements/path preview.
 - No per-unit movement traits yet.

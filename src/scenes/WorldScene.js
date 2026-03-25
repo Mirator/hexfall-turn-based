@@ -15,11 +15,15 @@ import { axialKey, axialToWorld, neighbors, worldToAxial } from "../core/hexGrid
 import { TERRAIN } from "../core/terrainData.js";
 import {
   CITY_QUEUE_MAX,
+  computeCityYield,
+  enqueueCityBuilding,
   enqueueCityQueue,
+  enqueueCityQueueItem,
   foundCity,
   getFoundCityReasonText,
   removeCityQueueAt,
   setCityFocus,
+  setCityProductionTab,
   processTurn as processCityTurn,
 } from "../systems/citySystem.js";
 import {
@@ -29,11 +33,12 @@ import {
   resolveCityAttack,
   resolveCityOutcome,
 } from "../systems/combatSystem.js";
-import { runEnemyTurn } from "../systems/enemyTurnSystem.js";
+import { ensureEnemyAiState, normalizeEnemyPersonality, runEnemyTurn } from "../systems/enemyTurnSystem.js";
 import { getReachable, moveUnit } from "../systems/movementSystem.js";
 import { consumeScienceStock, cycleResearch, selectResearch } from "../systems/researchSystem.js";
 import { beginEnemyTurn, beginPlayerTurn } from "../systems/turnSystem.js";
 import { deriveUiSurface } from "../systems/uiSurfaceSystem.js";
+import { getSkipUnitReasonText, skipUnit } from "../systems/unitActionSystem.js";
 import { evaluateMatchState } from "../systems/victorySystem.js";
 
 const SQRT_3 = Math.sqrt(3);
@@ -56,6 +61,7 @@ export class WorldScene extends Phaser.Scene {
     this.foundCityKeyBinding = null;
     this.uiModalOpen = false;
     this.runtimeSeedCounter = 0;
+    this.lastCombatEvent = null;
   }
 
   create() {
@@ -76,7 +82,9 @@ export class WorldScene extends Phaser.Scene {
     gameEvents.on("end-turn-requested", this.handleEndTurnRequested, this);
     gameEvents.on("found-city-requested", this.handleFoundCityRequested, this);
     gameEvents.on("research-cycle-requested", this.handleResearchCycleRequested, this);
+    gameEvents.on("unit-action-requested", this.handleUnitActionRequested, this);
     gameEvents.on("city-focus-set-requested", this.handleCityFocusSetRequested, this);
+    gameEvents.on("city-production-tab-set-requested", this.handleCityProductionTabSetRequested, this);
     gameEvents.on("city-queue-enqueue-requested", this.handleCityQueueEnqueueRequested, this);
     gameEvents.on("city-queue-remove-requested", this.handleCityQueueRemoveRequested, this);
     gameEvents.on("city-outcome-requested", this.handleCityOutcomeRequested, this);
@@ -90,7 +98,9 @@ export class WorldScene extends Phaser.Scene {
       gameEvents.off("end-turn-requested", this.handleEndTurnRequested, this);
       gameEvents.off("found-city-requested", this.handleFoundCityRequested, this);
       gameEvents.off("research-cycle-requested", this.handleResearchCycleRequested, this);
+      gameEvents.off("unit-action-requested", this.handleUnitActionRequested, this);
       gameEvents.off("city-focus-set-requested", this.handleCityFocusSetRequested, this);
+      gameEvents.off("city-production-tab-set-requested", this.handleCityProductionTabSetRequested, this);
       gameEvents.off("city-queue-enqueue-requested", this.handleCityQueueEnqueueRequested, this);
       gameEvents.off("city-queue-remove-requested", this.handleCityQueueRemoveRequested, this);
       gameEvents.off("city-outcome-requested", this.handleCityOutcomeRequested, this);
@@ -131,6 +141,7 @@ export class WorldScene extends Phaser.Scene {
     if (selectedUnit && clickedUnit && clickedUnit.owner !== selectedUnit.owner) {
       const attackResult = resolveAttack(selectedUnit.id, clickedUnit.id, this.gameState);
       if (attackResult.ok) {
+        this.handleUnitAttackResult(selectedUnit, clickedUnit, attackResult);
         this.evaluateAndPublish();
       }
       return;
@@ -142,6 +153,7 @@ export class WorldScene extends Phaser.Scene {
       }
       const cityAttackResult = resolveCityAttack(selectedUnit.id, clickedCity.id, this.gameState);
       if (cityAttackResult.ok) {
+        this.recordCityAttackEvent(selectedUnit, clickedCity, cityAttackResult);
         this.handleCityAttackResult(cityAttackResult);
         this.evaluateAndPublish();
       }
@@ -179,7 +191,7 @@ export class WorldScene extends Phaser.Scene {
 
   handleFoundCityRequested = () => {
     if (!this.canAcceptPlayerCommands()) {
-      return;
+      return false;
     }
     const selectedUnitId = this.gameState.selectedUnitId;
     if (!selectedUnitId) {
@@ -187,7 +199,7 @@ export class WorldScene extends Phaser.Scene {
         message: getFoundCityReasonText("unit-not-found"),
         level: "warning",
       });
-      return;
+      return false;
     }
     const result = foundCity(selectedUnitId, this.gameState);
     if (result.ok) {
@@ -196,12 +208,13 @@ export class WorldScene extends Phaser.Scene {
         message: "City founded.",
         level: "info",
       });
-      return;
+      return true;
     }
     gameEvents.emit("ui-toast-requested", {
       message: getFoundCityReasonText(result.reason),
       level: "warning",
     });
+    return false;
   };
 
   handleResearchCycleRequested = () => {
@@ -210,6 +223,41 @@ export class WorldScene extends Phaser.Scene {
     }
     cycleResearch(this.gameState);
     this.evaluateAndPublish();
+  };
+
+  handleUnitActionRequested = (payload) => {
+    if (!this.canAcceptPlayerCommands()) {
+      return false;
+    }
+    const actionId = payload?.actionId;
+    if (actionId === "foundCity") {
+      return this.handleFoundCityRequested();
+    }
+    if (actionId === "skipUnit") {
+      const selectedUnitId = this.gameState.selectedUnitId;
+      if (!selectedUnitId) {
+        gameEvents.emit("ui-toast-requested", {
+          message: getSkipUnitReasonText("unit-not-found"),
+          level: "warning",
+        });
+        return false;
+      }
+      const result = skipUnit(selectedUnitId, this.gameState);
+      if (!result.ok) {
+        gameEvents.emit("ui-toast-requested", {
+          message: getSkipUnitReasonText(result.reason),
+          level: "warning",
+        });
+        return false;
+      }
+      this.evaluateAndPublish();
+      gameEvents.emit("ui-toast-requested", {
+        message: "Unit is waiting this turn.",
+        level: "info",
+      });
+      return true;
+    }
+    return false;
   };
 
   handleCityFocusSetRequested = (payload) => {
@@ -237,17 +285,43 @@ export class WorldScene extends Phaser.Scene {
     });
   };
 
+  handleCityProductionTabSetRequested = (payload) => {
+    if (!this.canAcceptPlayerCommands() || !this.gameState.selectedCityId) {
+      return;
+    }
+
+    const tab = payload?.tab;
+    if (tab !== "units" && tab !== "buildings") {
+      return;
+    }
+
+    const result = setCityProductionTab(this.gameState.selectedCityId, tab, this.gameState);
+    if (result.ok) {
+      this.evaluateAndPublish();
+      gameEvents.emit("ui-toast-requested", {
+        message: `Production tab: ${tab}.`,
+        level: "info",
+      });
+      return;
+    }
+
+    gameEvents.emit("ui-toast-requested", {
+      message: "Could not switch production tab.",
+      level: "warning",
+    });
+  };
+
   handleCityQueueEnqueueRequested = (payload) => {
     if (!this.canAcceptPlayerCommands() || !this.gameState.selectedCityId) {
       return;
     }
 
-    const unitType = payload?.unitType;
-    if (unitType !== "warrior" && unitType !== "settler" && unitType !== "spearman") {
+    const queueItem = normalizeIncomingQueueItem(payload);
+    if (!queueItem) {
       return;
     }
 
-    const result = enqueueCityQueue(this.gameState.selectedCityId, unitType, this.gameState);
+    const result = enqueueCityQueueItem(this.gameState.selectedCityId, queueItem, this.gameState);
     if (!result.ok) {
       const message = this.getQueueFailureMessage(result.reason);
       gameEvents.emit("ui-toast-requested", {
@@ -259,8 +333,10 @@ export class WorldScene extends Phaser.Scene {
     }
 
     this.evaluateAndPublish();
+    const queuedLabel =
+      queueItem.kind === "building" ? `${capitalizeLabel(queueItem.id)} building` : `${capitalizeLabel(queueItem.id)} unit`;
     gameEvents.emit("ui-toast-requested", {
-      message: `${capitalizeLabel(unitType)} added to queue (${result.queue?.length ?? 0}/${CITY_QUEUE_MAX}).`,
+      message: `${queuedLabel} added to queue (${result.queue?.length ?? 0}/${CITY_QUEUE_MAX}).`,
       level: "info",
     });
   };
@@ -324,6 +400,7 @@ export class WorldScene extends Phaser.Scene {
     const previousLayout = this.captureLayoutFingerprint(this.gameState);
     this.startNewMatch(previousLayout);
     this.evaluateAndPublish();
+    gameEvents.emit("ui-notifications-reset-requested");
     gameEvents.emit("ui-toast-requested", {
       message: "Match restarted.",
       level: "info",
@@ -342,10 +419,22 @@ export class WorldScene extends Phaser.Scene {
     if (reason === "unit-not-unlocked") {
       return "That unit is not unlocked yet.";
     }
+    if (reason === "building-not-unlocked") {
+      return "That building is not unlocked yet.";
+    }
+    if (reason === "building-already-built") {
+      return "This building already exists in the city.";
+    }
+    if (reason === "building-already-queued") {
+      return "This building is already queued.";
+    }
+    if (reason === "invalid-unit-type" || reason === "invalid-building-id" || reason === "invalid-queue-item") {
+      return "That queue item is not valid.";
+    }
     if (reason === "city-not-found") {
       return "Select a city first.";
     }
-    return "Could not add unit to queue.";
+    return "Could not add item to queue.";
   }
 
   startNewMatch(previousLayout = null) {
@@ -368,8 +457,10 @@ export class WorldScene extends Phaser.Scene {
         seed: this.generateRuntimeSeed(),
         minFactionDistance: RESTART_MIN_FACTION_DISTANCE,
       });
+    ensureEnemyAiState(this.gameState);
     this.uiModalOpen = false;
     this.manualTimeMs = 0;
+    this.lastCombatEvent = null;
   }
 
   generateRuntimeSeed() {
@@ -425,6 +516,55 @@ export class WorldScene extends Phaser.Scene {
 
     evaluateMatchState(this.gameState);
     this.evaluateAndPublish();
+  }
+
+  handleUnitAttackResult(attacker, target, attackResult) {
+    if (!attackResult.ok) {
+      return;
+    }
+
+    this.lastCombatEvent = {
+      type: "unit",
+      attackerId: attacker.id,
+      targetId: target.id,
+      damage: attackResult.damage ?? 0,
+      targetDefeated: !!attackResult.targetDefeated,
+      attackerDefeated: !!attackResult.attackerDefeated,
+      breakdown: attackResult.breakdown ?? null,
+      counterattack: attackResult.counterattack ?? null,
+      turn: this.gameState.turnState.turn,
+      phase: this.gameState.turnState.phase,
+    };
+
+    const summary = formatCombatBreakdownSummary(attackResult.breakdown);
+    const counterSummary = formatCounterattackSummary(attackResult.counterattack);
+    const message =
+      `Hit ${target.id} for ${attackResult.damage ?? 0}${summary}.` +
+      `${attackResult.targetDefeated ? " Target defeated." : ""}${counterSummary}`;
+    gameEvents.emit("ui-toast-requested", {
+      message,
+      level: "info",
+    });
+  }
+
+  recordCityAttackEvent(attacker, city, attackResult) {
+    this.lastCombatEvent = {
+      type: "city",
+      attackerId: attacker.id,
+      targetId: city.id,
+      damage: attackResult.damage ?? 0,
+      cityDefeated: !!attackResult.cityDefeated,
+      breakdown: attackResult.breakdown ?? null,
+      outcomeChoice: attackResult.outcomeChoice ?? null,
+      turn: this.gameState.turnState.turn,
+      phase: this.gameState.turnState.phase,
+    };
+
+    const summary = formatCombatBreakdownSummary(attackResult.breakdown);
+    gameEvents.emit("ui-toast-requested", {
+      message: `City attack dealt ${attackResult.damage ?? 0}${summary}.`,
+      level: "info",
+    });
   }
 
   handleCityAttackResult(attackResult) {
@@ -521,6 +661,8 @@ export class WorldScene extends Phaser.Scene {
     const snapshot = cloneGameState(this.gameState);
     const selectedUnit = getUnitById(this.gameState, this.gameState.selectedUnitId);
     const selectedCity = this.gameState.cities.find((city) => city.id === this.gameState.selectedCityId) ?? null;
+    const projectedIncome = this.getProjectedPlayerIncome();
+    const projectedNetIncome = this.getProjectedPlayerNetIncome();
     const uiSurface = deriveUiSurface(
       this.gameState,
       selectedUnit,
@@ -532,11 +674,22 @@ export class WorldScene extends Phaser.Scene {
       pendingCityResolution: this.gameState.pendingCityResolution,
     }
     );
+    const uiRuntime = this.getUiRuntimeState();
     return {
       ...snapshot,
+      projectedIncome,
+      projectedNetIncome,
+      selectedInfo: this.buildSelectedInfo(selectedUnit, selectedCity),
+      contextMenu: this.buildContextMenuPayload(uiSurface, selectedUnit, selectedCity),
       uiHints: uiSurface.uiHints,
       uiActions: uiSurface.uiActions,
       uiModalOpen: this.uiModalOpen,
+      pauseMenu: {
+        open: uiRuntime.pauseMenuOpen,
+        restartConfirmOpen: uiRuntime.restartConfirmOpen,
+      },
+      uiNotifications: uiRuntime.notifications,
+      lastCombatEvent: this.lastCombatEvent,
     };
   }
 
@@ -685,6 +838,8 @@ export class WorldScene extends Phaser.Scene {
   renderGameToText() {
     const selectedUnit = getUnitById(this.gameState, this.gameState.selectedUnitId);
     const selectedCity = this.gameState.cities.find((city) => city.id === this.gameState.selectedCityId) ?? null;
+    const projectedIncome = this.getProjectedPlayerIncome();
+    const projectedNetIncome = this.getProjectedPlayerNetIncome();
     const uiSurface = deriveUiSurface(
       this.gameState,
       selectedUnit,
@@ -703,6 +858,8 @@ export class WorldScene extends Phaser.Scene {
       },
       /** @type {Record<string, number>} */ ({})
     );
+    const uiRuntime = this.getUiRuntimeState();
+    const playerEconomy = this.gameState.economy.player;
 
     const payload = {
       coordinateSystem: "Axial coordinates: q increases down-right, r increases down.",
@@ -736,7 +893,10 @@ export class WorldScene extends Phaser.Scene {
         health: unit.health,
         maxHealth: unit.maxHealth,
         attack: unit.attack,
+        armor: unit.armor,
         attackRange: unit.attackRange,
+        minAttackRange: unit.minAttackRange,
+        role: unit.role,
         movementRemaining: unit.movementRemaining,
         maxMovement: unit.maxMovement,
         hasActed: unit.hasActed,
@@ -749,12 +909,17 @@ export class WorldScene extends Phaser.Scene {
         population: city.population,
         focus: city.focus,
         identity: city.identity,
+        specialization: city.specialization,
         growthProgress: city.growthProgress,
         health: city.health,
         maxHealth: city.maxHealth,
+        productionTab: city.productionTab,
+        buildings: [...(city.buildings ?? [])],
         yieldLastTurn: city.yieldLastTurn,
         workedHexes: city.workedHexes.map((hex) => ({ q: hex.q, r: hex.r })),
-        queue: [...city.queue],
+        queue: city.queue.map((item) =>
+          typeof item === "string" ? { kind: "unit", id: item } : { kind: item.kind, id: item.id }
+        ),
       })),
       pendingCityResolution: this.gameState.pendingCityResolution
         ? {
@@ -774,24 +939,166 @@ export class WorldScene extends Phaser.Scene {
         player: this.gameState.economy.player,
         enemy: this.gameState.economy.enemy,
       },
+      ai: {
+        enemy: {
+          personality: this.gameState.ai?.enemy?.personality ?? null,
+          lastGoal: this.gameState.ai?.enemy?.lastGoal ?? null,
+          lastTurnSummary: this.gameState.ai?.enemy?.lastTurnSummary ?? null,
+        },
+      },
+      hudTopLeft: {
+        turnLabel: `Turn ${this.gameState.turnState.turn} - ${this.gameState.turnState.phase === "enemy" ? "Enemy" : "Player"}`,
+        resources: {
+          food: { current: playerEconomy.foodStock, delta: projectedNetIncome.food, grossDelta: projectedIncome.food },
+          production: {
+            current: playerEconomy.productionStock,
+            delta: projectedNetIncome.production,
+            grossDelta: projectedIncome.production,
+          },
+          science: { current: playerEconomy.scienceStock, delta: projectedNetIncome.science, grossDelta: projectedIncome.science },
+        },
+      },
+      selectedInfo: this.buildSelectedInfo(selectedUnit, selectedCity),
+      contextMenu: this.buildContextMenuPayload(uiSurface, selectedUnit, selectedCity),
+      pauseMenu: {
+        open: uiRuntime.pauseMenuOpen,
+        restartConfirmOpen: uiRuntime.restartConfirmOpen,
+      },
+      uiNotifications: uiRuntime.notifications,
       unlocks: {
         units: [...this.gameState.unlocks.units],
       },
       uiHints: uiSurface.uiHints,
       uiActions: uiSurface.uiActions,
       uiModalOpen: this.uiModalOpen,
-      cityPanel: {
-        visible: !!selectedCity && selectedCity.owner === "player" && this.gameState.match.status === "ongoing",
-        queueMax: uiSurface.uiActions.cityQueueMax,
-        selectedCityQueue: selectedCity ? [...selectedCity.queue] : [],
-        queueReason: uiSurface.uiActions.cityQueueReason,
-        canSetCityFocus: uiSurface.uiActions.canSetCityFocus,
-        canQueueProduction: uiSurface.uiActions.canQueueProduction,
-        productionChoices: uiSurface.uiActions.cityProductionChoices,
-      },
       simulatedTimeMs: this.manualTimeMs,
+      lastCombatEvent: this.lastCombatEvent,
     };
     return JSON.stringify(payload);
+  }
+
+  getProjectedPlayerIncome() {
+    const projected = {
+      food: 0,
+      production: 0,
+      science: 1,
+    };
+    for (const city of this.gameState.cities) {
+      if (city.owner !== "player") {
+        continue;
+      }
+      const cityYield = computeCityYield(city.id, this.gameState);
+      projected.food += cityYield.food;
+      projected.production += cityYield.production;
+      projected.science += cityYield.science;
+    }
+    return projected;
+  }
+
+  getProjectedPlayerNetIncome() {
+    const simulation = cloneGameState(this.gameState);
+    const before = simulation.economy.player;
+    const beforeFood = before.foodStock;
+    const beforeProduction = before.productionStock;
+    const beforeScience = before.scienceStock;
+
+    processCityTurn(simulation, "player");
+    consumeScienceStock(simulation, "player", 1);
+
+    const after = simulation.economy.player;
+    return {
+      food: after.foodStock - beforeFood,
+      production: after.productionStock - beforeProduction,
+      science: after.scienceStock - beforeScience,
+    };
+  }
+
+  buildSelectedInfo(selectedUnit, selectedCity) {
+    if (selectedUnit) {
+      return {
+        kind: "unit",
+        id: selectedUnit.id,
+        type: selectedUnit.type,
+        health: selectedUnit.health,
+        maxHealth: selectedUnit.maxHealth,
+        movementRemaining: selectedUnit.movementRemaining,
+        maxMovement: selectedUnit.maxMovement,
+        hasActed: selectedUnit.hasActed,
+        attack: selectedUnit.attack,
+        armor: selectedUnit.armor,
+        minAttackRange: selectedUnit.minAttackRange,
+        attackRange: selectedUnit.attackRange,
+        role: selectedUnit.role,
+      };
+    }
+    if (selectedCity) {
+      return {
+        kind: "city",
+        id: selectedCity.id,
+        owner: selectedCity.owner,
+        population: selectedCity.population,
+        health: selectedCity.health,
+        maxHealth: selectedCity.maxHealth,
+        focus: selectedCity.focus,
+        identity: selectedCity.identity,
+        specialization: selectedCity.specialization,
+        productionTab: selectedCity.productionTab,
+        buildings: [...(selectedCity.buildings ?? [])],
+        yieldLastTurn: selectedCity.yieldLastTurn,
+        queue: selectedCity.queue.map((item) =>
+          typeof item === "string" ? { kind: "unit", id: item } : { kind: item.kind, id: item.id }
+        ),
+      };
+    }
+    return { kind: "none" };
+  }
+
+  buildContextMenuPayload(uiSurface, selectedUnit, selectedCity) {
+    const menuType = uiSurface.uiActions.contextMenuType;
+    if (menuType === "city" && selectedCity) {
+      return {
+        type: "city",
+        cityId: selectedCity.id,
+        queueMax: uiSurface.uiActions.cityQueueMax,
+        queue: selectedCity.queue.map((item) =>
+          typeof item === "string" ? { kind: "unit", id: item } : { kind: item.kind, id: item.id }
+        ),
+        cityProductionTab: uiSurface.uiActions.cityProductionTab,
+        canSetCityFocus: uiSurface.uiActions.canSetCityFocus,
+        canSetCityProductionTab: uiSurface.uiActions.canSetCityProductionTab,
+        canQueueProduction: uiSurface.uiActions.canQueueProduction,
+        cityQueueReason: uiSurface.uiActions.cityQueueReason,
+        cityProductionChoices: uiSurface.uiActions.cityProductionChoices,
+        cityBuildingChoices: uiSurface.uiActions.cityBuildingChoices,
+      };
+    }
+    if (menuType === "unit" && selectedUnit) {
+      return {
+        type: "unit",
+        unitId: selectedUnit.id,
+        canFoundCity: uiSurface.uiActions.canFoundCity,
+        foundCityReason: uiSurface.uiActions.foundCityReason,
+        canSkipUnit: uiSurface.uiActions.canSkipUnit,
+        skipUnitReason: uiSurface.uiActions.skipUnitReason,
+      };
+    }
+    return { type: "none" };
+  }
+
+  getUiRuntimeState() {
+    const defaults = {
+      pauseMenuOpen: false,
+      restartConfirmOpen: false,
+      notifications: [],
+    };
+    if (!this.scene.isActive("UIScene")) {
+      return defaults;
+    }
+    const uiScene = this.scene.get("UIScene");
+    if (!uiScene || typeof uiScene.getRuntimeUiState !== "function") {
+      return defaults;
+    }
+    return uiScene.getRuntimeUiState();
   }
 
   computeTerrainHash(tiles) {
@@ -815,6 +1122,14 @@ export class WorldScene extends Phaser.Scene {
     return true;
   }
 
+  testSelectCity(cityId) {
+    if (!this.gameState.cities.find((city) => city.id === cityId)) {
+      return false;
+    }
+    this.selectCity(cityId);
+    return true;
+  }
+
   testMoveSelected(q, r) {
     const unitId = this.gameState.selectedUnitId;
     if (!unitId) {
@@ -833,10 +1148,16 @@ export class WorldScene extends Phaser.Scene {
     if (!unitId) {
       return false;
     }
+    const attacker = getUnitById(this.gameState, unitId);
+    const target = getUnitById(this.gameState, targetId);
+    if (!attacker || !target) {
+      return false;
+    }
     const result = resolveAttack(unitId, targetId, this.gameState);
     if (!result.ok) {
       return false;
     }
+    this.handleUnitAttackResult(attacker, target, result);
     this.evaluateAndPublish();
     return true;
   }
@@ -846,10 +1167,16 @@ export class WorldScene extends Phaser.Scene {
     if (!unitId) {
       return false;
     }
+    const attacker = getUnitById(this.gameState, unitId);
+    const city = this.gameState.cities.find((candidate) => candidate.id === cityId);
+    if (!attacker || !city) {
+      return false;
+    }
     const result = resolveCityAttack(unitId, cityId, this.gameState);
     if (!result.ok) {
       return false;
     }
+    this.recordCityAttackEvent(attacker, city, result);
     this.handleCityAttackResult(result);
     this.evaluateAndPublish();
     return true;
@@ -926,7 +1253,7 @@ export class WorldScene extends Phaser.Scene {
     if (!cityId) {
       return false;
     }
-    if (unitType !== "warrior" && unitType !== "settler" && unitType !== "spearman") {
+    if (unitType !== "warrior" && unitType !== "settler" && unitType !== "spearman" && unitType !== "archer") {
       return false;
     }
     const result = enqueueCityQueue(cityId, unitType, this.gameState);
@@ -934,7 +1261,39 @@ export class WorldScene extends Phaser.Scene {
       return false;
     }
     this.evaluateAndPublish();
-    return [...(result.queue ?? [])];
+    return (result.queue ?? []).map((item) => ({ kind: item.kind, id: item.id }));
+  }
+
+  testEnqueueCityBuilding(buildingId) {
+    const cityId = this.gameState.selectedCityId;
+    if (!cityId) {
+      return false;
+    }
+    if (buildingId !== "granary" && buildingId !== "workshop" && buildingId !== "monument") {
+      return false;
+    }
+    const result = enqueueCityBuilding(cityId, buildingId, this.gameState);
+    if (!result.ok) {
+      return false;
+    }
+    this.evaluateAndPublish();
+    return (result.queue ?? []).map((item) => ({ kind: item.kind, id: item.id }));
+  }
+
+  testSetCityProductionTab(tab) {
+    const cityId = this.gameState.selectedCityId;
+    if (!cityId) {
+      return false;
+    }
+    if (tab !== "units" && tab !== "buildings") {
+      return false;
+    }
+    const result = setCityProductionTab(cityId, tab, this.gameState);
+    if (!result.ok) {
+      return false;
+    }
+    this.evaluateAndPublish();
+    return result.tab;
   }
 
   testRemoveCityQueueAt(index) {
@@ -954,6 +1313,36 @@ export class WorldScene extends Phaser.Scene {
     cycleResearch(this.gameState);
     this.evaluateAndPublish();
     return this.gameState.research.activeTechId;
+  }
+
+  testTriggerUnitAction(actionId) {
+    return this.handleUnitActionRequested({ actionId });
+  }
+
+  testSetEnemyPersonality(personality) {
+    if (personality !== "raider" && personality !== "expansionist" && personality !== "guardian") {
+      return false;
+    }
+    const aiState = ensureEnemyAiState(this.gameState);
+    aiState.personality = normalizeEnemyPersonality(personality, this.gameState.map.seed);
+    this.evaluateAndPublish();
+    return aiState.personality;
+  }
+
+  testGetEnemyAiState() {
+    return structuredClone(ensureEnemyAiState(this.gameState));
+  }
+
+  testClearEnemyCityQueue(cityId) {
+    const targetCity =
+      (cityId ? this.gameState.cities.find((city) => city.id === cityId) : this.gameState.cities.find((city) => city.owner === "enemy")) ??
+      null;
+    if (!targetCity || targetCity.owner !== "enemy") {
+      return false;
+    }
+    targetCity.queue = [];
+    this.evaluateAndPublish();
+    return true;
   }
 
   testSelectResearch(techId) {
@@ -1048,6 +1437,26 @@ export class WorldScene extends Phaser.Scene {
   }
 }
 
+function normalizeIncomingQueueItem(payload) {
+  if (payload?.queueItem && typeof payload.queueItem === "object") {
+    const kind = payload.queueItem.kind;
+    const id = payload.queueItem.id;
+    if ((kind === "unit" || kind === "building") && typeof id === "string" && id) {
+      return { kind, id };
+    }
+  }
+
+  if (typeof payload?.unitType === "string") {
+    return { kind: "unit", id: payload.unitType };
+  }
+
+  if (typeof payload?.buildingId === "string") {
+    return { kind: "building", id: payload.buildingId };
+  }
+
+  return null;
+}
+
 function drawHex(graphics, x, y, size, fillColor, fillAlpha, strokeColor, strokeWidth) {
   const points = [];
   for (let i = 0; i < 6; i += 1) {
@@ -1061,6 +1470,43 @@ function drawHex(graphics, x, y, size, fillColor, fillAlpha, strokeColor, stroke
     graphics.fillPoints(points, true);
   }
   graphics.strokePoints(points, true);
+}
+
+function formatCombatBreakdownSummary(breakdown) {
+  if (!breakdown) {
+    return "";
+  }
+  const parts = [
+    `base ${breakdown.baseAttack}`,
+    `role ${formatSignedNumber(breakdown.roleBonus)}`,
+    `terrain atk ${formatSignedNumber(breakdown.terrainAttackBonus)}`,
+    `armor -${breakdown.defenderArmor}`,
+    `terrain def -${breakdown.terrainDefenseBonus}`,
+  ];
+  return ` (${parts.join(", ")})`;
+}
+
+function formatCounterattackSummary(counterattack) {
+  if (!counterattack) {
+    return "";
+  }
+  if (!counterattack.triggered) {
+    if (counterattack.reason === "out-of-range") {
+      return " No counterattack (out of range).";
+    }
+    if (counterattack.reason === "target-defeated") {
+      return " No counterattack (target defeated).";
+    }
+    return "";
+  }
+  return ` Counterattack for ${counterattack.damage ?? 0}.`;
+}
+
+function formatSignedNumber(value) {
+  if (value > 0) {
+    return `+${value}`;
+  }
+  return `${value}`;
 }
 
 function capitalizeLabel(value) {

@@ -10,12 +10,13 @@
 - Chosen: each unit can perform one primary action per turn (`hasActed` gate).
 - Chosen: attacks are range-based (adjacent for current units) and apply direct damage.
 - Chosen: defeated units are removed immediately from game state.
-- Rejected for now: retaliation chains, armor stats, status effects, and critical hits.
+- Chosen baseline has since been extended by `spec-015` with armor, role bonuses, terrain modifiers, ranged min/max range, and one-step counterattack.
+- Rejected for now: retaliation chains beyond one-step, status effects, and critical hits.
 
 ## Interfaces/types added
 
 - Unit fields:
-  - `type`, `health`, `maxHealth`, `attack`, `attackRange`, `hasActed`
+  - `type`, `health`, `maxHealth`, `attack`, `attackRange`, `hasActed` (baseline)
 - Combat system:
   - `CombatSystem.getAttackableTargets(attackerId, gameState)`
   - `CombatSystem.canAttack(attackerId, targetId, gameState)`
@@ -38,5 +39,5 @@
 ## Known gaps and next steps
 
 - No attack animations or hit effects yet.
-- No ranged units beyond current range-1 defaults.
+- Ranged/armor/terrain depth is now tracked in `spec-015`; this spec remains the baseline milestone.
 - No dedicated combat log/history view in UI yet.

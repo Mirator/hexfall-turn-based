@@ -11,8 +11,8 @@
 - Chosen: both factions start with one settler; no starting warriors.
 - Chosen: enemy auto-founds its first city during enemy turn when valid.
 - Chosen: city queues remain city-level, but spending is from empire `productionStock`.
-- Chosen: player production queue supports up to 3 slots with add/remove management from contextual city panel.
-- Chosen: player queues do not auto-refill; enemy queues auto-refill with cheapest unlocked unit.
+- Chosen: production queue is now a typed shared queue (`unit`/`building`) with up to 3 slots (extended by `spec-016`).
+- Chosen: player queues do not auto-refill; enemy refill behavior is personality-aware and handled by AI planning (`spec-014`).
 - Chosen: discoverability relies on contextual hints/toasts and `F` shortcut (no persistent tutorial blocks).
 - Rejected for now: border expansion, manual worker placement, and building branches in this milestone.
 
@@ -23,6 +23,8 @@
 - `CitySystem.processTurn(gameState, owner)`
 - `CitySystem.cycleCityQueue(cityId, gameState)`
 - `CitySystem.enqueueCityQueue(cityId, unitType, gameState)`
+- `CitySystem.enqueueCityQueueItem(cityId, queueItem, gameState)`
+- `CitySystem.enqueueCityBuilding(cityId, buildingId, gameState)`
 - `CitySystem.removeCityQueueAt(cityId, index, gameState)`
 - `CitySystem.getFoundCityReasonText(reason)`
 - City state includes:
@@ -38,7 +40,7 @@
 - City queue behavior:
   - player queue length cap `3`,
   - front item is consumed on successful production,
-  - enemy queue auto-refills deterministically when empty.
+  - enemy queue refills deterministically through personality-aware AI planning.
 
 ## Validation performed (tests/manual checks)
 
@@ -49,6 +51,6 @@
 
 ## Known gaps and next steps
 
-- No building queue branches yet.
+- Building queue branch now exists in `spec-016` using shared typed queue items.
 - No city placement preview pathing.
 - No dedicated early-game advisor/tutorial sequence.

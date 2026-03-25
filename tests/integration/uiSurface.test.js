@@ -80,9 +80,42 @@ describe("UI surface hints/actions", () => {
     const ui = deriveUiSurface(gameState, null, city, [], []);
     expect(ui.uiActions.canSetCityFocus).toBe(true);
     expect(ui.uiActions.canQueueProduction).toBe(true);
+    expect(ui.uiActions.canQueueUnits).toBe(true);
+    expect(ui.uiActions.canQueueBuildings).toBe(true);
+    expect(ui.uiActions.cityProductionTab).toBe("units");
+    expect(ui.uiActions.contextMenuType).toBe("city");
     expect(ui.uiActions.cityQueueMax).toBe(3);
     expect(ui.uiActions.cityProductionChoices.length).toBeGreaterThan(0);
+    expect(ui.uiActions.cityBuildingChoices.length).toBeGreaterThan(0);
+    expect(ui.uiActions.cityQueueItems[0]).toEqual({ kind: "unit", id: "warrior" });
     expect(ui.uiHints.primary).toContain("City selected");
+  });
+
+  it("exposes unit context actions for selected player units", () => {
+    const gameState = createInitialGameState({ seed: 125 });
+    const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
+    expect(settler).toBeTruthy();
+    if (!settler) {
+      return;
+    }
+
+    const ui = deriveUiSurface(gameState, settler, null, [], []);
+    expect(ui.uiActions.contextMenuType).toBe("unit");
+    expect(ui.uiActions.canSkipUnit).toBe(true);
+    expect(ui.uiActions.skipUnitReason).toBeNull();
+  });
+
+  it("hides contextual menu while enemy phase is active", () => {
+    const gameState = createInitialGameState({ seed: 126 });
+    gameState.turnState.phase = "enemy";
+    const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
+    expect(settler).toBeTruthy();
+    if (!settler) {
+      return;
+    }
+
+    const ui = deriveUiSurface(gameState, settler, null, [], []);
+    expect(ui.uiActions.contextMenuType).toBeNull();
   });
 
   it("reports queue-full reason when city queue reaches max", () => {
@@ -97,10 +130,39 @@ describe("UI surface hints/actions", () => {
     expect(founded.ok).toBe(true);
 
     const city = gameState.cities[0];
-    city.queue = ["warrior", "settler", "warrior"];
+    city.queue = [
+      { kind: "unit", id: "warrior" },
+      { kind: "unit", id: "settler" },
+      { kind: "unit", id: "warrior" },
+    ];
     const ui = deriveUiSurface(gameState, null, city, [], []);
     expect(ui.uiActions.canQueueProduction).toBe(false);
     expect(ui.uiActions.cityQueueReason).toContain("full");
+  });
+
+  it("reports building-tab reason when unlocked buildings are already built/queued", () => {
+    const gameState = createInitialGameState({ seed: 223 });
+    const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
+    expect(settler).toBeTruthy();
+    if (!settler) {
+      return;
+    }
+
+    const founded = foundCity(settler.id, gameState);
+    expect(founded.ok).toBe(true);
+
+    const city = gameState.cities[0];
+    city.productionTab = "buildings";
+    city.buildings = ["granary"];
+
+    const ui = deriveUiSurface(gameState, null, city, [], []);
+    expect(ui.uiActions.cityProductionTab).toBe("buildings");
+    expect(ui.uiActions.canQueueBuildings).toBe(false);
+    expect(ui.uiActions.canQueueProduction).toBe(false);
+    expect(ui.uiActions.cityQueueReason).toContain("already built or queued");
+
+    const granaryChoice = ui.uiActions.cityBuildingChoices.find((choice) => choice.id === "granary");
+    expect(granaryChoice?.alreadyBuilt).toBe(true);
   });
 
   it("shows pending city-resolution hint while modal context is active", () => {

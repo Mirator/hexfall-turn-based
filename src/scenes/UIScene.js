@@ -3,24 +3,41 @@ import { gameEvents } from "../core/eventBus.js";
 
 const BUTTON_WIDTH = 180;
 const BUTTON_HEIGHT = 40;
+const COMPACT_BREAKPOINT = 900;
 const CITY_PANEL_FOCUS_WIDTH = 88;
-const CITY_PANEL_ACTION_WIDTH = 58;
+const CITY_PANEL_TAB_WIDTH = 102;
+const CITY_PANEL_ACTION_WIDTH = 78;
 const CITY_PANEL_BUTTON_HEIGHT = 30;
-const CITY_PANEL_QUEUE_MAX = 3;
+const UNIT_PANEL_ACTION_WIDTH = 160;
+const CONTEXT_PANEL_HEIGHT = 150;
 const FOCUS_MODES = ["balanced", "food", "production", "science"];
-const PRODUCTION_TYPES = ["warrior", "settler", "spearman"];
+const PRODUCTION_TABS = ["units", "buildings"];
+const UNIT_PRODUCTION_TYPES = ["warrior", "settler", "spearman", "archer"];
+const BUILDING_PRODUCTION_TYPES = ["granary", "workshop", "monument"];
 
 const FOCUS_LABELS = {
   balanced: "Balanced",
   food: "Food",
-  production: "Prod",
-  science: "Sci",
+  production: "Production",
+  science: "Science",
 };
 
-const UNIT_SHORT_LABELS = {
-  warrior: "War",
-  settler: "Set",
-  spearman: "Sp",
+const UNIT_LABELS = {
+  warrior: "Warrior",
+  settler: "Settler",
+  spearman: "Spearman",
+  archer: "Archer",
+};
+
+const BUILDING_LABELS = {
+  granary: "Granary",
+  workshop: "Workshop",
+  monument: "Monument",
+};
+
+const PRODUCTION_TAB_LABELS = {
+  units: "Units",
+  buildings: "Buildings",
 };
 
 export class UIScene extends Phaser.Scene {
@@ -29,44 +46,39 @@ export class UIScene extends Phaser.Scene {
 
     this.latestState = null;
     this.hoverHint = null;
+    this.pauseMenuOpen = false;
     this.restartConfirmOpen = false;
     this.cityResolutionOpen = false;
     this.modalStateOpen = false;
-    this.toastTimer = null;
     this.escapeKey = null;
-    this.cityPanelVisible = false;
+    this.contextMenuMode = null;
+    this.notifications = [];
+    this.notificationNextId = 1;
+    this.notificationScroll = 0;
+    this.notificationVisibleRows = 8;
   }
 
   create() {
-    this.turnLabel = this.add
-      .text(24, 18, "Turn 1 - Player", {
-        fontFamily: "Trebuchet MS",
-        fontSize: "24px",
-        color: "#2d2415",
-        stroke: "#f4ebd7",
-        strokeThickness: 3,
-      })
-      .setDepth(10);
+    this.turnLabel = this.createLabel("", 24, 16, "24px", "#2d2415", 10, "#f4ebd7", 3);
+    this.foodLabel = this.createLabel("", 24, 48, "18px", "#2d2415", 10);
+    this.foodDeltaLabel = this.createLabel("", 24, 50, "15px", "#2f7a41", 10);
+    this.productionLabel = this.createLabel("", 24, 74, "18px", "#2d2415", 10);
+    this.productionDeltaLabel = this.createLabel("", 24, 76, "15px", "#2f7a41", 10);
+    this.scienceLabel = this.createLabel("", 24, 100, "18px", "#2d2415", 10);
+    this.scienceDeltaLabel = this.createLabel("", 24, 102, "15px", "#2f7a41", 10);
 
-    this.selectionChip = this.createChip("Selection: none");
-    this.researchChip = this.createChip("Research: none");
-    this.economyChip = this.createChip("Economy: F0 P0 S0");
+    this.selectedPanel = this.add.rectangle(24, 0, 460, 92, 0xeadcc0, 0.95).setOrigin(0, 0).setDepth(10);
+    this.selectedPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
+    this.selectedTitle = this.createLabel("Selected", 38, 0, "16px", "#4a3318", 11);
+    this.selectedDetails = this.createLabel("No selection", 38, 0, "15px", "#3f2d18", 11);
 
     this.endTurnButton = this.createButton("End Turn", "endTurn", () => gameEvents.emit("end-turn-requested"));
-    this.foundCityButton = this.createButton("Found City", "foundCity", () => gameEvents.emit("found-city-requested"));
-    this.restartButton = this.createButton("Restart", "restart", () => this.openRestartConfirm());
 
-    this.cityPanel = this.add.rectangle(0, 0, 10, 10, 0xead7b1, 0.95).setDepth(12).setVisible(false);
-    this.cityPanel.setStrokeStyle(2, 0x7d5a2f, 0.9);
-    this.cityPanelTitle = this.add
-      .text(0, 0, "", {
-        fontFamily: "Trebuchet MS",
-        fontSize: "15px",
-        color: "#3d2a14",
-      })
-      .setOrigin(0.5)
-      .setDepth(13)
-      .setVisible(false);
+    this.contextPanel = this.add.rectangle(0, 0, 10, 10, 0xead7b1, 0.95).setDepth(12).setVisible(false);
+    this.contextPanel.setStrokeStyle(2, 0x7d5a2f, 0.9);
+    this.contextPanelTitle = this.createLabel("", 0, 0, "16px", "#3d2a14", 13);
+    this.contextPanelTitle.setOrigin(0.5);
+    this.contextPanelTitle.setVisible(false);
 
     this.cityFocusButtons = FOCUS_MODES.map((focus) =>
       this.createButton(
@@ -85,16 +97,32 @@ export class UIScene extends Phaser.Scene {
         }
       )
     );
-    for (const button of this.cityFocusButtons) {
-      button.rectangle.setDepth(14);
-      button.label.setDepth(15);
-    }
-
-    this.cityProductionButtons = PRODUCTION_TYPES.map((unitType) =>
+    this.cityProductionTabButtons = PRODUCTION_TABS.map((tab) =>
+      this.createButton(
+        PRODUCTION_TAB_LABELS[tab],
+        `city-production-tab-${tab}`,
+        () => gameEvents.emit("city-production-tab-set-requested", { tab }),
+        {
+          width: CITY_PANEL_TAB_WIDTH,
+          height: CITY_PANEL_BUTTON_HEIGHT,
+          fontSize: "14px",
+          enabledFill: 0x6d6d73,
+          hoverFill: 0x7f8088,
+          activeFill: 0x355e94,
+          disabledFill: 0x74757a,
+          stroke: 0xe9d9b4,
+        }
+      )
+    );
+    this.cityProductionButtons = UNIT_PRODUCTION_TYPES.map((unitType) =>
       this.createButton(
         "--",
         `city-enqueue-${unitType}`,
-        () => gameEvents.emit("city-queue-enqueue-requested", { unitType }),
+        () =>
+          gameEvents.emit("city-queue-enqueue-requested", {
+            unitType,
+            queueItem: { kind: "unit", id: unitType },
+          }),
         {
           width: CITY_PANEL_ACTION_WIDTH,
           height: CITY_PANEL_BUTTON_HEIGHT,
@@ -107,11 +135,27 @@ export class UIScene extends Phaser.Scene {
         }
       )
     );
-    for (const button of this.cityProductionButtons) {
-      button.rectangle.setDepth(14);
-      button.label.setDepth(15);
-    }
-
+    this.cityBuildingButtons = BUILDING_PRODUCTION_TYPES.map((buildingId) =>
+      this.createButton(
+        "--",
+        `city-enqueue-building-${buildingId}`,
+        () =>
+          gameEvents.emit("city-queue-enqueue-requested", {
+            buildingId,
+            queueItem: { kind: "building", id: buildingId },
+          }),
+        {
+          width: CITY_PANEL_ACTION_WIDTH,
+          height: CITY_PANEL_BUTTON_HEIGHT,
+          fontSize: "13px",
+          enabledFill: 0x3d6e58,
+          hoverFill: 0x4d866b,
+          activeFill: 0x3d6e58,
+          disabledFill: 0x707a72,
+          stroke: 0xe6dbbf,
+        }
+      )
+    );
     this.cityQueueButtons = [0, 1, 2].map((index) =>
       this.createButton(
         `${index + 1}:--`,
@@ -129,47 +173,36 @@ export class UIScene extends Phaser.Scene {
         }
       )
     );
-    for (const button of this.cityQueueButtons) {
-      button.rectangle.setDepth(14);
-      button.label.setDepth(15);
-    }
+    this.unitFoundCityButton = this.createButton("Found City", "unit-found-city", () =>
+      gameEvents.emit("unit-action-requested", { actionId: "foundCity" }),
+      {
+        width: UNIT_PANEL_ACTION_WIDTH,
+        height: BUTTON_HEIGHT - 6,
+      }
+    );
+    this.unitSkipButton = this.createButton("Skip Unit", "unit-skip", () =>
+      gameEvents.emit("unit-action-requested", { actionId: "skipUnit" }),
+      {
+        width: UNIT_PANEL_ACTION_WIDTH,
+        height: BUTTON_HEIGHT - 6,
+      }
+    );
+    this.setCityControlsVisible(false);
+    this.setUnitControlsVisible(false);
 
-    this.setCityPanelVisible(false);
-
-    this.hintPanel = this.add.rectangle(0, 0, 380, 74, 0xf0e4cb, 0.95).setDepth(20).setVisible(false);
+    this.hintPanel = this.add.rectangle(0, 0, 440, 74, 0xf0e4cb, 0.95).setDepth(20).setVisible(false);
     this.hintPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
-    this.hintPrimary = this.add
-      .text(0, 0, "", {
-        fontFamily: "Trebuchet MS",
-        fontSize: "16px",
-        color: "#3f2d18",
-        align: "center",
-      })
-      .setOrigin(0.5)
-      .setDepth(21)
-      .setVisible(false);
-    this.hintSecondary = this.add
-      .text(0, 0, "", {
-        fontFamily: "Trebuchet MS",
-        fontSize: "14px",
-        color: "#5a4224",
-        align: "center",
-      })
-      .setOrigin(0.5)
-      .setDepth(21)
-      .setVisible(false);
+    this.hintPrimary = this.createLabel("", 0, 0, "16px", "#3f2d18", 21);
+    this.hintPrimary.setOrigin(0.5).setVisible(false);
+    this.hintSecondary = this.createLabel("", 0, 0, "14px", "#5a4224", 21);
+    this.hintSecondary.setOrigin(0.5).setVisible(false);
 
-    this.toastPanel = this.add.rectangle(0, 0, 420, 44, 0x3a2f1f, 0.88).setDepth(30).setVisible(false);
-    this.toastText = this.add
-      .text(0, 0, "", {
-        fontFamily: "Trebuchet MS",
-        fontSize: "16px",
-        color: "#f8efd8",
-        align: "center",
-      })
-      .setOrigin(0.5)
-      .setDepth(31)
-      .setVisible(false);
+    this.notificationPanel = this.add.rectangle(0, 0, 360, 236, 0xeadcc0, 0.95).setDepth(16);
+    this.notificationPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
+    this.notificationTitle = this.createLabel("Notifications", 0, 0, "17px", "#4a3318", 17);
+    this.notificationRows = Array.from({ length: 8 }, () =>
+      this.createLabel("", 0, 0, "14px", "#3f2d18", 17).setVisible(false)
+    );
 
     this.modalBackdrop = this.add
       .rectangle(0, 0, 10, 10, 0x2a1b10, 0.34)
@@ -179,87 +212,73 @@ export class UIScene extends Phaser.Scene {
     this.modalBackdrop.on("pointerdown", () => {
       if (this.restartConfirmOpen) {
         this.closeRestartConfirm();
+      } else if (this.pauseMenuOpen) {
+        this.closePauseMenu();
       }
     });
 
-    this.restartConfirmPanel = this.add.rectangle(0, 0, 420, 150, 0xf2e6cc, 0.98).setDepth(40).setVisible(false);
+    this.pausePanel = this.add.rectangle(0, 0, 420, 178, 0xf2e6cc, 0.98).setDepth(40).setVisible(false);
+    this.pausePanel.setStrokeStyle(3, 0x6e4a22, 1);
+    this.pausePanel.setInteractive();
+    this.pausePanel.on("pointerdown", (_pointer, _x, _y, event) => event.stopPropagation());
+    this.pauseTitle = this.createLabel("Paused", 0, 0, "34px", "#4a2e12", 41);
+    this.pauseTitle.setOrigin(0.5).setVisible(false);
+    this.pauseResumeButton = this.createButton("Resume", "pause-resume", () => this.closePauseMenu(), {
+      enabledFill: 0x355e94,
+      hoverFill: 0x4a76ae,
+    });
+    this.pauseRestartButton = this.createButton("Restart", "pause-restart", () => this.openRestartConfirm(), {
+      enabledFill: 0x7c4e2b,
+      hoverFill: 0x956039,
+      stroke: 0xf2debb,
+    });
+    this.pauseResumeButton.rectangle.setDepth(42);
+    this.pauseResumeButton.label.setDepth(43);
+    this.pauseRestartButton.rectangle.setDepth(42);
+    this.pauseRestartButton.label.setDepth(43);
+    this.setCompositeVisible(this.pauseResumeButton, false);
+    this.setCompositeVisible(this.pauseRestartButton, false);
+
+    this.restartConfirmPanel = this.add.rectangle(0, 0, 420, 150, 0xf2e6cc, 0.98).setDepth(44).setVisible(false);
     this.restartConfirmPanel.setStrokeStyle(3, 0x6e4a22, 1);
     this.restartConfirmPanel.setInteractive();
-    this.restartConfirmPanel.on("pointerdown", (_pointer, _x, _y, event) => {
-      event.stopPropagation();
-    });
-    this.restartConfirmTitle = this.add
-      .text(0, 0, "Restart match?", {
-        fontFamily: "Trebuchet MS",
-        fontSize: "30px",
-        color: "#4a2e12",
-        align: "center",
-      })
-      .setOrigin(0.5)
-      .setDepth(41)
-      .setVisible(false);
-    this.restartConfirmSubtitle = this.add
-      .text(0, 0, "Current progress will be lost.", {
-        fontFamily: "Trebuchet MS",
-        fontSize: "17px",
-        color: "#4a2e12",
-        align: "center",
-      })
-      .setOrigin(0.5)
-      .setDepth(41)
-      .setVisible(false);
-    this.restartConfirmButton = this.createButton("Confirm", "restartConfirm", () => this.confirmRestart(), {
+    this.restartConfirmPanel.on("pointerdown", (_pointer, _x, _y, event) => event.stopPropagation());
+    this.restartConfirmTitle = this.createLabel("Restart match?", 0, 0, "30px", "#4a2e12", 45);
+    this.restartConfirmTitle.setOrigin(0.5).setVisible(false);
+    this.restartConfirmSubtitle = this.createLabel("Current progress will be lost.", 0, 0, "17px", "#4a2e12", 45);
+    this.restartConfirmSubtitle.setOrigin(0.5).setVisible(false);
+    this.restartConfirmButton = this.createButton("Confirm", "restart-confirm", () => this.confirmRestart(), {
       enabledFill: 0x2f6c3d,
       hoverFill: 0x3f8450,
       disabledFill: 0x617965,
       stroke: 0xe5f0dc,
     });
-    this.restartCancelButton = this.createButton("Cancel", "restartCancel", () => this.closeRestartConfirm(), {
+    this.restartCancelButton = this.createButton("Cancel", "restart-cancel", () => this.closeRestartConfirm(), {
       enabledFill: 0x7c4e2b,
       hoverFill: 0x956039,
       disabledFill: 0x7c7065,
       stroke: 0xf2debb,
     });
-    this.restartConfirmButton.rectangle.setDepth(43);
-    this.restartConfirmButton.label.setDepth(44);
-    this.restartCancelButton.rectangle.setDepth(43);
-    this.restartCancelButton.label.setDepth(44);
+    this.restartConfirmButton.rectangle.setDepth(46);
+    this.restartConfirmButton.label.setDepth(47);
+    this.restartCancelButton.rectangle.setDepth(46);
+    this.restartCancelButton.label.setDepth(47);
     this.setCompositeVisible(this.restartConfirmButton, false);
     this.setCompositeVisible(this.restartCancelButton, false);
 
-    this.cityOutcomePanel = this.add.rectangle(0, 0, 420, 160, 0xf2e6cc, 0.98).setDepth(45).setVisible(false);
+    this.cityOutcomePanel = this.add.rectangle(0, 0, 420, 160, 0xf2e6cc, 0.98).setDepth(48).setVisible(false);
     this.cityOutcomePanel.setStrokeStyle(3, 0x6e4a22, 1);
     this.cityOutcomePanel.setInteractive();
-    this.cityOutcomePanel.on("pointerdown", (_pointer, _x, _y, event) => {
-      event.stopPropagation();
-    });
-    this.cityOutcomeTitle = this.add
-      .text(0, 0, "City conquered", {
-        fontFamily: "Trebuchet MS",
-        fontSize: "30px",
-        color: "#4a2e12",
-        align: "center",
-      })
-      .setOrigin(0.5)
-      .setDepth(46)
-      .setVisible(false);
-    this.cityOutcomeSubtitle = this.add
-      .text(0, 0, "Capture it or raze it.", {
-        fontFamily: "Trebuchet MS",
-        fontSize: "17px",
-        color: "#4a2e12",
-        align: "center",
-      })
-      .setOrigin(0.5)
-      .setDepth(46)
-      .setVisible(false);
+    this.cityOutcomePanel.on("pointerdown", (_pointer, _x, _y, event) => event.stopPropagation());
+    this.cityOutcomeTitle = this.createLabel("City conquered", 0, 0, "30px", "#4a2e12", 49);
+    this.cityOutcomeTitle.setOrigin(0.5).setVisible(false);
+    this.cityOutcomeSubtitle = this.createLabel("Capture it or raze it.", 0, 0, "17px", "#4a2e12", 49);
+    this.cityOutcomeSubtitle.setOrigin(0.5).setVisible(false);
     this.cityCaptureButton = this.createButton("Capture", "cityCapture", () =>
       gameEvents.emit("city-outcome-requested", { choice: "capture" })
     );
-    this.cityRazeButton = this.createButton(
-      "Raze",
-      "cityRaze",
-      () => gameEvents.emit("city-outcome-requested", { choice: "raze" }),
+    this.cityRazeButton = this.createButton("Raze", "cityRaze", () =>
+      gameEvents.emit("city-outcome-requested", { choice: "raze" }),
       {
         enabledFill: 0x8a422f,
         hoverFill: 0xa34f38,
@@ -267,55 +286,40 @@ export class UIScene extends Phaser.Scene {
         stroke: 0xf2debb,
       }
     );
-    this.cityCaptureButton.rectangle.setDepth(47);
-    this.cityCaptureButton.label.setDepth(48);
-    this.cityRazeButton.rectangle.setDepth(47);
-    this.cityRazeButton.label.setDepth(48);
+    this.cityCaptureButton.rectangle.setDepth(50);
+    this.cityCaptureButton.label.setDepth(51);
+    this.cityRazeButton.rectangle.setDepth(50);
+    this.cityRazeButton.label.setDepth(51);
     this.setCompositeVisible(this.cityCaptureButton, false);
     this.setCompositeVisible(this.cityRazeButton, false);
 
-    this.resultPanel = this.add.rectangle(0, 0, 460, 170, 0xf2e6cc, 0.98).setDepth(50).setVisible(false);
+    this.resultPanel = this.add.rectangle(0, 0, 460, 170, 0xf2e6cc, 0.98).setDepth(52).setVisible(false);
     this.resultPanel.setStrokeStyle(3, 0x6e4a22, 1);
-    this.resultTitle = this.add
-      .text(0, 0, "", {
-        fontFamily: "Trebuchet MS",
-        fontSize: "36px",
-        color: "#4a2e12",
-        align: "center",
-      })
-      .setDepth(51)
-      .setOrigin(0.5)
-      .setVisible(false);
-    this.resultSubtitle = this.add
-      .text(0, 0, "", {
-        fontFamily: "Trebuchet MS",
-        fontSize: "19px",
-        color: "#4a2e12",
-        align: "center",
-      })
-      .setDepth(51)
-      .setOrigin(0.5)
-      .setVisible(false);
+    this.resultTitle = this.createLabel("", 0, 0, "36px", "#4a2e12", 53);
+    this.resultTitle.setOrigin(0.5).setVisible(false);
+    this.resultSubtitle = this.createLabel("", 0, 0, "19px", "#4a2e12", 53);
+    this.resultSubtitle.setOrigin(0.5).setVisible(false);
     this.resultRestartButton = this.createButton("Restart Match", "resultRestart", () => gameEvents.emit("restart-match-requested"));
-    this.resultRestartButton.rectangle.setDepth(52);
-    this.resultRestartButton.label.setDepth(53);
+    this.resultRestartButton.rectangle.setDepth(54);
+    this.resultRestartButton.label.setDepth(55);
     this.setCompositeVisible(this.resultRestartButton, false);
 
     this.scale.on("resize", this.layout, this);
     this.escapeKey = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.ESC) ?? null;
     this.escapeKey?.on("down", this.handleEscapePressed, this);
+    this.input.on("wheel", this.handleWheel, this);
     gameEvents.on("state-changed", this.updateFromState, this);
-    gameEvents.on("ui-toast-requested", this.handleToastRequested, this);
+    gameEvents.on("ui-toast-requested", this.handleNotificationRequested, this);
+    gameEvents.on("ui-notifications-reset-requested", this.handleNotificationsReset, this);
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.scale.off("resize", this.layout, this);
       this.escapeKey?.off("down", this.handleEscapePressed, this);
+      this.input.off("wheel", this.handleWheel, this);
       gameEvents.off("state-changed", this.updateFromState, this);
-      gameEvents.off("ui-toast-requested", this.handleToastRequested, this);
+      gameEvents.off("ui-toast-requested", this.handleNotificationRequested, this);
+      gameEvents.off("ui-notifications-reset-requested", this.handleNotificationsReset, this);
       gameEvents.emit("ui-modal-state-changed", false);
-      if (this.toastTimer) {
-        this.toastTimer.remove(false);
-        this.toastTimer = null;
-      }
     });
 
     const worldScene = this.scene.get("WorldScene");
@@ -324,18 +328,17 @@ export class UIScene extends Phaser.Scene {
     }
 
     this.layout(this.scale.gameSize);
+    this.updateNotificationCenter();
   }
 
-  createChip(text) {
-    return this.add
-      .text(24, 0, text, {
-        fontFamily: "Trebuchet MS",
-        fontSize: "15px",
-        color: "#2d2415",
-        backgroundColor: "#eadcc0",
-        padding: { left: 7, right: 7, top: 4, bottom: 4 },
-      })
-      .setDepth(10);
+  createLabel(text, x, y, size, color, depth, stroke, strokeThickness = 0) {
+    const config = {
+      fontFamily: "Trebuchet MS",
+      fontSize: size,
+      color,
+      ...(stroke ? { stroke, strokeThickness } : {}),
+    };
+    return this.add.text(x, y, text, config).setDepth(depth);
   }
 
   createButton(label, actionId, onClick, options = {}) {
@@ -359,15 +362,8 @@ export class UIScene extends Phaser.Scene {
       .rectangle(0, 0, width, height, resolvedPalette.enabledFill, resolvedPalette.enabledAlpha)
       .setStrokeStyle(2, resolvedPalette.stroke)
       .setInteractive({ useHandCursor: true })
-      .setDepth(10);
-    const text = this.add
-      .text(0, 0, label, {
-        fontFamily: "Trebuchet MS",
-        fontSize: options.fontSize ?? "18px",
-        color: resolvedPalette.textColor,
-      })
-      .setOrigin(0.5)
-      .setDepth(11);
+      .setDepth(14);
+    const text = this.createLabel(label, 0, 0, options.fontSize ?? "18px", resolvedPalette.textColor, 15).setOrigin(0.5);
 
     const button = {
       rectangle,
@@ -384,7 +380,6 @@ export class UIScene extends Phaser.Scene {
     rectangle.on("pointerover", () => this.handleButtonHover(button, true));
     rectangle.on("pointerout", () => this.handleButtonHover(button, false));
     rectangle.on("pointerdown", () => this.handleButtonClick(button));
-
     return button;
   }
 
@@ -392,7 +387,6 @@ export class UIScene extends Phaser.Scene {
     if (this.isAnyModalOpen() && !this.isModalButton(button.actionId)) {
       return;
     }
-
     if (button.enabled) {
       if (isEntering) {
         button.rectangle.setFillStyle(button.palette.hoverFill, button.palette.hoverAlpha);
@@ -401,13 +395,11 @@ export class UIScene extends Phaser.Scene {
       }
       return;
     }
-
     if (!isEntering) {
       this.hoverHint = null;
       this.updateContextualHint();
       return;
     }
-
     const disabledHint = this.getDisabledActionHint(button.actionId);
     if (disabledHint) {
       this.hoverHint = disabledHint;
@@ -419,15 +411,13 @@ export class UIScene extends Phaser.Scene {
     if (this.isAnyModalOpen() && !this.isModalButton(button.actionId)) {
       return;
     }
-
     if (button.enabled) {
       button.onClick();
       return;
     }
-
     const hint = this.getDisabledActionHint(button.actionId);
     if (hint) {
-      this.handleToastRequested({ message: hint, level: "warning" });
+      this.handleNotificationRequested({ message: hint, level: "warning" });
     }
   }
 
@@ -435,96 +425,122 @@ export class UIScene extends Phaser.Scene {
     if (!this.latestState) {
       return null;
     }
-
-    const canIssueOrders =
-      this.latestState.turnState?.phase === "player" &&
-      this.latestState.match?.status === "ongoing" &&
-      !this.latestState.pendingCityResolution;
-    const selectedCity = this.latestState.cities?.find((city) => city.id === this.latestState.selectedCityId) ?? null;
-
-    if (actionId === "foundCity") {
+    if (actionId === "endTurn") {
+      return this.latestState.pendingCityResolution ? "Resolve city outcome first." : "Wait for the enemy turn to finish.";
+    }
+    if (actionId === "unit-found-city") {
       return this.latestState.uiActions?.foundCityReason ?? "Cannot found a city right now.";
     }
-    if (actionId === "endTurn") {
-      if (this.latestState.pendingCityResolution) {
-        return "Resolve city outcome first.";
-      }
-      return "Wait for the enemy turn to finish.";
-    }
-    if (actionId.startsWith("city-focus-")) {
-      if (!selectedCity || selectedCity.owner !== "player") {
-        return "Select one of your cities to set focus.";
-      }
-      if (!canIssueOrders) {
-        return "You can set focus on your turn only.";
-      }
-      return "Focus cannot be changed right now.";
+    if (actionId === "unit-skip") {
+      return this.latestState.uiActions?.skipUnitReason ?? "Cannot skip this unit right now.";
     }
     if (actionId.startsWith("city-enqueue-")) {
-      if (!selectedCity || selectedCity.owner !== "player") {
-        return "Select one of your cities to manage production.";
-      }
-      if (!canIssueOrders) {
-        return "You can manage queue on your turn only.";
-      }
       return this.latestState.uiActions?.cityQueueReason ?? "Queue is unavailable right now.";
     }
+    if (actionId.startsWith("city-production-tab-")) {
+      return this.latestState.uiActions?.canSetCityProductionTab
+        ? "Production tab is unavailable right now."
+        : "Select one of your cities first.";
+    }
     if (actionId.startsWith("city-queue-slot-")) {
-      if (!selectedCity || selectedCity.owner !== "player") {
-        return "Select one of your cities to manage production.";
-      }
-      if (!canIssueOrders) {
-        return "You can manage queue on your turn only.";
-      }
-      const rawIndex = actionId.slice("city-queue-slot-".length);
-      const index = Number(rawIndex);
-      if (!Number.isInteger(index) || index < 0 || index >= selectedCity.queue.length) {
-        return "This queue slot is empty.";
-      }
-      return "Cannot remove this queue item right now.";
+      return "This queue slot is empty.";
+    }
+    if (actionId.startsWith("city-focus-")) {
+      return "Focus cannot be changed right now.";
     }
     return null;
   }
 
   layout(gameSize) {
-    const buttonX = gameSize.width - 120;
-    this.selectionChip.setPosition(24, 52);
-    this.researchChip.setPosition(24, 82);
-    this.economyChip.setPosition(24, 112);
+    const isCompact = gameSize.width < COMPACT_BREAKPOINT;
+    const edgePadding = isCompact ? 10 : 24;
 
-    this.endTurnButton.rectangle.setPosition(buttonX, 30);
-    this.endTurnButton.label.setPosition(buttonX, 30);
+    this.turnLabel.setPosition(edgePadding, 16);
+    this.foodLabel.setPosition(edgePadding, 48);
+    this.productionLabel.setPosition(edgePadding, 74);
+    this.scienceLabel.setPosition(edgePadding, 100);
+    this.layoutResourceDeltas();
 
-    this.foundCityButton.rectangle.setPosition(buttonX, 78);
-    this.foundCityButton.label.setPosition(buttonX, 78);
+    this.notificationVisibleRows = isCompact ? 4 : this.notificationRows.length;
+    const notificationWidth = isCompact ? Math.max(170, Math.floor(gameSize.width * 0.46)) : 360;
+    const notificationHeight = isCompact ? 44 + this.notificationVisibleRows * 20 : 236;
+    const notificationLeft = gameSize.width - edgePadding - notificationWidth;
+    this.notificationPanel.setPosition(notificationLeft + notificationWidth / 2, edgePadding + notificationHeight / 2);
+    this.notificationPanel.setSize(notificationWidth, notificationHeight);
+    this.notificationPanel.setDisplaySize(notificationWidth, notificationHeight);
+    this.notificationTitle.setPosition(notificationLeft + 12, edgePadding + 10);
+    const rowStartY = edgePadding + 34;
+    for (let i = 0; i < this.notificationRows.length; i += 1) {
+      const row = this.notificationRows[i];
+      row.setPosition(notificationLeft + 12, rowStartY + i * 20);
+      row.setWordWrapWidth(Math.max(100, notificationWidth - 20), true);
+      if (i >= this.notificationVisibleRows) {
+        row.setVisible(false);
+      }
+    }
 
-    this.restartButton.rectangle.setPosition(buttonX, 126);
-    this.restartButton.label.setPosition(buttonX, 126);
+    const contextHeight = isCompact ? 206 : CONTEXT_PANEL_HEIGHT;
+    const contextWidth = isCompact ? gameSize.width - edgePadding * 2 : Math.max(400, Math.min(760, gameSize.width - 560));
+    const contextX = gameSize.width / 2;
+    const contextY = gameSize.height - contextHeight / 2 - (isCompact ? 10 : 12);
+    const contextTop = contextY - contextHeight / 2;
+    const activeCityProductionButtons =
+      (this.latestState?.uiActions?.cityProductionTab ?? "units") === "buildings"
+        ? this.cityBuildingButtons
+        : this.cityProductionButtons;
+    this.contextPanel.setPosition(contextX, contextY);
+    this.contextPanel.setSize(contextWidth, contextHeight);
+    this.contextPanelTitle.setPosition(contextX, contextY - (isCompact ? 84 : 58));
 
-    const panelWidth = Math.max(372, Math.min(gameSize.width - 12, 760));
-    const panelHeight = 118;
-    const panelX = gameSize.width / 2;
-    const panelY = gameSize.height - panelHeight / 2 - 10;
-    this.cityPanel.setPosition(panelX, panelY);
-    this.cityPanel.setSize(panelWidth, panelHeight);
-    this.cityPanelTitle.setPosition(panelX, panelY - 42);
+    if (isCompact) {
+      this.layoutButtonRow(this.cityFocusButtons, contextX, contextY - 58, 6);
+      this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY - 24, 8);
+      this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 10, 6);
+      this.layoutButtonRow(this.cityQueueButtons, contextX, contextY + 44, 6);
+      this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 20, 10);
+    } else {
+      this.layoutButtonRow(this.cityFocusButtons, contextX, contextY - 34, 6);
+      this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY, 8);
+      this.layoutButtonRow([...activeCityProductionButtons, ...this.cityQueueButtons], contextX, contextY + 34, 6);
+      this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 16, 16);
+    }
 
-    const focusRowY = panelY - 14;
-    this.layoutButtonRow(this.cityFocusButtons, panelX, focusRowY, 6);
+    const endTurnWidth = isCompact ? 150 : BUTTON_WIDTH;
+    this.endTurnButton.width = endTurnWidth;
+    this.endTurnButton.rectangle.setSize(endTurnWidth, BUTTON_HEIGHT);
+    const selectedPanelWidth = isCompact ? Math.max(150, Math.min(230, Math.floor(gameSize.width * 0.5))) : 460;
+    const selectedPanelHeight = isCompact ? 88 : 92;
+    const selectedPanelY = isCompact ? contextTop - selectedPanelHeight - 8 : gameSize.height - 118;
+    this.selectedPanel.setPosition(edgePadding, selectedPanelY);
+    this.selectedPanel.setSize(selectedPanelWidth, selectedPanelHeight);
+    this.selectedTitle.setPosition(edgePadding + 14, selectedPanelY + 12);
+    this.selectedDetails.setPosition(edgePadding + 14, selectedPanelY + 38);
+    this.selectedDetails.setWordWrapWidth(Math.max(120, selectedPanelWidth - 24), true);
 
-    const queueRowY = panelY + 24;
-    const queueRowButtons = [...this.cityProductionButtons, ...this.cityQueueButtons];
-    this.layoutButtonRow(queueRowButtons, panelX, queueRowY, 4);
+    const endTurnX = gameSize.width - edgePadding - endTurnWidth / 2;
+    const endTurnY = isCompact ? selectedPanelY + selectedPanelHeight / 2 : gameSize.height - 34;
+    this.endTurnButton.rectangle.setPosition(endTurnX, endTurnY);
+    this.endTurnButton.label.setPosition(endTurnX, endTurnY);
 
-    this.hintPanel.setPosition(gameSize.width / 2, 56);
-    this.hintPrimary.setPosition(gameSize.width / 2, 44);
-    this.hintSecondary.setPosition(gameSize.width / 2, 66);
-
-    this.toastPanel.setPosition(gameSize.width / 2, gameSize.height - 30);
-    this.toastText.setPosition(gameSize.width / 2, gameSize.height - 30);
+    const hintWidth = isCompact ? gameSize.width - edgePadding * 2 : 440;
+    const hintHeight = isCompact ? 82 : 74;
+    const hintY = isCompact ? Math.max(178, notificationHeight + edgePadding + hintHeight / 2) : 56;
+    this.hintPanel.setPosition(gameSize.width / 2, hintY);
+    this.hintPanel.setSize(hintWidth, hintHeight);
+    this.hintPrimary.setPosition(gameSize.width / 2, hintY - 12);
+    this.hintSecondary.setPosition(gameSize.width / 2, hintY + 10);
+    this.hintPrimary.setWordWrapWidth(Math.max(140, hintWidth - 20), true);
+    this.hintSecondary.setWordWrapWidth(Math.max(120, hintWidth - 20), true);
 
     this.modalBackdrop.setPosition(gameSize.width / 2, gameSize.height / 2);
     this.modalBackdrop.setSize(gameSize.width + 4, gameSize.height + 4);
+
+    this.pausePanel.setPosition(gameSize.width / 2, gameSize.height / 2 - 26);
+    this.pauseTitle.setPosition(gameSize.width / 2, gameSize.height / 2 - 66);
+    this.pauseResumeButton.rectangle.setPosition(gameSize.width / 2 - 90, gameSize.height / 2 + 10);
+    this.pauseResumeButton.label.setPosition(gameSize.width / 2 - 90, gameSize.height / 2 + 10);
+    this.pauseRestartButton.rectangle.setPosition(gameSize.width / 2 + 90, gameSize.height / 2 + 10);
+    this.pauseRestartButton.label.setPosition(gameSize.width / 2 + 90, gameSize.height / 2 + 10);
 
     this.restartConfirmPanel.setPosition(gameSize.width / 2, gameSize.height / 2 - 30);
     this.restartConfirmTitle.setPosition(gameSize.width / 2, gameSize.height / 2 - 62);
@@ -562,95 +578,158 @@ export class UIScene extends Phaser.Scene {
 
   updateFromState(gameState) {
     this.latestState = gameState;
-    const selectedUnit = gameState.units.find((unit) => unit.id === gameState.selectedUnitId);
-    const selectedCity = gameState.cities.find((city) => city.id === gameState.selectedCityId);
+    const selectedUnit = gameState.units.find((unit) => unit.id === gameState.selectedUnitId) ?? null;
+    const selectedCity = gameState.cities.find((city) => city.id === gameState.selectedCityId) ?? null;
+    const hasSelection = !!selectedUnit || !!selectedCity;
     const phaseText = gameState.turnState.phase === "enemy" ? "Enemy" : "Player";
     const hasPendingCityResolution = !!gameState.pendingCityResolution;
     const canIssueOrders = gameState.turnState.phase === "player" && gameState.match.status === "ongoing" && !hasPendingCityResolution;
-    const canFoundCity = !!gameState.uiActions?.canFoundCity && canIssueOrders;
+    const projected = gameState.projectedNetIncome ?? gameState.projectedIncome ?? { food: 0, production: 0, science: 1 };
+    const economy = gameState.economy?.player ?? { foodStock: 0, productionStock: 0, scienceStock: 0 };
 
     this.turnLabel.setText(`Turn ${gameState.turnState.turn} - ${phaseText}`);
-    this.selectionChip.setText(this.getSelectionChipText(selectedUnit, selectedCity));
-    this.researchChip.setText(this.getResearchChipText(gameState));
-    this.economyChip.setText(this.getEconomyChipText(gameState));
+    this.foodLabel.setText(`Food: ${economy.foodStock}`);
+    this.foodDeltaLabel.setText(`(${formatSigned(projected.food)})`);
+    this.foodDeltaLabel.setColor(getDeltaColor(projected.food));
+    this.productionLabel.setText(`Production: ${economy.productionStock}`);
+    this.productionDeltaLabel.setText(`(${formatSigned(projected.production)})`);
+    this.productionDeltaLabel.setColor(getDeltaColor(projected.production));
+    this.scienceLabel.setText(`Science: ${economy.scienceStock}`);
+    this.scienceDeltaLabel.setText(`(${formatSigned(projected.science)})`);
+    this.scienceDeltaLabel.setColor(getDeltaColor(projected.science));
+    this.layoutResourceDeltas();
+
+    this.selectedPanel.setVisible(hasSelection);
+    this.selectedTitle.setVisible(hasSelection);
+    this.selectedDetails.setVisible(hasSelection);
+    if (hasSelection) {
+      this.selectedDetails.setText(this.getSelectedInfoText(selectedUnit, selectedCity));
+    }
 
     this.endTurnButton.label.setText(canIssueOrders ? "End Turn" : hasPendingCityResolution ? "Resolve..." : "Enemy...");
     this.setButtonEnabled(this.endTurnButton, canIssueOrders);
-    this.setButtonEnabled(this.foundCityButton, canFoundCity);
-    this.setButtonEnabled(this.restartButton, !!gameState.uiActions?.canRestart && !hasPendingCityResolution);
 
-    this.syncCityCommandPanel(gameState, selectedCity, canIssueOrders);
+    this.syncContextMenu(gameState, selectedUnit, selectedCity, canIssueOrders);
     this.syncCityResolutionModal(gameState.pendingCityResolution);
     this.updateContextualHint();
+    this.updateNotificationCenter();
 
     const hasResult = gameState.match.status !== "ongoing";
     this.resultPanel.setVisible(hasResult);
     this.resultTitle.setVisible(hasResult);
     this.resultSubtitle.setVisible(hasResult);
     this.setCompositeVisible(this.resultRestartButton, hasResult);
-
     if (hasResult) {
-      const title = gameState.match.status === "won" ? "Victory" : "Defeat";
-      const subtitle =
-        gameState.match.reason === "elimination" ? "Enemy forces eliminated." : "Your civilization has fallen.";
-      this.resultTitle.setText(title);
-      this.resultSubtitle.setText(subtitle);
+      this.resultTitle.setText(gameState.match.status === "won" ? "Victory" : "Defeat");
+      this.resultSubtitle.setText(
+        gameState.match.reason === "elimination" ? "Enemy forces eliminated." : "Your civilization has fallen."
+      );
       this.setButtonEnabled(this.resultRestartButton, true);
     }
   }
 
-  syncCityCommandPanel(gameState, selectedCity, canIssueOrders) {
-    const panelVisible = !!selectedCity && selectedCity.owner === "player" && gameState.match.status === "ongoing";
-    this.cityPanelVisible = panelVisible;
-    this.setCityPanelVisible(panelVisible);
-    if (!panelVisible || !selectedCity) {
+  syncContextMenu(gameState, selectedUnit, selectedCity, canIssueOrders) {
+    const menuType = gameState.uiActions?.contextMenuType ?? null;
+    this.contextMenuMode = menuType;
+    const visible = menuType !== null && gameState.match.status === "ongoing";
+    this.contextPanel.setVisible(visible);
+    this.contextPanelTitle.setVisible(visible);
+    if (!visible) {
+      this.setCityControlsVisible(false);
+      this.setUnitControlsVisible(false);
       return;
     }
 
-    const queueMax = gameState.uiActions?.cityQueueMax ?? CITY_PANEL_QUEUE_MAX;
-    const queueLength = selectedCity.queue.length;
-    this.cityPanelTitle.setText(`City Commands  Pop ${selectedCity.population}  Queue ${queueLength}/${queueMax}`);
+    if (menuType === "city" && selectedCity) {
+      this.contextPanelTitle.setText(`City Commands  Pop ${selectedCity.population}  Queue ${selectedCity.queue.length}/${gameState.uiActions.cityQueueMax}`);
+      this.setCityControlsVisible(true);
+      this.setUnitControlsVisible(false);
 
-    for (let i = 0; i < this.cityFocusButtons.length; i += 1) {
-      const focus = FOCUS_MODES[i];
-      const button = this.cityFocusButtons[i];
-      this.setButtonActive(button, selectedCity.focus === focus);
-      this.setButtonEnabled(button, canIssueOrders && !!gameState.uiActions?.canSetCityFocus);
-    }
-
-    const byType = new Map((gameState.uiActions?.cityProductionChoices ?? []).map((choice) => [choice.type, choice]));
-    const canQueueProduction = canIssueOrders && !!gameState.uiActions?.canQueueProduction;
-    for (let i = 0; i < this.cityProductionButtons.length; i += 1) {
-      const button = this.cityProductionButtons[i];
-      const unitType = PRODUCTION_TYPES[i];
-      const choice = byType.get(unitType);
-      const isUnlocked = !!choice?.unlocked;
-      const affordable = !!choice?.affordable;
-      const costText = choice ? `${choice.cost}` : "--";
-      const lockSuffix = isUnlocked ? "" : "X";
-      this.setButtonLabel(button, `${UNIT_SHORT_LABELS[unitType]}${lockSuffix}${costText}`);
-      this.setButtonEnabled(button, canQueueProduction && isUnlocked);
-      if (button.enabled) {
-        button.label.setAlpha(affordable ? 1 : 0.9);
+      for (let i = 0; i < this.cityFocusButtons.length; i += 1) {
+        const focus = FOCUS_MODES[i];
+        const button = this.cityFocusButtons[i];
+        this.setButtonActive(button, selectedCity.focus === focus);
+        this.setButtonEnabled(button, canIssueOrders && !!gameState.uiActions?.canSetCityFocus);
       }
+
+      const productionTab = gameState.uiActions?.cityProductionTab ?? "units";
+      for (let i = 0; i < this.cityProductionTabButtons.length; i += 1) {
+        const tab = PRODUCTION_TABS[i];
+        const button = this.cityProductionTabButtons[i];
+        this.setButtonActive(button, tab === productionTab);
+        this.setButtonEnabled(button, canIssueOrders && !!gameState.uiActions?.canSetCityProductionTab);
+      }
+
+      const choiceByType = new Map((gameState.uiActions?.cityProductionChoices ?? []).map((choice) => [choice.type, choice]));
+      const canQueueUnits = canIssueOrders && !!gameState.uiActions?.canQueueUnits;
+      for (let i = 0; i < this.cityProductionButtons.length; i += 1) {
+        const unitType = UNIT_PRODUCTION_TYPES[i];
+        const choice = choiceByType.get(unitType);
+        const button = this.cityProductionButtons[i];
+        const cost = choice?.cost ?? 0;
+        this.setButtonLabel(button, `${formatUnitLabel(unitType)} ${cost}`);
+        this.setCompositeVisible(button, productionTab === "units");
+        this.setButtonEnabled(button, productionTab === "units" && canQueueUnits && !!choice?.unlocked);
+        if (button.enabled && !choice?.affordable) {
+          button.label.setAlpha(0.9);
+        }
+      }
+
+      const buildingChoiceById = new Map((gameState.uiActions?.cityBuildingChoices ?? []).map((choice) => [choice.id, choice]));
+      const canQueueBuildings = canIssueOrders && !!gameState.uiActions?.canQueueBuildings;
+      for (let i = 0; i < this.cityBuildingButtons.length; i += 1) {
+        const buildingId = BUILDING_PRODUCTION_TYPES[i];
+        const choice = buildingChoiceById.get(buildingId);
+        const button = this.cityBuildingButtons[i];
+        const cost = choice?.cost ?? 0;
+        this.setButtonLabel(button, `${formatBuildingLabel(buildingId)} ${cost}`);
+        this.setCompositeVisible(button, productionTab === "buildings");
+        this.setButtonEnabled(
+          button,
+          productionTab === "buildings" &&
+            canQueueBuildings &&
+            !!choice?.unlocked &&
+            !choice?.alreadyBuilt &&
+            !choice?.alreadyQueued
+        );
+        if (button.enabled && !choice?.affordable) {
+          button.label.setAlpha(0.9);
+        }
+      }
+
+      for (let i = 0; i < this.cityQueueButtons.length; i += 1) {
+        const button = this.cityQueueButtons[i];
+        const queueItem = selectedCity.queue[i] ?? null;
+        this.setButtonLabel(button, queueItem ? `${i + 1}: ${this.getQueueItemLabel(queueItem)}` : `${i + 1}: --`);
+        this.setButtonEnabled(button, canIssueOrders && !!queueItem);
+      }
+      return;
     }
 
-    for (let i = 0; i < this.cityQueueButtons.length; i += 1) {
-      const button = this.cityQueueButtons[i];
-      const queueItem = selectedCity.queue[i] ?? null;
-      const label = queueItem ? `${i + 1}:${UNIT_SHORT_LABELS[queueItem]}` : `${i + 1}:--`;
-      this.setButtonLabel(button, label);
-      this.setButtonEnabled(button, canIssueOrders && !!queueItem);
+    if (menuType === "unit" && selectedUnit) {
+      this.contextPanelTitle.setText(`Unit Commands  ${formatUnitLabel(selectedUnit.type)}`);
+      this.setCityControlsVisible(false);
+      this.setUnitControlsVisible(true);
+      this.setButtonEnabled(this.unitFoundCityButton, canIssueOrders && !!gameState.uiActions?.canFoundCity);
+      this.setButtonEnabled(this.unitSkipButton, canIssueOrders && !!gameState.uiActions?.canSkipUnit);
+      return;
     }
+
+    this.setCityControlsVisible(false);
+    this.setUnitControlsVisible(false);
   }
 
-  setCityPanelVisible(visible) {
-    this.cityPanel.setVisible(visible);
-    this.cityPanelTitle.setVisible(visible);
+  setCityControlsVisible(visible) {
     for (const button of this.cityFocusButtons) {
       this.setCompositeVisible(button, visible);
     }
+    for (const button of this.cityProductionTabButtons) {
+      this.setCompositeVisible(button, visible);
+    }
     for (const button of this.cityProductionButtons) {
+      this.setCompositeVisible(button, visible);
+    }
+    for (const button of this.cityBuildingButtons) {
       this.setCompositeVisible(button, visible);
     }
     for (const button of this.cityQueueButtons) {
@@ -658,30 +737,33 @@ export class UIScene extends Phaser.Scene {
     }
   }
 
-  getSelectionChipText(selectedUnit, selectedCity) {
+  setUnitControlsVisible(visible) {
+    this.setCompositeVisible(this.unitFoundCityButton, visible);
+    this.setCompositeVisible(this.unitSkipButton, visible);
+  }
+
+  getSelectedInfoText(selectedUnit, selectedCity) {
     if (selectedUnit) {
-      return `Unit: ${selectedUnit.type} ${selectedUnit.health}/${selectedUnit.maxHealth} HP`;
+      return `Unit ${formatUnitLabel(selectedUnit.type)} | HP ${selectedUnit.health}/${selectedUnit.maxHealth} | Move ${selectedUnit.movementRemaining}/${selectedUnit.maxMovement} | Attack ${selectedUnit.attack} | ${selectedUnit.hasActed ? "Acted" : "Ready"}`;
     }
     if (selectedCity) {
       const localYield = selectedCity.yieldLastTurn ?? { food: 0, production: 0, science: 0 };
-      return `City: Pop ${selectedCity.population} | HP ${selectedCity.health}/${selectedCity.maxHealth} | ${selectedCity.focus} | F/P/S ${localYield.food}/${localYield.production}/${localYield.science} | ${selectedCity.identity}`;
+      return `City Pop ${selectedCity.population} | HP ${selectedCity.health}/${selectedCity.maxHealth} | Focus ${selectedCity.focus} | Identity ${selectedCity.identity} | Specialization ${selectedCity.specialization ?? "balanced"} | Yield ${localYield.food}/${localYield.production}/${localYield.science}`;
     }
-    return "Selection: none";
+    return "No unit or city selected.";
   }
 
-  getResearchChipText(gameState) {
-    const activeTechLabel = gameState.research.activeTechId ?? "none";
-    return `Research: ${activeTechLabel} (${gameState.research.progress})`;
-  }
-
-  getEconomyChipText(gameState) {
-    const playerEconomy = gameState.economy?.player ?? {
-      foodStock: 0,
-      productionStock: 0,
-      scienceStock: 0,
-    };
-    const income = gameState.economy?.researchIncomeThisTurn ?? 0;
-    return `Economy: F${playerEconomy.foodStock} P${playerEconomy.productionStock} S${playerEconomy.scienceStock} (+${income} sci)`;
+  getQueueItemLabel(queueItem) {
+    if (!queueItem) {
+      return "--";
+    }
+    if (typeof queueItem === "string") {
+      return formatUnitLabel(queueItem);
+    }
+    if (queueItem.kind === "building") {
+      return formatBuildingLabel(queueItem.id);
+    }
+    return formatUnitLabel(queueItem.id);
   }
 
   updateContextualHint() {
@@ -689,12 +771,10 @@ export class UIScene extends Phaser.Scene {
       this.setHint(null, null, null);
       return;
     }
-
     if (this.hoverHint) {
       this.setHint(this.hoverHint, null, "warning");
       return;
     }
-
     const uiHints = this.latestState.uiHints ?? { primary: null, secondary: null, level: null };
     this.setHint(uiHints.primary, uiHints.secondary, uiHints.level);
   }
@@ -704,11 +784,9 @@ export class UIScene extends Phaser.Scene {
     this.hintPanel.setVisible(hasPrimary);
     this.hintPrimary.setVisible(hasPrimary);
     this.hintSecondary.setVisible(hasPrimary && !!secondary);
-
     if (!hasPrimary) {
       return;
     }
-
     this.hintPrimary.setText(primary);
     this.hintSecondary.setText(secondary ?? "");
     if (level === "warning") {
@@ -724,37 +802,112 @@ export class UIScene extends Phaser.Scene {
     }
   }
 
-  handleToastRequested(payload) {
+  handleNotificationRequested(payload) {
     const message = typeof payload === "string" ? payload : payload?.message;
     if (!message) {
       return;
     }
-
-    const level = typeof payload === "object" ? payload.level : "info";
-    if (this.toastTimer) {
-      this.toastTimer.remove(false);
-      this.toastTimer = null;
-    }
-
-    this.toastText.setText(message);
-    this.toastPanel.setVisible(true);
-    this.toastText.setVisible(true);
-    if (level === "warning") {
-      this.toastPanel.setFillStyle(0x6f241a, 0.9);
-    } else {
-      this.toastPanel.setFillStyle(0x2f3d22, 0.88);
-    }
-
-    this.toastTimer = this.time.delayedCall(1700, () => {
-      this.toastPanel.setVisible(false);
-      this.toastText.setVisible(false);
-      this.toastTimer = null;
+    const level = typeof payload === "object" ? payload.level ?? "info" : "info";
+    this.notifications.unshift({
+      id: `n-${this.notificationNextId}`,
+      level,
+      message,
+      createdAtMs: Date.now(),
     });
+    this.notificationNextId += 1;
+    this.updateNotificationCenter();
+  }
+
+  handleNotificationsReset = () => {
+    this.notifications = [];
+    this.notificationScroll = 0;
+    this.updateNotificationCenter();
+  };
+
+  updateNotificationCenter() {
+    const visibleCount = this.notificationVisibleRows || this.notificationRows.length;
+    const maxScroll = Math.max(0, this.notifications.length - visibleCount);
+    this.notificationScroll = Phaser.Math.Clamp(this.notificationScroll, 0, maxScroll);
+    const slice = this.notifications.slice(this.notificationScroll, this.notificationScroll + visibleCount);
+    const shownRows = slice.length;
+    const contentHeight = shownRows > 0 ? shownRows * 20 + 14 : 0;
+    const panelHeight = 40 + contentHeight;
+    const bounds = this.notificationPanel.getBounds();
+    this.notificationPanel.setSize(this.notificationPanel.displayWidth, panelHeight);
+    this.notificationPanel.setDisplaySize(this.notificationPanel.displayWidth, panelHeight);
+    this.notificationPanel.setPosition(bounds.centerX, bounds.top + panelHeight / 2);
+    this.notificationTitle.setPosition(bounds.left + 12, bounds.top + 10);
+
+    for (let i = 0; i < this.notificationRows.length; i += 1) {
+      const row = this.notificationRows[i];
+      if (i >= visibleCount) {
+        row.setVisible(false);
+        continue;
+      }
+      const entry = slice[i];
+      if (!entry) {
+        row.setVisible(false);
+        continue;
+      }
+      row.setPosition(bounds.left + 12, bounds.top + 34 + i * 20);
+      row.setVisible(true);
+      row.setText(`${entry.level === "warning" ? "[Warning]" : "[Info]"} ${entry.message}`);
+      row.setColor(entry.level === "warning" ? "#7b3024" : "#3f2d18");
+    }
+  }
+
+  handleWheel(pointer, _gameObjects, _deltaX, deltaY) {
+    if (!this.isPointerInNotificationCenter(pointer)) {
+      return;
+    }
+    const visibleCount = this.notificationVisibleRows || this.notificationRows.length;
+    if (this.notifications.length <= visibleCount) {
+      return;
+    }
+    const next = this.notificationScroll + (deltaY > 0 ? 1 : -1);
+    this.notificationScroll = Phaser.Math.Clamp(next, 0, Math.max(0, this.notifications.length - visibleCount));
+    this.updateNotificationCenter();
+  }
+
+  isPointerInNotificationCenter(pointer) {
+    const bounds = this.notificationPanel.getBounds();
+    return Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y);
+  }
+
+  openPauseMenu() {
+    if (this.cityResolutionOpen || this.pauseMenuOpen) {
+      return this.pauseMenuOpen;
+    }
+    this.pauseMenuOpen = true;
+    this.pausePanel.setVisible(true);
+    this.pauseTitle.setVisible(true);
+    this.setCompositeVisible(this.pauseResumeButton, true);
+    this.setCompositeVisible(this.pauseRestartButton, true);
+    this.setButtonEnabled(this.pauseResumeButton, true);
+    this.setButtonEnabled(this.pauseRestartButton, true);
+    this.hoverHint = null;
+    this.updateContextualHint();
+    this.syncModalState();
+    return true;
+  }
+
+  closePauseMenu() {
+    if (!this.pauseMenuOpen) {
+      return false;
+    }
+    this.pauseMenuOpen = false;
+    this.pausePanel.setVisible(false);
+    this.pauseTitle.setVisible(false);
+    this.setCompositeVisible(this.pauseResumeButton, false);
+    this.setCompositeVisible(this.pauseRestartButton, false);
+    this.closeRestartConfirm();
+    this.syncModalState();
+    return true;
   }
 
   openRestartConfirm() {
-    if (!this.latestState?.uiActions?.canRestart || this.restartConfirmOpen || this.cityResolutionOpen) {
-      return;
+    if (!this.pauseMenuOpen || this.restartConfirmOpen || this.cityResolutionOpen) {
+      return false;
     }
     this.restartConfirmOpen = true;
     this.restartConfirmPanel.setVisible(true);
@@ -764,14 +917,13 @@ export class UIScene extends Phaser.Scene {
     this.setCompositeVisible(this.restartCancelButton, true);
     this.setButtonEnabled(this.restartConfirmButton, true);
     this.setButtonEnabled(this.restartCancelButton, true);
-    this.hoverHint = null;
-    this.updateContextualHint();
     this.syncModalState();
+    return true;
   }
 
   closeRestartConfirm() {
     if (!this.restartConfirmOpen) {
-      return;
+      return false;
     }
     this.restartConfirmOpen = false;
     this.restartConfirmPanel.setVisible(false);
@@ -779,21 +931,19 @@ export class UIScene extends Phaser.Scene {
     this.restartConfirmSubtitle.setVisible(false);
     this.setCompositeVisible(this.restartConfirmButton, false);
     this.setCompositeVisible(this.restartCancelButton, false);
-    this.hoverHint = null;
-    this.updateContextualHint();
     this.syncModalState();
+    return true;
   }
 
   confirmRestart() {
     this.closeRestartConfirm();
+    this.closePauseMenu();
     gameEvents.emit("restart-match-requested");
   }
 
   syncCityResolutionModal(pendingResolution) {
     if (pendingResolution) {
       this.cityResolutionOpen = true;
-      this.cityOutcomeTitle.setText("City conquered");
-      this.cityOutcomeSubtitle.setText("Capture to keep it, or Raze to destroy it.");
       this.cityOutcomePanel.setVisible(true);
       this.cityOutcomeTitle.setVisible(true);
       this.cityOutcomeSubtitle.setVisible(true);
@@ -813,7 +963,7 @@ export class UIScene extends Phaser.Scene {
   }
 
   syncModalState() {
-    const nextOpen = this.restartConfirmOpen || this.cityResolutionOpen;
+    const nextOpen = this.pauseMenuOpen || this.restartConfirmOpen || this.cityResolutionOpen;
     this.modalBackdrop.setVisible(nextOpen);
     if (nextOpen !== this.modalStateOpen) {
       this.modalStateOpen = nextOpen;
@@ -844,8 +994,8 @@ export class UIScene extends Phaser.Scene {
     button.rectangle.setFillStyle(button.palette.enabledFill, button.palette.enabledAlpha);
   }
 
-  setButtonLabel(button, label) {
-    button.label.setText(label);
+  setButtonLabel(button, text) {
+    button.label.setText(text);
   }
 
   setCompositeVisible(button, visible) {
@@ -853,30 +1003,72 @@ export class UIScene extends Phaser.Scene {
     button.label.setVisible(visible);
   }
 
-  getEndTurnButtonCenter() {
-    return { x: this.endTurnButton.rectangle.x, y: this.endTurnButton.rectangle.y };
-  }
-
   handleEscapePressed() {
     if (this.restartConfirmOpen) {
       this.closeRestartConfirm();
+      return;
+    }
+    if (this.pauseMenuOpen) {
+      this.closePauseMenu();
+      return;
+    }
+    if (!this.cityResolutionOpen) {
+      this.openPauseMenu();
     }
   }
 
   isModalButton(actionId) {
     return (
-      actionId === "restartConfirm" ||
-      actionId === "restartCancel" ||
+      actionId === "pause-resume" ||
+      actionId === "pause-restart" ||
+      actionId === "restart-confirm" ||
+      actionId === "restart-cancel" ||
       actionId === "cityCapture" ||
       actionId === "cityRaze"
     );
   }
 
   isAnyModalOpen() {
-    return this.restartConfirmOpen || this.cityResolutionOpen;
+    return this.pauseMenuOpen || this.restartConfirmOpen || this.cityResolutionOpen;
+  }
+
+  getEndTurnButtonCenter() {
+    return { x: this.endTurnButton.rectangle.x, y: this.endTurnButton.rectangle.y };
+  }
+
+  getRuntimeUiState() {
+    return {
+      pauseMenuOpen: this.pauseMenuOpen,
+      restartConfirmOpen: this.restartConfirmOpen,
+      notifications: this.notifications.map((entry) => ({ ...entry })),
+    };
+  }
+
+  layoutResourceDeltas() {
+    this.foodDeltaLabel.setPosition(this.foodLabel.x + this.foodLabel.width + 6, this.foodLabel.y + 2);
+    this.productionDeltaLabel.setPosition(this.productionLabel.x + this.productionLabel.width + 6, this.productionLabel.y + 2);
+    this.scienceDeltaLabel.setPosition(this.scienceLabel.x + this.scienceLabel.width + 6, this.scienceLabel.y + 2);
+  }
+
+  testOpenPauseMenu() {
+    return this.openPauseMenu();
+  }
+
+  testClosePauseMenu() {
+    this.closePauseMenu();
+    return !this.pauseMenuOpen;
+  }
+
+  testGetPauseMenuState() {
+    return {
+      open: this.pauseMenuOpen,
+      restartConfirmOpen: this.restartConfirmOpen,
+      backdropVisible: this.modalBackdrop.visible,
+    };
   }
 
   testOpenRestartConfirm() {
+    this.openPauseMenu();
     this.openRestartConfirm();
     return this.restartConfirmOpen;
   }
@@ -919,20 +1111,40 @@ export class UIScene extends Phaser.Scene {
 
   testGetCityPanelState() {
     return {
-      visible: this.cityPanelVisible,
-      focusButtons: this.cityFocusButtons.map((button) => ({
+      visible: this.contextPanel.visible,
+      mode: this.contextMenuMode,
+      cityFocusButtons: this.cityFocusButtons.map((button) => ({
         actionId: button.actionId,
         visible: button.rectangle.visible && button.label.visible,
         enabled: button.enabled,
         active: button.isActive,
       })),
-      productionButtons: this.cityProductionButtons.map((button) => ({
+      cityProductionTabButtons: this.cityProductionTabButtons.map((button) => ({
+        actionId: button.actionId,
+        label: button.label.text,
+        visible: button.rectangle.visible && button.label.visible,
+        enabled: button.enabled,
+        active: button.isActive,
+      })),
+      cityProductionButtons: this.cityProductionButtons.map((button) => ({
         actionId: button.actionId,
         label: button.label.text,
         visible: button.rectangle.visible && button.label.visible,
         enabled: button.enabled,
       })),
-      queueButtons: this.cityQueueButtons.map((button) => ({
+      cityBuildingButtons: this.cityBuildingButtons.map((button) => ({
+        actionId: button.actionId,
+        label: button.label.text,
+        visible: button.rectangle.visible && button.label.visible,
+        enabled: button.enabled,
+      })),
+      cityQueueButtons: this.cityQueueButtons.map((button) => ({
+        actionId: button.actionId,
+        label: button.label.text,
+        visible: button.rectangle.visible && button.label.visible,
+        enabled: button.enabled,
+      })),
+      unitButtons: [this.unitFoundCityButton, this.unitSkipButton].map((button) => ({
         actionId: button.actionId,
         label: button.label.text,
         visible: button.rectangle.visible && button.label.visible,
@@ -940,4 +1152,41 @@ export class UIScene extends Phaser.Scene {
       })),
     };
   }
+
+  testGetNotificationCenterState() {
+    return {
+      count: this.notifications.length,
+      scroll: this.notificationScroll,
+      entries: this.notifications.slice(0, 12).map((entry) => ({ ...entry })),
+    };
+  }
+}
+
+function formatSigned(value) {
+  return `${value >= 0 ? "+" : ""}${value}`;
+}
+
+function getDeltaColor(value) {
+  if (value > 0) {
+    return "#2f7a41";
+  }
+  if (value < 0) {
+    return "#9a3a2b";
+  }
+  return "#5a4224";
+}
+
+function formatUnitLabel(type) {
+  return UNIT_LABELS[type] ?? capitalizeLabel(type);
+}
+
+function formatBuildingLabel(type) {
+  return BUILDING_LABELS[type] ?? capitalizeLabel(type);
+}
+
+function capitalizeLabel(value) {
+  if (!value) {
+    return "";
+  }
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }

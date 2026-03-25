@@ -6,16 +6,22 @@ import { DEFAULT_UNLOCKED_UNITS, createUnit } from "./unitData.js";
 
 export const DEFAULT_MATCH_SEED = 20260324;
 export const DEFAULT_MIN_FACTION_DISTANCE = 7;
+export const ENEMY_PERSONALITY_ORDER = ["raider", "expansionist", "guardian"];
 
 const MATCH_LAYOUT_ATTEMPTS = 72;
 
 /**
- * @param {{ seed?: number|string, minFactionDistance?: number }} [options]
+ * @param {{
+ *   seed?: number|string,
+ *   minFactionDistance?: number,
+ *   enemyPersonality?: import("./types.js").EnemyPersonality
+ * }} [options]
  * @returns {import("./types.js").GameState}
  */
 export function createInitialGameState(options = {}) {
   const normalizedSeed = normalizeSeed(options.seed ?? DEFAULT_MATCH_SEED);
   const minFactionDistance = Math.max(3, options.minFactionDistance ?? DEFAULT_MIN_FACTION_DISTANCE);
+  const enemyPersonality = resolveEnemyPersonality(options.enemyPersonality, normalizedSeed);
   const layout = generateMatchLayout(MAP_WIDTH, MAP_HEIGHT, normalizedSeed, minFactionDistance);
 
   return {
@@ -68,6 +74,13 @@ export function createInitialGameState(options = {}) {
       status: "ongoing",
       reason: null,
     },
+    ai: {
+      enemy: {
+        personality: enemyPersonality,
+        lastGoal: null,
+        lastTurnSummary: null,
+      },
+    },
     economy: {
       player: createEmptyEconomyBucket(),
       enemy: createEmptyEconomyBucket(),
@@ -79,6 +92,19 @@ export function createInitialGameState(options = {}) {
       city: 1,
     },
   };
+}
+
+/**
+ * @param {import("./types.js").EnemyPersonality|undefined} override
+ * @param {number} seed
+ * @returns {import("./types.js").EnemyPersonality}
+ */
+function resolveEnemyPersonality(override, seed) {
+  if (override === "raider" || override === "expansionist" || override === "guardian") {
+    return override;
+  }
+  const index = Math.abs(seed) % ENEMY_PERSONALITY_ORDER.length;
+  return /** @type {import("./types.js").EnemyPersonality} */ (ENEMY_PERSONALITY_ORDER[index]);
 }
 
 function createEmptyEconomyBucket() {

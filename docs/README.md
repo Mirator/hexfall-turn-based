@@ -16,6 +16,10 @@ Every meaningful work item in this repository must be captured in a spec file un
 - [spec-010-economy-and-city-identity-lite.md](./spec-010-economy-and-city-identity-lite.md) - Empire-wide economy stocks, city focus/identity, and yield-driven growth/production.
 - [spec-011-city-siege-and-capture-lite.md](./spec-011-city-siege-and-capture-lite.md) - City HP, assault flow, capture/raze resolution, and deterministic AI outcome policy.
 - [spec-012-city-bottom-command-panel-and-queue-ui.md](./spec-012-city-bottom-command-panel-and-queue-ui.md) - Contextual city command panel with direct focus controls and 3-slot production queue UX.
+- [spec-013-hud-layout-context-actions-and-notification-center.md](./spec-013-hud-layout-context-actions-and-notification-center.md) - HUD layout rework, shared unit/city context commands, Esc pause/restart path, and persistent notification center.
+- [spec-014-ai-personalities-and-strategic-goals.md](./spec-014-ai-personalities-and-strategic-goals.md) - Deterministic AI personalities, goal/action scoring, and personality-aware strategic choices.
+- [spec-015-combat-roles-terrain-bonuses-and-ranged.md](./spec-015-combat-roles-terrain-bonuses-and-ranged.md) - Archer tech/unit, armor + terrain + role combat math, range gates, and combat breakdown payloads.
+- [spec-016-buildings-and-city-specialization-lite.md](./spec-016-buildings-and-city-specialization-lite.md) - Shared unit/building queue, building effects, production tabs, and building-driven city specialization.
 
 ## Spec Template Rules
 

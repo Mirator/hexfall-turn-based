@@ -11,7 +11,8 @@
 - Chosen: ring-1 workable tiles with deterministic assignment by focus.
 - Chosen: growth and production spend from empire stockpiles, not per-city stores.
 - Chosen: city focus is set directly from contextual city panel buttons (not cycle-only UX).
-- Chosen: city production spending follows queue-front consumption with finite queue slots.
+- Chosen: city production spending follows queue-front consumption with finite queue slots and typed queue items.
+- Chosen: city buildings add local yields and building-driven city specialization.
 - Chosen: research consumes empire science stock with carryover.
 - Chosen: on city capture, city economy identity fields persist and ownership flips.
 - Rejected for now: gold/upkeep/happiness/trade-route systems.
@@ -24,6 +25,8 @@
   - `player`, `enemy`, `researchIncomeThisTurn`
 - City economy/identity fields:
   - `focus`, `workedHexes`, `yieldLastTurn`, `identity`, `growthProgress`
+- City extension fields:
+  - `buildings`, `specialization`, `productionTab`, typed `queue` entries
 - City durability fields used with capture flow:
   - `health`, `maxHealth`
 - City APIs:
@@ -39,7 +42,8 @@
 - `processTurn(gameState, owner)` aggregates city yield into `economy[owner].lastTurnIncome` and stocks.
 - Growth spends empire `foodStock` with threshold `8 + (population - 1) * 4`.
 - Production spends empire `productionStock` in deterministic city-id order.
-- Player queue uses finite slots and consumes front item on successful production; enemy queue can auto-refill.
+- Shared queue (units/buildings) consumes front item on successful completion; duplicates are blocked for city buildings.
+- Enemy refill behavior is now personality-aware via AI planning (`spec-014`), not city-system cheapest fallback.
 - Capture keeps city identity/economy fields and resets city HP; raze removes city.
 - Research consumes empire science and keeps overflow/leftovers as designed.
 
@@ -54,4 +58,4 @@
 
 - No manual worker assignment UI.
 - No economy pressure from gold/upkeep.
-- No building-specific economy modifiers yet.
+- No empire-wide upkeep/maintenance pressure for buildings yet.

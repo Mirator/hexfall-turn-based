@@ -1,6 +1,14 @@
-import { getCityById, getUnitById, removeUnitById } from "../core/gameState.js";
+import { getCityById, getTileAt, getUnitById, removeUnitById } from "../core/gameState.js";
 import { distance } from "../core/hexGrid.js";
 import { CITY_MAX_HEALTH } from "./citySystem.js";
+
+const ROLE_ATTACK_BONUS = {
+  spearman: { warrior: 1 },
+  warrior: { archer: 1 },
+  archer: { spearman: 1 },
+};
+
+const DEFENSE_TERRAIN_TYPES = new Set(["forest", "hill"]);
 
 /**
  * @param {string} attackerId
@@ -17,7 +25,7 @@ export function getAttackableTargets(attackerId, gameState) {
     if (unit.id === attacker.id || unit.owner === attacker.owner || unit.health <= 0) {
       return false;
     }
-    return distance(attacker, unit) <= attacker.attackRange;
+    return isTargetInAttackRange(attacker, unit);
   });
 }
 
@@ -36,7 +44,7 @@ export function getAttackableCities(attackerId, gameState) {
     if (city.owner === attacker.owner || city.health <= 0) {
       return false;
     }
-    return distance(attacker, city) <= attacker.attackRange;
+    return isTargetInAttackRange(attacker, city);
   });
 }
 
@@ -65,7 +73,7 @@ export function canAttack(attackerId, targetId, gameState) {
     return { ok: false, reason: "unit-already-acted" };
   }
 
-  if (distance(attacker, target) > attacker.attackRange) {
+  if (!isTargetInAttackRange(attacker, target)) {
     return { ok: false, reason: "out-of-range" };
   }
 
@@ -97,7 +105,7 @@ export function canAttackCity(attackerId, cityId, gameState) {
     return { ok: false, reason: "unit-already-acted" };
   }
 
-  if (distance(attacker, city) > attacker.attackRange) {
+  if (!isTargetInAttackRange(attacker, city)) {
     return { ok: false, reason: "out-of-range" };
   }
 
@@ -108,7 +116,37 @@ export function canAttackCity(attackerId, cityId, gameState) {
  * @param {string} attackerId
  * @param {string} targetId
  * @param {import("../core/types.js").GameState} gameState
- * @returns {{ ok: boolean, reason?: string, damage?: number, targetDefeated?: boolean }}
+ * @returns {{
+ *   ok: boolean,
+ *   reason?: string,
+ *   damage?: number,
+ *   targetDefeated?: boolean,
+ *   attackerDefeated?: boolean,
+ *   breakdown?: {
+ *     baseAttack: number,
+ *     roleBonus: number,
+ *     terrainAttackBonus: number,
+ *     defenderArmor: number,
+ *     terrainDefenseBonus: number,
+ *     rawDamage: number,
+ *     damage: number
+ *   },
+ *   counterattack?: {
+ *     triggered: boolean,
+ *     reason?: string,
+ *     damage?: number,
+ *     attackerDefeated?: boolean,
+ *     breakdown?: {
+ *       baseAttack: number,
+ *       roleBonus: number,
+ *       terrainAttackBonus: number,
+ *       defenderArmor: number,
+ *       terrainDefenseBonus: number,
+ *       rawDamage: number,
+ *       damage: number
+ *     }
+ *   }
+ * }}
  */
 export function resolveAttack(attackerId, targetId, gameState) {
   const check = canAttack(attackerId, targetId, gameState);
@@ -122,7 +160,8 @@ export function resolveAttack(attackerId, targetId, gameState) {
     return { ok: false, reason: "units-missing" };
   }
 
-  const damage = attacker.attack;
+  const breakdown = buildUnitCombatBreakdown(attacker, target, gameState);
+  const damage = breakdown.damage;
   target.health = Math.max(0, target.health - damage);
 
   attacker.hasActed = true;
@@ -133,7 +172,53 @@ export function resolveAttack(attackerId, targetId, gameState) {
     removeUnitById(gameState, target.id);
   }
 
-  return { ok: true, damage, targetDefeated };
+  /** @type {{
+   *   triggered: boolean,
+   *   reason?: string,
+   *   damage?: number,
+   *   attackerDefeated?: boolean,
+   *   breakdown?: {
+   *     baseAttack: number,
+   *     roleBonus: number,
+   *     terrainAttackBonus: number,
+   *     defenderArmor: number,
+   *     terrainDefenseBonus: number,
+   *     rawDamage: number,
+   *     damage: number
+   *   }
+   * }} */
+  let counterattack = { triggered: false };
+  let attackerDefeated = false;
+
+  if (!targetDefeated) {
+    if (isTargetInAttackRange(target, attacker)) {
+      const counterBreakdown = buildUnitCombatBreakdown(target, attacker, gameState);
+      const counterDamage = counterBreakdown.damage;
+      attacker.health = Math.max(0, attacker.health - counterDamage);
+      attackerDefeated = attacker.health <= 0;
+      if (attackerDefeated) {
+        removeUnitById(gameState, attacker.id);
+      }
+      counterattack = {
+        triggered: true,
+        damage: counterDamage,
+        attackerDefeated,
+        breakdown: counterBreakdown,
+      };
+    } else {
+      counterattack = {
+        triggered: false,
+        reason: "out-of-range",
+      };
+    }
+  } else {
+    counterattack = {
+      triggered: false,
+      reason: "target-defeated",
+    };
+  }
+
+  return { ok: true, damage, targetDefeated, attackerDefeated, breakdown, counterattack };
 }
 
 /**
@@ -144,6 +229,15 @@ export function resolveAttack(attackerId, targetId, gameState) {
  *   ok: boolean,
  *   reason?: string,
  *   damage?: number,
+ *   breakdown?: {
+ *     baseAttack: number,
+ *     roleBonus: number,
+ *     terrainAttackBonus: number,
+ *     defenderArmor: number,
+ *     terrainDefenseBonus: number,
+ *     rawDamage: number,
+ *     damage: number
+ *   },
  *   cityDefeated?: boolean,
  *   pendingResolution?: boolean,
  *   outcomeChoice?: "capture"|"raze"
@@ -161,13 +255,14 @@ export function resolveCityAttack(attackerId, cityId, gameState) {
     return { ok: false, reason: "entities-missing" };
   }
 
-  const damage = attacker.attack;
+  const breakdown = buildCityCombatBreakdown(attacker, city, gameState);
+  const damage = breakdown.damage;
   city.health = Math.max(0, city.health - damage);
   attacker.hasActed = true;
   attacker.movementRemaining = 0;
 
   if (city.health > 0) {
-    return { ok: true, damage, cityDefeated: false };
+    return { ok: true, damage, breakdown, cityDefeated: false };
   }
 
   gameState.pendingCityResolution = {
@@ -178,10 +273,10 @@ export function resolveCityAttack(attackerId, cityId, gameState) {
   };
 
   if (attacker.owner === "player") {
-    return { ok: true, damage, cityDefeated: true, pendingResolution: true };
+    return { ok: true, damage, breakdown, cityDefeated: true, pendingResolution: true };
   }
 
-  const aiChoice = pickAiCityOutcome(attacker.owner, gameState);
+  const aiChoice = pickAiCityOutcome(attacker.owner, city, gameState);
   const outcome = resolveCityOutcome(city.id, aiChoice, gameState);
   if (!outcome.ok) {
     return { ok: false, reason: outcome.reason };
@@ -190,6 +285,7 @@ export function resolveCityAttack(attackerId, cityId, gameState) {
   return {
     ok: true,
     damage,
+    breakdown,
     cityDefeated: true,
     pendingResolution: false,
     outcomeChoice: aiChoice,
@@ -240,7 +336,97 @@ export function resolveCityOutcome(cityId, choice, gameState) {
   return { ok: true, cityRemoved: false, cityCaptured: true };
 }
 
-function pickAiCityOutcome(attackerOwner, gameState) {
+function pickAiCityOutcome(attackerOwner, targetCity, gameState) {
   const ownedCities = gameState.cities.filter((city) => city.owner === attackerOwner).length;
-  return ownedCities === 0 ? "capture" : "raze";
+  if (attackerOwner !== "enemy") {
+    return ownedCities === 0 ? "capture" : "raze";
+  }
+
+  const personality = gameState.ai?.enemy?.personality ?? "expansionist";
+  if (personality === "expansionist") {
+    return "capture";
+  }
+  if (personality === "raider") {
+    return ownedCities === 0 ? "capture" : "raze";
+  }
+
+  const hasNearbyAlliedCity = gameState.cities.some((city) => {
+    if (city.owner !== attackerOwner) {
+      return false;
+    }
+    return city.id !== targetCity.id && distance(city, targetCity) <= 3;
+  });
+  if (ownedCities === 0 || hasNearbyAlliedCity) {
+    return "capture";
+  }
+  return "raze";
+}
+
+function isTargetInAttackRange(attacker, target) {
+  const distanceToTarget = distance(attacker, target);
+  const minRange = getMinAttackRange(attacker);
+  const maxRange = getMaxAttackRange(attacker, minRange);
+  return distanceToTarget >= minRange && distanceToTarget <= maxRange;
+}
+
+function getMinAttackRange(unit) {
+  return Math.max(1, unit.minAttackRange ?? 1);
+}
+
+function getMaxAttackRange(unit, minRange) {
+  return Math.max(minRange, unit.attackRange ?? 1);
+}
+
+function buildUnitCombatBreakdown(attacker, defender, gameState) {
+  const baseAttack = attacker.attack;
+  const roleBonus = getRoleBonus(attacker, defender);
+  const terrainAttackBonus = getTerrainAttackBonus(attacker, gameState);
+  const defenderArmor = Math.max(0, defender.armor ?? 0);
+  const terrainDefenseBonus = getTerrainDefenseBonus(defender, gameState);
+  const rawDamage = baseAttack + roleBonus + terrainAttackBonus - defenderArmor - terrainDefenseBonus;
+  const damage = Math.max(1, rawDamage);
+
+  return {
+    baseAttack,
+    roleBonus,
+    terrainAttackBonus,
+    defenderArmor,
+    terrainDefenseBonus,
+    rawDamage,
+    damage,
+  };
+}
+
+function buildCityCombatBreakdown(attacker, city, gameState) {
+  const baseAttack = attacker.attack;
+  const roleBonus = 0;
+  const terrainAttackBonus = getTerrainAttackBonus(attacker, gameState);
+  const defenderArmor = 0;
+  const terrainDefenseBonus = getTerrainDefenseBonus(city, gameState);
+  const rawDamage = baseAttack + roleBonus + terrainAttackBonus - defenderArmor - terrainDefenseBonus;
+  const damage = Math.max(1, rawDamage);
+
+  return {
+    baseAttack,
+    roleBonus,
+    terrainAttackBonus,
+    defenderArmor,
+    terrainDefenseBonus,
+    rawDamage,
+    damage,
+  };
+}
+
+function getRoleBonus(attacker, defender) {
+  return ROLE_ATTACK_BONUS[attacker.type]?.[defender.type] ?? 0;
+}
+
+function getTerrainAttackBonus(unit, gameState) {
+  const attackerTerrain = getTileAt(gameState.map, unit.q, unit.r)?.terrainType;
+  return attackerTerrain === "hill" ? 1 : 0;
+}
+
+function getTerrainDefenseBonus(entity, gameState) {
+  const terrainType = getTileAt(gameState.map, entity.q, entity.r)?.terrainType;
+  return DEFENSE_TERRAIN_TYPES.has(terrainType) ? 1 : 0;
 }

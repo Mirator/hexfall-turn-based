@@ -63,9 +63,29 @@ window.__hexfallTest = {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testGetCityPanelState() : null;
   },
+  getPauseMenuState() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testGetPauseMenuState() : null;
+  },
+  openPauseMenu() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testOpenPauseMenu() : false;
+  },
+  closePauseMenu() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testClosePauseMenu() : false;
+  },
+  getNotificationCenterState() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testGetNotificationCenterState() : null;
+  },
   selectUnit(unitId) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testSelectUnit(unitId) : false;
+  },
+  selectCity(cityId) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testSelectCity(cityId) : false;
   },
   moveSelected(q, r) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
@@ -78,6 +98,10 @@ window.__hexfallTest = {
   attackCity(cityId) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testAttackCity(cityId) : false;
+  },
+  triggerUnitAction(actionId) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testTriggerUnitAction(actionId) : false;
   },
   foundCity() {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
@@ -95,9 +119,17 @@ window.__hexfallTest = {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testSetCityFocus(focus) : null;
   },
+  setCityProductionTab(tab) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testSetCityProductionTab(tab) : null;
+  },
   enqueueCityProduction(unitType) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testEnqueueCityProduction(unitType) : false;
+  },
+  enqueueCityBuilding(buildingId) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testEnqueueCityBuilding(buildingId) : false;
   },
   removeCityQueueAt(index) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
@@ -122,6 +154,18 @@ window.__hexfallTest = {
   arrangeCombatSkirmish(playerUnitId, enemyUnitId) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testArrangeCombatSkirmish(playerUnitId, enemyUnitId) : false;
+  },
+  setEnemyPersonality(personality) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testSetEnemyPersonality(personality) : false;
+  },
+  getEnemyAiState() {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testGetEnemyAiState() : null;
+  },
+  clearEnemyCityQueue(cityId) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testClearEnemyCityQueue(cityId) : false;
   },
 };
 

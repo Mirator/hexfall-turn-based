@@ -8,6 +8,15 @@ export const TECH_TREE = {
       units: ["spearman"],
     },
   },
+  archery: {
+    id: "archery",
+    name: "Archery",
+    cost: 6,
+    prerequisites: ["bronzeWorking"],
+    unlocks: {
+      units: ["archer"],
+    },
+  },
   masonry: {
     id: "masonry",
     name: "Masonry",
@@ -19,4 +28,4 @@ export const TECH_TREE = {
   },
 };
 
-export const TECH_ORDER = ["bronzeWorking", "masonry"];
+export const TECH_ORDER = ["bronzeWorking", "archery", "masonry"];

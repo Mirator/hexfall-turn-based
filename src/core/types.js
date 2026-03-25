@@ -35,16 +35,23 @@
  * @typedef {Object} Unit
  * @property {string} id
  * @property {"player"|"enemy"} owner
- * @property {"warrior"|"settler"|"spearman"} type
+ * @property {"warrior"|"settler"|"spearman"|"archer"} type
  * @property {number} q
  * @property {number} r
  * @property {number} health
  * @property {number} maxHealth
  * @property {number} attack
+ * @property {number} armor
  * @property {number} attackRange
+ * @property {number} minAttackRange
+ * @property {"melee"|"ranged"} role
  * @property {number} movementRemaining
  * @property {number} maxMovement
  * @property {boolean} hasActed
+ */
+
+/**
+ * @typedef {{ kind: "unit"|"building", id: string }} CityQueueItem
  */
 
 /**
@@ -58,10 +65,13 @@
  * @property {Hex[]} workedHexes
  * @property {YieldBundle} yieldLastTurn
  * @property {"agricultural"|"industrial"|"scholarly"|"balanced"} identity
+ * @property {"agricultural"|"industrial"|"scholarly"|"balanced"} specialization
  * @property {number} growthProgress
  * @property {number} health
  * @property {number} maxHealth
- * @property {string[]} queue
+ * @property {"units"|"buildings"} productionTab
+ * @property {Array<"granary"|"workshop"|"monument">} buildings
+ * @property {CityQueueItem[]} queue
  */
 
 /**
@@ -100,6 +110,42 @@
  */
 
 /**
+ * @typedef {"raider"|"expansionist"|"guardian"} EnemyPersonality
+ */
+
+/**
+ * @typedef {"foundFirstCity"|"expand"|"defend"|"assaultCity"|"huntUnits"|"regroup"|"idle"} EnemyGoal
+ */
+
+/**
+ * @typedef {Object} EnemyActionSummary
+ * @property {string} unitId
+ * @property {"foundCity"|"attackUnit"|"attackCity"|"move"|"wait"} action
+ * @property {string|null} targetId
+ * @property {number|null} q
+ * @property {number|null} r
+ * @property {number} score
+ * @property {number} cost
+ * @property {string|null} detail
+ */
+
+/**
+ * @typedef {Object} EnemyTurnSummary
+ * @property {number} turn
+ * @property {EnemyGoal} goal
+ * @property {string|null} selectedResearch
+ * @property {Array<{ cityId: string, item: string }>} queueRefills
+ * @property {EnemyActionSummary[]} actions
+ */
+
+/**
+ * @typedef {Object} EnemyAiState
+ * @property {EnemyPersonality} personality
+ * @property {EnemyGoal|null} lastGoal
+ * @property {EnemyTurnSummary|null} lastTurnSummary
+ */
+
+/**
  * @typedef {Object} GameState
  * @property {TurnState} turnState
  * @property {{ width: number, height: number, seed: number, tiles: Tile[], spawnMetadata: SpawnMetadata }} map
@@ -110,6 +156,7 @@
  * @property {ResearchState} research
  * @property {{ units: string[] }} unlocks
  * @property {MatchState} match
+ * @property {{ enemy: EnemyAiState }} ai
  * @property {{ player: EmpireEconomy, enemy: EmpireEconomy, researchIncomeThisTurn: number }} economy
  * @property {PendingCityResolution|null} pendingCityResolution
  * @property {{ unit: number, city: number }} nextIds
