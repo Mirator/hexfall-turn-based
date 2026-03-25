@@ -32,6 +32,7 @@
   - `window.__hexfallTest.getRestartModalState()`
   - `window.__hexfallTest.getNotificationCenterState()`
   - `window.__hexfallTest.setNotificationFilter(filter)`
+  - `window.__hexfallTest.clickNotificationRow(index)`
   - `window.__hexfallTest.focusNotification(index)`
   - `window.__hexfallTest.getActionPreviewState()`
   - `window.__hexfallTest.hoverHex(q, r)`
@@ -78,6 +79,7 @@
   - selected info payload and context menu payload
   - pause/restart modal state
   - `uiNotifications` feed payload with `category` and optional `focus`
+  - `cameraScroll` payload (`{ x, y }`) for deterministic camera movement assertions
   - `cameraFocusHex` for notification jump verification
   - `ai.enemy` runtime payload (`personality`, `lastGoal`, `lastTurnSummary`)
   - `lastCombatEvent` breakdown payload
@@ -89,6 +91,9 @@
   - turn readiness assistant and deterministic next-ready action path
   - context panel expanded/pinned behavior
   - notification filtering and notification-focus camera jump
+  - non-focus notification row click returns `false` without adding warning notification
+  - keyboard camera pan (`Arrow`/`WASD`) and right-drag camera pan both move `cameraScroll`
+  - manual pan clears prior `cameraFocusHex`
   - founding, queue/focus management, research, combat, city resolution, restart/pause flows
   - no unexpected defeat during validated scenario flow
   - zero console/page errors

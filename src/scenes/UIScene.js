@@ -84,7 +84,7 @@ export class UIScene extends Phaser.Scene {
     this.endTurnButton = this.createButton("End Turn", "endTurn", () => gameEvents.emit("end-turn-requested"));
     this.turnAssistantPanel = this.add.rectangle(0, 0, 220, 64, 0xf0e4cb, 0.95).setDepth(12);
     this.turnAssistantPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
-    this.turnAssistantLabel = this.createLabel("Units ready: 0", 0, 0, "16px", "#3f2d18", 13);
+    this.turnAssistantLabel = this.createLabel("Units ready: 0", 0, 0, "16px", "#3f2d18", 13).setOrigin(0.5);
     this.nextUnitButton = this.createButton("Next Unit", "nextUnit", () => gameEvents.emit("next-ready-unit-requested"), {
       width: 130,
       height: 30,
@@ -269,7 +269,6 @@ export class UIScene extends Phaser.Scene {
     }
     this.notificationRows = Array.from({ length: 8 }, (_unused, index) => {
       const row = this.createLabel("", 0, 0, "14px", "#3f2d18", 17).setVisible(false);
-      row.setInteractive({ useHandCursor: true });
       row.on("pointerdown", () => this.focusNotificationByRow(index));
       return row;
     });
@@ -626,7 +625,8 @@ export class UIScene extends Phaser.Scene {
 
     const selectedPanelWidth = isCompact ? Math.max(150, Math.min(230, Math.floor(gameSize.width * 0.5))) : 460;
     const selectedPanelHeight = isCompact ? 88 : 92;
-    const selectedPanelY = contextVisible ? contextTop - selectedPanelHeight - 8 : gameSize.height - selectedPanelHeight - 14;
+    const selectedPanelY =
+      isCompact && contextVisible ? contextTop - selectedPanelHeight - 8 : gameSize.height - selectedPanelHeight - 14;
     this.selectedPanel.setPosition(edgePadding, selectedPanelY);
     this.selectedPanel.setSize(selectedPanelWidth, selectedPanelHeight);
     this.selectedTitle.setPosition(edgePadding + 14, selectedPanelY + 12);
@@ -641,15 +641,20 @@ export class UIScene extends Phaser.Scene {
     this.endTurnButton.rectangle.setPosition(endTurnX, endTurnY);
     this.endTurnButton.label.setPosition(endTurnX, endTurnY);
 
-    const assistantWidth = isCompact ? 196 : 220;
-    const assistantHeight = 64;
-    const assistantX = Math.max(edgePadding + assistantWidth / 2, endTurnX - endTurnWidth / 2 - assistantWidth / 2 - 12);
-    const assistantY = isCompact ? gameSize.height - 80 : endTurnY;
-    this.turnAssistantPanel.setPosition(assistantX, assistantY);
-    this.turnAssistantPanel.setSize(assistantWidth, assistantHeight);
-    this.turnAssistantLabel.setPosition(assistantX, assistantY - 16);
-    this.nextUnitButton.rectangle.setPosition(assistantX, assistantY + 12);
-    this.nextUnitButton.label.setPosition(assistantX, assistantY + 12);
+    const statusWidth = endTurnWidth;
+    const statusHeight = isCompact ? 30 : 32;
+    const nextUnitY = endTurnY - BUTTON_HEIGHT - (isCompact ? 10 : 12);
+    const statusY = nextUnitY - BUTTON_HEIGHT / 2 - statusHeight / 2 - 8;
+
+    this.turnAssistantPanel.setPosition(endTurnX, statusY);
+    this.turnAssistantPanel.setSize(statusWidth, statusHeight);
+    this.turnAssistantPanel.setDisplaySize(statusWidth, statusHeight);
+    this.turnAssistantLabel.setPosition(endTurnX, statusY);
+
+    this.nextUnitButton.width = endTurnWidth;
+    this.nextUnitButton.rectangle.setSize(endTurnWidth, BUTTON_HEIGHT);
+    this.nextUnitButton.rectangle.setPosition(endTurnX, nextUnitY);
+    this.nextUnitButton.label.setPosition(endTurnX, nextUnitY);
 
     const hintWidth = isCompact ? gameSize.width - edgePadding * 2 : 440;
     const hintHeight = isCompact ? 82 : 74;
@@ -724,7 +729,9 @@ export class UIScene extends Phaser.Scene {
     const phaseText = gameState.turnState.phase === "enemy" ? "Enemy" : "Player";
     const hasPendingCityResolution = !!gameState.pendingCityResolution;
     const canIssueOrders = gameState.turnState.phase === "player" && gameState.match.status === "ongoing" && !hasPendingCityResolution;
-    const turnAssistant = gameState.uiTurnAssistant ?? { readyCount: 0, nextReadyUnitId: null };
+    const turnAssistant = gameState.uiTurnAssistant ?? { readyCount: 0, nextReadyUnitId: null, emptyQueueCityCount: 0 };
+    const pendingQueues = turnAssistant.emptyQueueCityCount ?? 0;
+    const pendingOrders = turnAssistant.readyCount + pendingQueues;
     const projected = gameState.projectedNetIncome ?? gameState.projectedIncome ?? { food: 0, production: 0, science: 1 };
     const economy = gameState.economy?.player ?? { foodStock: 0, productionStock: 0, scienceStock: 0 };
 
@@ -754,11 +761,11 @@ export class UIScene extends Phaser.Scene {
 
     this.endTurnButton.label.setText(canIssueOrders ? "End Turn" : hasPendingCityResolution ? "Resolve..." : "Enemy...");
     this.setButtonEnabled(this.endTurnButton, canIssueOrders);
-    this.setButtonWarning(this.endTurnButton, canIssueOrders && turnAssistant.readyCount > 0);
+    this.setButtonWarning(this.endTurnButton, canIssueOrders && pendingOrders > 0);
 
     this.turnAssistantPanel.setVisible(gameState.match.status === "ongoing");
     this.turnAssistantLabel.setVisible(gameState.match.status === "ongoing");
-    this.turnAssistantLabel.setText(`Units ready: ${turnAssistant.readyCount}`);
+    this.turnAssistantLabel.setText(`Attention needed (${pendingOrders})`);
     this.setCompositeVisible(this.nextUnitButton, gameState.match.status === "ongoing");
     this.setButtonEnabled(this.nextUnitButton, canIssueOrders && turnAssistant.readyCount > 0);
 
@@ -1033,7 +1040,11 @@ export class UIScene extends Phaser.Scene {
       return;
     }
     const uiHints = this.latestState.uiHints ?? { primary: null, secondary: null, level: null };
-    this.setHint(uiHints.primary, uiHints.secondary, uiHints.level);
+    if (uiHints.level === "warning") {
+      this.setHint(uiHints.primary, uiHints.secondary, uiHints.level);
+      return;
+    }
+    this.setHint(null, null, null);
   }
 
   setHint(primary, secondary, level) {
@@ -1114,11 +1125,6 @@ export class UIScene extends Phaser.Scene {
       return false;
     }
     if (!entry.focus) {
-      this.handleNotificationRequested({
-        message: "This notification has no map focus target.",
-        level: "warning",
-        category: "System",
-      });
       return false;
     }
     gameEvents.emit("notification-focus-requested", { focus: entry.focus, id: entry.id });
@@ -1180,11 +1186,13 @@ export class UIScene extends Phaser.Scene {
       const row = this.notificationRows[i];
       if (i >= visibleCount) {
         row.setVisible(false);
+        row.disableInteractive();
         continue;
       }
       const entry = slice[i];
       if (!entry) {
         row.setVisible(false);
+        row.disableInteractive();
         continue;
       }
       row.setPosition(bounds.left + 12, bounds.top + 34 + filterHeight + i * 20);
@@ -1192,6 +1200,11 @@ export class UIScene extends Phaser.Scene {
       const line = `[${entry.category}] ${entry.level === "warning" ? "[Warning]" : "[Info]"} ${entry.message}`;
       row.setText(truncateText(line, Math.max(36, Math.floor((this.notificationPanel.displayWidth - 24) / 7))));
       row.setColor(entry.level === "warning" ? "#7b3024" : "#3f2d18");
+      if (entry.focus) {
+        row.setInteractive({ useHandCursor: true });
+      } else {
+        row.disableInteractive();
+      }
     }
   }
 
@@ -1521,6 +1534,10 @@ export class UIScene extends Phaser.Scene {
 
   testSetNotificationFilter(filterName) {
     return this.setNotificationFilter(filterName);
+  }
+
+  testClickNotificationRow(index) {
+    return this.focusNotificationByRow(index);
   }
 
   testFocusNotification(index) {

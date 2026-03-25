@@ -23,6 +23,8 @@
 - Chosen: turn-readiness assistant shows `Units ready: N`, supports `Next Unit`, and keeps End Turn one-click with warning tint when units remain.
 - Chosen: restart lives in Esc pause menu (`Resume`, `Restart`, confirm step) and blocks underlying interactions while modal is open.
 - Chosen: notification center v2 supports categories (`All/Combat/City/Research/System`), filtering, and click-to-jump focus.
+- Chosen: notification rows with no map `focus` are rendered as non-clickable text and never emit "no target" warning on click.
+- Chosen: camera recentering recovery supports keyboard pan (`Arrow`/`WASD`) and right-mouse drag panning while no modal is open.
 - Rejected for now: persistent tutorial text, separate sidebars for unit actions, and full notification search.
 
 ## Interfaces/types added
@@ -37,6 +39,7 @@
   - `uiContextPanel`
   - `uiNotifications` entries with `category` and optional `focus`
   - `uiNotificationFilter`
+  - `cameraScroll`
   - `cameraFocusHex`
   - `pauseMenu`
 - Key UI events:
@@ -56,7 +59,7 @@
   - `getActionPreviewState`, `hoverHex`
   - `getTurnAssistantState`, `nextReadyUnit`
   - `setContextPanelPinned`
-  - `getNotificationCenterState`, `setNotificationFilter`, `focusNotification`
+  - `getNotificationCenterState`, `setNotificationFilter`, `clickNotificationRow`, `focusNotification`
 
 ## Behavior and acceptance criteria
 
@@ -74,9 +77,13 @@
 - Notification center:
   - newest-first feed
   - filter chips by category
+  - rows without `focus` are non-clickable and do not emit warnings when clicked
   - jump-to-map focus when payload has valid target
   - safe warning when focus target no longer exists
   - reset on restart/new match
+- Camera controls:
+  - keyboard pan (`Arrow`/`WASD`) and right-drag pan are available whenever no modal is open
+  - manual camera pan clears `cameraFocusHex` previously set by notification jump
 
 ## Validation performed (tests/manual checks)
 

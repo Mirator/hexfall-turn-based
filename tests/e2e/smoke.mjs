@@ -247,6 +247,32 @@ async function run() {
       if (!focusState.cameraFocusHex) {
         return { ok: false, reason: "camera-focus-payload-missing-after-notification-focus" };
       }
+
+      const cycledResearch = window.__hexfallTest.cycleResearch();
+      if (!cycledResearch) {
+        return { ok: false, reason: "research-cycle-for-nonfocus-notification-failed" };
+      }
+      if (!window.__hexfallTest.setNotificationFilter("Research")) {
+        return { ok: false, reason: "notification-filter-research-failed" };
+      }
+      const researchFeedBefore = window.__hexfallTest.getNotificationCenterState();
+      if ((researchFeedBefore?.filteredCount ?? 0) < 1) {
+        return { ok: false, reason: "notification-research-filter-empty" };
+      }
+      const noMapFocusWarningBefore = (researchFeedBefore?.entries ?? []).filter((entry) =>
+        String(entry.message ?? "").includes("This notification has no map focus target.")
+      ).length;
+      const clickedNonFocusRow = window.__hexfallTest.clickNotificationRow(0);
+      if (clickedNonFocusRow !== false) {
+        return { ok: false, reason: "non-focus-notification-row-should-not-trigger-focus" };
+      }
+      const researchFeedAfter = window.__hexfallTest.getNotificationCenterState();
+      const noMapFocusWarningAfter = (researchFeedAfter?.entries ?? []).filter((entry) =>
+        String(entry.message ?? "").includes("This notification has no map focus target.")
+      ).length;
+      if (noMapFocusWarningAfter !== noMapFocusWarningBefore) {
+        return { ok: false, reason: "non-focus-notification-click-created-warning" };
+      }
       window.__hexfallTest.setNotificationFilter("All");
 
       // Direct focus + tabs + typed queue flow.
@@ -587,6 +613,42 @@ async function run() {
 
     const canvas = page.locator("canvas");
     await canvas.waitFor({ state: "visible" });
+    await canvas.click({ position: { x: 260, y: 220 } });
+
+    const cameraStateBeforeKeyboard = await page.evaluate(() => window.__hexfallTest.getState());
+    assert.ok(cameraStateBeforeKeyboard.cameraFocusHex, "camera should be focused before manual pan checks");
+    const keyboardBefore = cameraStateBeforeKeyboard.cameraScroll;
+    assert.ok(keyboardBefore, "camera scroll payload should exist before keyboard pan");
+
+    await page.keyboard.down("ArrowRight");
+    await page.waitForTimeout(160);
+    await page.keyboard.up("ArrowRight");
+
+    const cameraStateAfterKeyboard = await page.evaluate(() => window.__hexfallTest.getState());
+    assert.ok(
+      cameraStateAfterKeyboard.cameraScroll.x !== keyboardBefore.x ||
+        cameraStateAfterKeyboard.cameraScroll.y !== keyboardBefore.y,
+      "keyboard camera pan should move camera scroll"
+    );
+    assert.equal(cameraStateAfterKeyboard.cameraFocusHex, null, "manual keyboard pan should clear camera focus target");
+
+    const dragBefore = cameraStateAfterKeyboard.cameraScroll;
+    const canvasBounds = await canvas.boundingBox();
+    assert.ok(canvasBounds, "canvas bounds should be available for right-drag test");
+    const dragStartX = canvasBounds.x + Math.floor(canvasBounds.width * 0.6);
+    const dragStartY = canvasBounds.y + Math.floor(canvasBounds.height * 0.5);
+    await page.mouse.move(dragStartX, dragStartY);
+    await page.mouse.down({ button: "right" });
+    await page.mouse.move(dragStartX + 90, dragStartY + 42, { steps: 8 });
+    await page.mouse.up({ button: "right" });
+    await page.waitForTimeout(80);
+
+    const cameraStateAfterDrag = await page.evaluate(() => window.__hexfallTest.getState());
+    assert.ok(
+      cameraStateAfterDrag.cameraScroll.x !== dragBefore.x || cameraStateAfterDrag.cameraScroll.y !== dragBefore.y,
+      "right-drag camera pan should move camera scroll"
+    );
+
     await canvas.screenshot({ path: `${ARTIFACT_DIR}/smoke.png` });
 
     assert.equal(consoleErrors.length, 0, `console errors found:\n${consoleErrors.join("\n")}`);

@@ -45,6 +45,7 @@ import { evaluateMatchState } from "../systems/victorySystem.js";
 
 const SQRT_3 = Math.sqrt(3);
 const RESTART_MIN_FACTION_DISTANCE = DEFAULT_MIN_FACTION_DISTANCE;
+const CAMERA_KEYBOARD_PAN_SPEED = 700;
 
 export class WorldScene extends Phaser.Scene {
   constructor() {
@@ -66,10 +67,14 @@ export class WorldScene extends Phaser.Scene {
     this.enemyTurnTimer = null;
     this.foundCityKeyBinding = null;
     this.nextUnitKeyBinding = null;
+    this.cameraPanKeys = null;
     this.uiModalOpen = false;
     this.runtimeSeedCounter = 0;
     this.lastCombatEvent = null;
     this.cameraFocusHex = null;
+    this.isRightDraggingCamera = false;
+    this.cameraDragLastScreenPos = null;
+    this.preventContextMenuHandler = null;
   }
 
   create() {
@@ -87,10 +92,26 @@ export class WorldScene extends Phaser.Scene {
 
     this.input.on("pointerdown", this.handlePointerDown, this);
     this.input.on("pointermove", this.handlePointerMove, this);
+    this.input.on("pointerup", this.handlePointerUp, this);
     this.foundCityKeyBinding = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.F) ?? null;
     this.nextUnitKeyBinding = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.TAB) ?? null;
+    this.cameraPanKeys =
+      this.input.keyboard?.addKeys({
+        up: Phaser.Input.Keyboard.KeyCodes.UP,
+        down: Phaser.Input.Keyboard.KeyCodes.DOWN,
+        left: Phaser.Input.Keyboard.KeyCodes.LEFT,
+        right: Phaser.Input.Keyboard.KeyCodes.RIGHT,
+        w: Phaser.Input.Keyboard.KeyCodes.W,
+        a: Phaser.Input.Keyboard.KeyCodes.A,
+        s: Phaser.Input.Keyboard.KeyCodes.S,
+        d: Phaser.Input.Keyboard.KeyCodes.D,
+      }) ?? null;
     this.foundCityKeyBinding?.on("down", this.handleFoundCityRequested, this);
     this.nextUnitKeyBinding?.on("down", this.handleNextReadyUnitRequested, this);
+    if (this.game.canvas) {
+      this.preventContextMenuHandler = (event) => event.preventDefault();
+      this.game.canvas.addEventListener("contextmenu", this.preventContextMenuHandler);
+    }
     this.scale.on("resize", this.handleResize, this);
     gameEvents.on("end-turn-requested", this.handleEndTurnRequested, this);
     gameEvents.on("next-ready-unit-requested", this.handleNextReadyUnitRequested, this);
@@ -109,6 +130,7 @@ export class WorldScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.input.off("pointerdown", this.handlePointerDown, this);
       this.input.off("pointermove", this.handlePointerMove, this);
+      this.input.off("pointerup", this.handlePointerUp, this);
       this.foundCityKeyBinding?.off("down", this.handleFoundCityRequested, this);
       this.nextUnitKeyBinding?.off("down", this.handleNextReadyUnitRequested, this);
       this.scale.off("resize", this.handleResize, this);
@@ -129,10 +151,22 @@ export class WorldScene extends Phaser.Scene {
         this.enemyTurnTimer.remove(false);
         this.enemyTurnTimer = null;
       }
+      if (this.game.canvas && this.preventContextMenuHandler) {
+        this.game.canvas.removeEventListener("contextmenu", this.preventContextMenuHandler);
+      }
+      this.preventContextMenuHandler = null;
+      this.endCameraDrag();
     });
 
     this.recalculateOrigin();
     this.evaluateAndPublish();
+  }
+
+  update(_time, delta) {
+    const moved = this.updateKeyboardCameraPan(delta);
+    if (moved) {
+      this.publishState();
+    }
   }
 
   handleResize(gameSize) {
@@ -140,10 +174,21 @@ export class WorldScene extends Phaser.Scene {
     this.recalculateOrigin();
     this.cameras.main.setScroll(0, 0);
     this.cameraFocusHex = null;
+    this.endCameraDrag();
     this.renderAll();
   }
 
   handlePointerDown(pointer) {
+    const rightClick = pointer.button === 2 || pointer.rightButtonDown();
+    if (rightClick) {
+      if (this.canPanCamera()) {
+        this.beginCameraDrag(pointer);
+      }
+      return;
+    }
+    if (this.isRightDraggingCamera) {
+      return;
+    }
     if (!this.canAcceptPlayerCommands()) {
       return;
     }
@@ -205,7 +250,31 @@ export class WorldScene extends Phaser.Scene {
     this.clearSelection();
   }
 
+  handlePointerUp(pointer) {
+    if (!this.isRightDraggingCamera) {
+      return;
+    }
+    if (pointer.button === 2 || !pointer.rightButtonDown()) {
+      this.endCameraDrag();
+    }
+  }
+
   handlePointerMove(pointer) {
+    if (this.isRightDraggingCamera || pointer.rightButtonDown()) {
+      if (!this.canPanCamera()) {
+        this.endCameraDrag();
+        return;
+      }
+      if (!this.isRightDraggingCamera) {
+        this.beginCameraDrag(pointer);
+      }
+      const moved = this.updateCameraDrag(pointer);
+      if (moved) {
+        this.publishState();
+      }
+      return;
+    }
+
     if (!this.canAcceptPlayerCommands()) {
       if (this.setUiPreview(null)) {
         this.renderAll();
@@ -526,6 +595,9 @@ export class WorldScene extends Phaser.Scene {
 
   handleUiModalStateChanged = (isOpen) => {
     this.uiModalOpen = !!isOpen;
+    if (isOpen) {
+      this.endCameraDrag();
+    }
     const previewCleared = isOpen ? this.setUiPreview(null) : false;
     if (previewCleared) {
       this.renderAll();
@@ -587,6 +659,7 @@ export class WorldScene extends Phaser.Scene {
     this.setUiPreview(null);
     this.cameraFocusHex = null;
     this.cameras?.main?.setScroll(0, 0);
+    this.endCameraDrag();
   }
 
   generateRuntimeSeed() {
@@ -734,6 +807,80 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
+  canPanCamera() {
+    return !this.uiModalOpen;
+  }
+
+  updateKeyboardCameraPan(deltaMs) {
+    if (!this.canPanCamera() || !this.cameraPanKeys || !this.cameras?.main) {
+      return false;
+    }
+    const left = this.cameraPanKeys.left?.isDown || this.cameraPanKeys.a?.isDown;
+    const right = this.cameraPanKeys.right?.isDown || this.cameraPanKeys.d?.isDown;
+    const up = this.cameraPanKeys.up?.isDown || this.cameraPanKeys.w?.isDown;
+    const down = this.cameraPanKeys.down?.isDown || this.cameraPanKeys.s?.isDown;
+    const horizontal = (right ? 1 : 0) - (left ? 1 : 0);
+    const vertical = (down ? 1 : 0) - (up ? 1 : 0);
+    if (horizontal === 0 && vertical === 0) {
+      return false;
+    }
+    const directionLength = Math.hypot(horizontal, vertical);
+    if (!directionLength) {
+      return false;
+    }
+    const step = (Math.max(0, deltaMs) / 1000) * CAMERA_KEYBOARD_PAN_SPEED;
+    if (step <= 0) {
+      return false;
+    }
+    this.cameras.main.scrollX += (horizontal / directionLength) * step;
+    this.cameras.main.scrollY += (vertical / directionLength) * step;
+    this.clearCameraFocusFromManualPan();
+    return true;
+  }
+
+  beginCameraDrag(pointer) {
+    this.isRightDraggingCamera = true;
+    this.cameraDragLastScreenPos = { x: pointer.x, y: pointer.y };
+  }
+
+  endCameraDrag() {
+    this.isRightDraggingCamera = false;
+    this.cameraDragLastScreenPos = null;
+  }
+
+  updateCameraDrag(pointer) {
+    if (!this.isRightDraggingCamera || !this.cameras?.main) {
+      return false;
+    }
+    if (!this.cameraDragLastScreenPos) {
+      this.cameraDragLastScreenPos = { x: pointer.x, y: pointer.y };
+      return false;
+    }
+    const deltaX = pointer.x - this.cameraDragLastScreenPos.x;
+    const deltaY = pointer.y - this.cameraDragLastScreenPos.y;
+    this.cameraDragLastScreenPos = { x: pointer.x, y: pointer.y };
+    if (deltaX === 0 && deltaY === 0) {
+      return false;
+    }
+    this.cameras.main.scrollX -= deltaX;
+    this.cameras.main.scrollY -= deltaY;
+    this.clearCameraFocusFromManualPan();
+    return true;
+  }
+
+  clearCameraFocusFromManualPan() {
+    if (this.cameraFocusHex) {
+      this.cameraFocusHex = null;
+    }
+  }
+
+  getCameraScrollPayload() {
+    return {
+      x: this.cameras?.main?.scrollX ?? 0,
+      y: this.cameras?.main?.scrollY ?? 0,
+    };
+  }
+
   canAcceptPlayerCommands() {
     return (
       this.gameState.turnState.phase === "player" &&
@@ -845,6 +992,7 @@ export class WorldScene extends Phaser.Scene {
         restartConfirmOpen: uiRuntime.restartConfirmOpen,
       },
       uiNotifications: uiRuntime.notifications,
+      cameraScroll: this.getCameraScrollPayload(),
       cameraFocusHex: this.cameraFocusHex,
       lastCombatEvent: this.lastCombatEvent,
     };
@@ -1169,6 +1317,7 @@ export class WorldScene extends Phaser.Scene {
         restartConfirmOpen: uiRuntime.restartConfirmOpen,
       },
       uiNotifications: uiRuntime.notifications,
+      cameraScroll: this.getCameraScrollPayload(),
       cameraFocusHex: this.cameraFocusHex,
       unlocks: {
         units: [...this.gameState.unlocks.units],
@@ -1414,6 +1563,13 @@ export class WorldScene extends Phaser.Scene {
       .sort((a, b) => a.id.localeCompare(b.id));
   }
 
+  getPlayerCitiesWithEmptyQueue() {
+    return this.gameState.cities
+      .filter((city) => city.owner === "player")
+      .filter((city) => (city.queue?.length ?? 0) === 0)
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }
+
   getNextReadyUnitId() {
     const readyUnits = this.getReadyPlayerUnits();
     if (readyUnits.length === 0) {
@@ -1439,12 +1595,15 @@ export class WorldScene extends Phaser.Scene {
       return {
         readyCount: 0,
         nextReadyUnitId: null,
+        emptyQueueCityCount: 0,
       };
     }
     const readyUnits = this.getReadyPlayerUnits();
+    const idleQueueCities = this.getPlayerCitiesWithEmptyQueue();
     return {
       readyCount: readyUnits.length,
       nextReadyUnitId: this.getNextReadyUnitId(),
+      emptyQueueCityCount: idleQueueCities.length,
     };
   }
 
@@ -1749,8 +1908,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   testCycleResearch() {
-    cycleResearch(this.gameState);
-    this.evaluateAndPublish();
+    this.handleResearchCycleRequested();
     return this.gameState.research.activeTechId;
   }
 

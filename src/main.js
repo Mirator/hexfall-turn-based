@@ -103,6 +103,10 @@ window.__hexfallTest = {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testSetNotificationFilter(filter) : false;
   },
+  clickNotificationRow(index) {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testClickNotificationRow(index) : false;
+  },
   focusNotification(index) {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testFocusNotification(index) : false;
