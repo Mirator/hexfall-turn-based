@@ -410,3 +410,12 @@ Original prompt: I want to make civilization like easy game in JS. Let's init th
   - `npm test` ?
   - `npm run test:e2e` ?
 - Hardened e2e smoke scenario against multi-faction variance while validating this change.
+## 2026-03-26 (Fog-safe selection highlight fix)
+- Fixed stale selection rendering so hidden/non-player selected entities no longer draw highlight markers in fog.
+- Added `normalizeSelectionState()` in `WorldScene.evaluateAndPublish()` to clear invalid selections after visibility/ownership changes.
+- Updated `renderSelection()` to draw selection outlines only when entity is visible to player.
+- Validation:
+  - `npm run lint` ?
+  - `npm test` ?
+  - `npm run test:e2e` ? (second rerun; smoke remains seed-variant sensitive)
+  - `npm run build` ?

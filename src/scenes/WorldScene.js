@@ -1819,10 +1819,30 @@ export class WorldScene extends Phaser.Scene {
 
   evaluateAndPublish() {
     recomputeVisibility(this.gameState);
+    this.normalizeSelectionState();
     evaluateMatchState(this.gameState);
     this.refreshActionHints();
     this.renderAll();
     this.publishState();
+  }
+
+  normalizeSelectionState() {
+    let changed = false;
+    const selectedUnit = getUnitById(this.gameState, this.gameState.selectedUnitId);
+    if (selectedUnit && (selectedUnit.owner !== "player" || !this.isUnitVisibleToPlayer(selectedUnit))) {
+      this.gameState.selectedUnitId = null;
+      changed = true;
+    }
+
+    const selectedCity = this.gameState.cities.find((city) => city.id === this.gameState.selectedCityId) ?? null;
+    if (selectedCity && (selectedCity.owner !== "player" || !this.isCityVisibleToPlayer(selectedCity))) {
+      this.gameState.selectedCityId = null;
+      changed = true;
+    }
+
+    if (changed) {
+      this.setUiPreview(null);
+    }
   }
 
   publishState() {
@@ -2028,13 +2048,13 @@ export class WorldScene extends Phaser.Scene {
     this.selectionGraphics.clear();
 
     const selectedUnit = getUnitById(this.gameState, this.gameState.selectedUnitId);
-    if (selectedUnit) {
+    if (selectedUnit && this.isUnitVisibleToPlayer(selectedUnit)) {
       const unitCenter = this.hexToWorld(selectedUnit.q, selectedUnit.r);
       drawHex(this.selectionGraphics, unitCenter.x, unitCenter.y, HEX_SIZE * 1.02, undefined, 0, COLORS.selectedStroke, 3);
     }
 
     const selectedCity = this.gameState.cities.find((city) => city.id === this.gameState.selectedCityId);
-    if (selectedCity) {
+    if (selectedCity && this.isCityVisibleToPlayer(selectedCity)) {
       const cityCenter = this.hexToWorld(selectedCity.q, selectedCity.r);
       this.selectionGraphics.lineStyle(3, COLORS.selectedStroke, 1);
       this.selectionGraphics.strokeRect(cityCenter.x - 18, cityCenter.y - 18, 36, 36);
