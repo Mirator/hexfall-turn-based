@@ -33,23 +33,27 @@ npm run dev
 
 ## Current Gameplay Slice
 
-- 12x12 axial hex map with terrain costs and obstacles
+- Seeded `16x16` axial hex map with terrain costs and obstacles
+- Three factions (`player`, `enemy`, `purple`) with settler starts and deterministic spawn spacing
+- Explored-memory fog-of-war per faction (`unit sight = 2`, `city sight = 3`)
+- Player dev visibility toggle (`V`) to reveal full map without disabling AI fog rules
 - Unit combat with HP, attack ranges, and unit removal
 - Settler-driven city founding and lightweight production queue
 - Research progression with unlockable unit options
-- Enemy turn behavior with movement and counter-attacks
+- Sequential AI phase playback (`enemy` then `purple`) with per-actor messages
 - Match-end victory/defeat state with restart overlay
 
 ## Controls
 
 - Left click unit to select
 - Left click highlighted hex to move
-- Left click red-highlighted enemy to attack
+- Left click red-highlighted hostile unit/city to attack (when visible)
 - Left click `End Turn` in top-right UI
 - Select a settler and press `Found City` (or key `F`)
-- Use `Research` label to cycle active research
-- Use `Cycle Queue` on selected city to switch production target
+- Use city context panel to set focus/production and manage queue
+- Use `Research` controls in HUD to cycle/select active research
 - `Restart` is always available in HUD and asks for confirmation
+- Press `V` to toggle `Dev Vision: ON/OFF`
 
 ## Loading + Bundling
 

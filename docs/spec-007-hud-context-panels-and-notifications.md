@@ -9,19 +9,22 @@
 ## Decisions made (and alternatives rejected)
 
 - Chosen: fixed HUD zones:
-  - top-left: turn + full resource names with value and projected delta
+  - top-left: turn + full resource names with value/projected delta + `Dev Vision: ON/OFF (V)` indicator
   - top-right: persistent notification center
   - bottom-left: selected entity card (hidden when no selection)
   - bottom-center: contextual action panel
   - bottom-right: End Turn + turn readiness assistant
 - Chosen: bottom contextual panel is shared for city and unit actions.
 - Chosen: panel has visible expand/collapse and pin controls; auto-expands on valid selection; pin persists expanded mode across selection changes.
-- Chosen: city mode supports direct focus tabs, `Units|Buildings` tabbed production, and 3-slot queue management.
+- Chosen: city mode supports direct focus tabs with projected-yield explanations, `Units|Buildings` tabbed production, and 3-slot queue management.
+- Chosen: city production choices expose explicit cost/ETA context and per-item unavailable-state tags (`Locked`, `Built`, `Queued`, `Queue Full`).
+- Chosen: disabled city actions show exact unavailable reasons on hover via pointer-following tooltip and hint text paths.
+- Chosen: queue supports deterministic per-slot up/down reorder controls plus explicit remove controls.
 - Chosen: unit mode supports `Found City` + `Skip Unit`.
 - Chosen: hover-driven action preview surfaces (`move`, `attack-unit`, `attack-city`) with no state mutation.
 - Chosen: map clarity overlays include reachable/attackable emphasis and threat visualization when a player unit is selected.
 - Chosen: bottom-right readiness assistant uses clickable `Attention needed (X)` status, where `X = ready units + player cities with empty queues`; click cycles the next attention target (unit or city), and End Turn keeps warning tint while any attention remains.
-- Chosen: enemy playback banner is displayed while sequential enemy actions resolve (`Enemy action X/Y: <summary>`), centered above the map/HUD action layers.
+- Chosen: AI playback banner is displayed while sequential AI actions resolve (`Enemy action ...` / `Purple action ...`), centered above the map/HUD action layers.
 - Chosen: gameplay commands (End Turn + context actions) are disabled while animation timeline is busy, with explicit disabled reason text.
 - Chosen: restart lives in Esc pause menu (`Resume`, `Restart`, confirm step) and blocks underlying interactions while modal is open.
 - Chosen: notification center v2 supports categories (`All/Combat/City/Research/System`), filtering, and click-to-jump focus.
@@ -41,6 +44,7 @@
   - `uiContextPanel`
   - `animationState`
   - `turnPlayback`
+  - `devVisionEnabled`
   - `uiNotifications` entries with `category` and optional `focus`
   - `uiNotificationFilter`
   - `cameraScroll`
@@ -51,6 +55,7 @@
   - `city-focus-set-requested`
   - `city-production-tab-set-requested`
   - `city-queue-enqueue-requested`
+  - `city-queue-move-requested`
   - `city-queue-remove-requested`
   - `next-ready-unit-requested`
   - `notification-focus-requested`
@@ -60,6 +65,7 @@
   - `getPauseMenuState`, `openPauseMenu`, `closePauseMenu`
   - `getRestartModalState`, `getCityResolutionModalState`
   - `getCityPanelState`, `triggerUnitAction`
+  - `moveCityQueue(index, direction)`
   - `getAnimationState`, `requestEndTurn`, `endTurnImmediate`
   - `getActionPreviewState`, `hoverHex`
   - `getTurnAssistantState`, `nextReadyUnit`
@@ -70,7 +76,9 @@
 
 - HUD layout remains readable on desktop and compact/mobile viewports.
 - City/unit contextual controls appear only when relevant selection is active.
-- Disabled actions expose contextual reason feedback through hint/notification paths.
+- Disabled actions expose contextual reason feedback through hint/notification paths and disabled-button hover tooltips.
+- City focus controls explain that focus changes worked-tile priority (not direct flat yield buffs) and expose projected local F/P/S per focus mode.
+- City production buttons show cost + ETA context; queue rows show per-slot status with reorder/remove affordances.
 - Hover preview lifecycle:
   - appears for reachable/attackable hover targets
   - shows deterministic move/combat prediction
@@ -81,8 +89,12 @@
   - clicking the assistant deterministically cycles next attention target (ready unit or city with empty queue)
 - Playback/lock flow:
   - playback banner is visible only while `turnPlayback.active=true`
-  - End Turn label reflects state (`Resolve...`, `Enemy...`, `Animating...` as applicable)
+  - End Turn label reflects state (`Resolve...`, `AI...`, `Animating...` as applicable)
   - disabled gameplay commands surface explicit reason text (for example, animation-busy lock)
+- Dev visibility flow:
+  - player can toggle full reveal with key `V`
+  - HUD indicator reflects `Dev Vision: ON/OFF`
+  - dev reveal does not alter AI visibility/fog decision rules
 - Notification center:
   - newest-first feed
   - filter chips by category

@@ -68,7 +68,7 @@ export function getUnitDefinition(type) {
 }
 
 /**
- * @param {{ id: string, owner: "player"|"enemy", type: "warrior"|"settler"|"spearman"|"archer", q: number, r: number }} params
+ * @param {{ id: string, owner: import("./types.js").Owner, type: "warrior"|"settler"|"spearman"|"archer", q: number, r: number }} params
  * @returns {import("./types.js").Unit}
  */
 export function createUnit(params) {

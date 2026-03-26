@@ -6,6 +6,7 @@ export function beginEnemyTurn(gameState) {
   gameState.turnState.phase = "enemy";
   gameState.selectedUnitId = null;
   resetMovementForOwner(gameState, "enemy");
+  resetMovementForOwner(gameState, "purple");
   return gameState;
 }
 

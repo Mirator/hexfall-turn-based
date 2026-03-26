@@ -6,9 +6,11 @@ import {
   pickEnemyGoal,
   pickEnemyQueueUnit,
   pickEnemyResearchTech,
+  prepareEnemyTurnPlan,
   runEnemyTurn,
 } from "../../src/systems/enemyTurnSystem.js";
 import { beginEnemyTurn } from "../../src/systems/turnSystem.js";
+import { getSeenHostileOwners, recomputeVisibility } from "../../src/systems/visibilitySystem.js";
 
 describe("enemy AI personalities and deterministic decisions", () => {
   it("derives enemy personality from seed and supports explicit override", () => {
@@ -193,6 +195,58 @@ describe("enemy AI personalities and deterministic decisions", () => {
 
     const goal = pickEnemyGoal(gameState, "guardian");
     expect(goal).toBe("defend");
+  });
+
+  it("can target visible non-player hostiles", () => {
+    const gameState = createInitialGameState({
+      seed: 1201,
+      enemyPersonality: "raider",
+    });
+
+    gameState.units = [
+      createUnit({ id: "enemy-warrior", owner: "enemy", type: "warrior", q: 5, r: 5 }),
+      createUnit({ id: "purple-settler", owner: "purple", type: "settler", q: 6, r: 5 }),
+      createUnit({ id: "player-settler", owner: "player", type: "settler", q: 12, r: 12 }),
+    ];
+    gameState.cities = [createCity("enemy-city-1", "enemy", 4, 4)];
+
+    beginEnemyTurn(gameState);
+    runEnemyTurn(gameState, "enemy");
+
+    const summary = gameState.ai.enemy.lastTurnSummary;
+    expect(summary).toBeTruthy();
+    expect(summary?.actions.some((action) => action.action === "attackUnit" && action.targetId === "purple-settler")).toBe(
+      true
+    );
+
+    const purpleAfter = gameState.units.find((unit) => unit.id === "purple-settler") ?? null;
+    if (purpleAfter) {
+      expect(purpleAfter.health).toBeLessThan(purpleAfter.maxHealth);
+    }
+  });
+
+  it("does not target hostile factions it has not seen yet", () => {
+    const gameState = createInitialGameState({
+      seed: 1202,
+      enemyPersonality: "raider",
+    });
+
+    gameState.units = [
+      createUnit({ id: "enemy-warrior", owner: "enemy", type: "warrior", q: 4, r: 4 }),
+      createUnit({ id: "player-visible", owner: "player", type: "settler", q: 5, r: 4 }),
+      createUnit({ id: "purple-hidden", owner: "purple", type: "settler", q: 14, r: 14 }),
+    ];
+    gameState.cities = [createCity("enemy-city-1", "enemy", 3, 3)];
+
+    recomputeVisibility(gameState);
+    const seenHostiles = getSeenHostileOwners(gameState, "enemy");
+    expect(seenHostiles).toContain("player");
+    expect(seenHostiles).not.toContain("purple");
+
+    const plan = prepareEnemyTurnPlan(gameState, "enemy");
+    const targetIds = new Set(plan.steps.map((step) => step.targetId).filter(Boolean));
+    expect(targetIds.has("player-visible")).toBe(true);
+    expect(targetIds.has("purple-hidden")).toBe(false);
   });
 });
 

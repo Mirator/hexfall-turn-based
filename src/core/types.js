@@ -5,6 +5,14 @@
  */
 
 /**
+ * @typedef {"player"|"enemy"|"purple"} Owner
+ */
+
+/**
+ * @typedef {"enemy"|"purple"} AiOwner
+ */
+
+/**
  * @typedef {Object} YieldBundle
  * @property {number} food
  * @property {number} production
@@ -27,14 +35,14 @@
  * @property {boolean} fallbackUsed
  * @property {number} minFactionDistance
  * @property {number} nearestFactionDistance
- * @property {{ player: Hex, enemy: Hex }} anchors
- * @property {{ playerSettler: Hex, enemySettler: Hex }} spawns
+ * @property {{ player: Hex, enemy: Hex, purple: Hex }} anchors
+ * @property {{ playerSettler: Hex, enemySettler: Hex, purpleSettler: Hex }} spawns
  */
 
 /**
  * @typedef {Object} Unit
  * @property {string} id
- * @property {"player"|"enemy"} owner
+ * @property {Owner} owner
  * @property {"warrior"|"settler"|"spearman"|"archer"} type
  * @property {number} q
  * @property {number} r
@@ -57,7 +65,7 @@
 /**
  * @typedef {Object} City
  * @property {string} id
- * @property {"player"|"enemy"} owner
+ * @property {Owner} owner
  * @property {number} q
  * @property {number} r
  * @property {number} population
@@ -77,8 +85,8 @@
 /**
  * @typedef {Object} PendingCityResolution
  * @property {string} cityId
- * @property {"player"|"enemy"} attackerOwner
- * @property {"player"|"enemy"} defenderOwner
+ * @property {Owner} attackerOwner
+ * @property {Owner} defenderOwner
  * @property {Array<"capture"|"raze">} choices
  */
 
@@ -110,7 +118,11 @@
  */
 
 /**
- * @typedef {"raider"|"expansionist"|"guardian"} EnemyPersonality
+ * @typedef {"raider"|"expansionist"|"guardian"} AiPersonality
+ */
+
+/**
+ * @typedef {AiPersonality} EnemyPersonality
  */
 
 /**
@@ -141,9 +153,22 @@
 
 /**
  * @typedef {Object} EnemyAiState
- * @property {EnemyPersonality} personality
+ * @property {AiPersonality} personality
  * @property {EnemyGoal|null} lastGoal
  * @property {EnemyTurnSummary|null} lastTurnSummary
+ */
+
+/**
+ * @typedef {Object} VisibilityOwnerState
+ * @property {string[]} visibleHexes
+ * @property {string[]} exploredHexes
+ * @property {Owner[]} seenOwners
+ */
+
+/**
+ * @typedef {Object} VisibilityState
+ * @property {{ player: VisibilityOwnerState, enemy: VisibilityOwnerState, purple: VisibilityOwnerState }} byOwner
+ * @property {boolean} devRevealPlayer
  */
 
 /**
@@ -157,8 +182,9 @@
  * @property {ResearchState} research
  * @property {{ units: string[] }} unlocks
  * @property {MatchState} match
- * @property {{ enemy: EnemyAiState }} ai
- * @property {{ player: EmpireEconomy, enemy: EmpireEconomy, researchIncomeThisTurn: number }} economy
+ * @property {{ enemy: EnemyAiState, purple: EnemyAiState, byOwner: Record<AiOwner, EnemyAiState> }} ai
+ * @property {{ player: EmpireEconomy, enemy: EmpireEconomy, purple: EmpireEconomy, researchIncomeThisTurn: number }} economy
+ * @property {VisibilityState} visibility
  * @property {PendingCityResolution|null} pendingCityResolution
  * @property {{ unit: number, city: number }} nextIds
  */

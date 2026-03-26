@@ -171,6 +171,10 @@ window.__hexfallTest = {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testRemoveCityQueueAt(index) : false;
   },
+  moveCityQueue(index, direction) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testMoveCityQueue(index, direction) : false;
+  },
   cycleResearch() {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testCycleResearch() : null;
@@ -199,13 +203,33 @@ window.__hexfallTest = {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testSetEnemyPersonality(personality) : false;
   },
+  setAiPersonality(owner, personality) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testSetAiPersonality(owner, personality) : false;
+  },
   getEnemyAiState() {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testGetEnemyAiState() : null;
   },
+  getAiState(owner) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testGetAiState(owner) : null;
+  },
   clearEnemyCityQueue(cityId) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testClearEnemyCityQueue(cityId) : false;
+  },
+  clearAiCityQueue(owner, cityId) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testClearAiCityQueue(owner, cityId) : false;
+  },
+  toggleDevVision() {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testToggleDevVision() : false;
+  },
+  setDevVision(enabled) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testSetDevVision(enabled) : false;
   },
 };
 

@@ -132,10 +132,14 @@ async function run() {
     assert.equal(initialState.turn, 1, "initial turn should be 1");
     assert.equal(initialState.match.status, "ongoing", "match should begin ongoing");
     assert.equal(initialState.uiActions.canRestart, true, "restart should be available during gameplay");
+    assert.equal(initialState.map.width, 16, "map width should be 16");
+    assert.equal(initialState.map.height, 16, "map height should be 16");
     const initialPlayerSettlers = initialState.units.filter((unit) => unit.owner === "player" && unit.type === "settler");
     const initialEnemySettlers = initialState.units.filter((unit) => unit.owner === "enemy" && unit.type === "settler");
+    const initialPurpleSettlers = initialState.units.filter((unit) => unit.owner === "purple" && unit.type === "settler");
     assert.equal(initialPlayerSettlers.length, 1, "player should start with one settler");
     assert.equal(initialEnemySettlers.length, 1, "enemy should start with one settler");
+    assert.equal(initialPurpleSettlers.length, 1, "purple should start with one settler");
     assert.equal(initialState.units.some((unit) => unit.type === "warrior"), false, "no warriors at match start");
     assert.equal(initialState.contextMenu?.type, "none", "context menu should be hidden before selection");
     assert.equal(initialState.uiPreview?.mode ?? "none", "none", "preview should be empty without hover selection");
@@ -144,6 +148,33 @@ async function run() {
     assert.ok(initialState.hudTopLeft?.resources?.food, "top-left food resource display should exist");
     assert.ok(initialState.hudTopLeft?.resources?.production, "top-left production resource display should exist");
     assert.ok(initialState.hudTopLeft?.resources?.science, "top-left science resource display should exist");
+    assert.equal(initialState.devVisionEnabled, false, "dev vision should default to off");
+    assert.ok(initialState.ai?.enemy?.personality, "enemy AI personality payload should exist");
+    assert.ok(initialState.ai?.purple?.personality, "purple AI personality payload should exist");
+    assert.ok(initialState.visibility?.byOwner?.player, "player visibility payload should exist");
+
+    const playerVisibleSet = new Set(initialState.visibility.byOwner.player.visibleHexes ?? []);
+    const playerExploredCount = initialState.visibility.byOwner.player.exploredHexes?.length ?? 0;
+    const totalHexCount = initialState.map.width * initialState.map.height;
+    assert.ok(playerVisibleSet.size > 0, "player should see at least one tile");
+    assert.ok(playerVisibleSet.size < totalHexCount, "fog should hide parts of the map initially");
+    assert.ok(playerExploredCount >= playerVisibleSet.size, "explored tiles should include currently visible tiles");
+
+    const hostileHiddenCount = initialState.units.filter((unit) => unit.owner !== "player").filter((unit) => !playerVisibleSet.has(`${unit.q},${unit.r}`)).length;
+    assert.ok(hostileHiddenCount >= 1, "at least one hostile unit should start hidden by fog");
+
+    const enemyVisibleBeforeDev = [...(initialState.visibility.byOwner.enemy.visibleHexes ?? [])];
+    await page.keyboard.press("KeyV");
+    const withDevVision = await page.evaluate(() => window.__hexfallTest.getState());
+    assert.equal(withDevVision.devVisionEnabled, true, "V should toggle dev vision on");
+    assert.deepEqual(
+      withDevVision.visibility?.byOwner?.enemy?.visibleHexes ?? [],
+      enemyVisibleBeforeDev,
+      "player dev reveal should not alter AI fog visibility"
+    );
+    await page.keyboard.press("KeyV");
+    const withoutDevVision = await page.evaluate(() => window.__hexfallTest.getState());
+    assert.equal(withoutDevVision.devVisionEnabled, false, "V should toggle dev vision off");
 
     const scenarioResult = await page.evaluate(async () => {
       const getState = () => window.__hexfallTest.getState();
@@ -308,6 +339,11 @@ async function run() {
       if (!Array.isArray(queueAfterUnitAdd) || queueAfterUnitAdd.length < 2) {
         return { ok: false, reason: "queue-unit-enqueue-failed" };
       }
+      const cityPanelAfterQueue = window.__hexfallTest.getCityPanelState();
+      const firstProductionLabel = cityPanelAfterQueue?.cityProductionButtons?.[0]?.label ?? "";
+      if (!String(firstProductionLabel).includes("/")) {
+        return { ok: false, reason: "production-cost-eta-label-not-visible" };
+      }
       let queueFillState = queueAfterUnitAdd;
       let queueFillSafety = 0;
       while (Array.isArray(queueFillState) && queueFillState.length < 3 && queueFillSafety < 4) {
@@ -317,6 +353,15 @@ async function run() {
       const overfillAttempt = window.__hexfallTest.enqueueCityProduction("warrior");
       if (overfillAttempt !== false) {
         return { ok: false, reason: "queue-overfill-should-fail" };
+      }
+      const overfillHint = getState().uiActions?.disabledActionHints?.["city-enqueue-warrior"] ?? "";
+      if (!String(overfillHint).toLowerCase().includes("queue is full")) {
+        return { ok: false, reason: "missing-unavailable-reason-for-overfill" };
+      }
+
+      const queueAfterMove = window.__hexfallTest.moveCityQueue(2, "up");
+      if (!Array.isArray(queueAfterMove) || queueAfterMove.length !== 3) {
+        return { ok: false, reason: "queue-move-up-failed" };
       }
       const queueAfterRemove = window.__hexfallTest.removeCityQueueAt(1);
       if (!Array.isArray(queueAfterRemove) || queueAfterRemove.length < 1 || queueAfterRemove.length > 2) {
@@ -349,11 +394,15 @@ async function run() {
       let playbackObserved = false;
       let stepAdvanced = false;
       let maxObservedStep = 0;
+      const observedPlaybackActors = new Set();
       for (let i = 0; i < 60; i += 1) {
         await pause(70);
         const frameState = getState();
         if (frameState.turnPlayback?.active) {
           playbackObserved = true;
+          if (frameState.turnPlayback?.actor) {
+            observedPlaybackActors.add(frameState.turnPlayback.actor);
+          }
           const stepIndex = frameState.turnPlayback?.stepIndex ?? 0;
           if (stepIndex > maxObservedStep) {
             maxObservedStep = stepIndex;
@@ -380,18 +429,36 @@ async function run() {
       if (afterEnemyOpen.turnPlayback?.active) {
         return { ok: false, reason: "enemy-playback-stuck-active" };
       }
+      if (!afterEnemyOpen.ai?.enemy?.lastTurnSummary || !afterEnemyOpen.ai?.purple?.lastTurnSummary) {
+        return { ok: false, reason: "missing-one-or-more-ai-turn-summaries" };
+      }
+      if (afterEnemyOpen.ai.enemy.lastTurnSummary.turn !== 1 || afterEnemyOpen.ai.purple.lastTurnSummary.turn !== 1) {
+        return { ok: false, reason: "ai-turn-summaries-have-unexpected-turn-number" };
+      }
+      if (!observedPlaybackActors.has("enemy") || !observedPlaybackActors.has("purple")) {
+        return { ok: false, reason: "playback-did-not-observe-both-ai-actors" };
+      }
 
-      // Enemy should auto-found on enemy phase.
+      // Enemy and purple should both auto-found on first AI phase.
       if (afterEnemyOpen.cities.filter((city) => city.owner === "enemy").length < 1) {
         return { ok: false, reason: "enemy-did-not-auto-found" };
       }
       if (afterEnemyOpen.units.some((unit) => unit.owner === "enemy" && unit.type === "settler")) {
         return { ok: false, reason: "enemy-settler-should-be-consumed" };
       }
+      if (afterEnemyOpen.cities.filter((city) => city.owner === "purple").length < 1) {
+        return { ok: false, reason: "purple-did-not-auto-found" };
+      }
+      if (afterEnemyOpen.units.some((unit) => unit.owner === "purple" && unit.type === "settler")) {
+        return { ok: false, reason: "purple-settler-should-be-consumed" };
+      }
 
       // AI personality payload + forced override hook.
       if (!afterEnemyOpen.ai?.enemy?.personality) {
         return { ok: false, reason: "missing-ai-personality-payload" };
+      }
+      if (!afterEnemyOpen.ai?.purple?.personality) {
+        return { ok: false, reason: "missing-purple-ai-personality-payload" };
       }
       const forcedRaider = window.__hexfallTest.setEnemyPersonality("raider");
       const aiAfterRaider = window.__hexfallTest.getEnemyAiState();
@@ -402,6 +469,11 @@ async function run() {
       const aiAfterGuardian = window.__hexfallTest.getEnemyAiState();
       if (forcedGuardian !== "guardian" || aiAfterGuardian?.personality !== "guardian") {
         return { ok: false, reason: "failed-to-force-guardian-personality" };
+      }
+      const forcedPurpleRaider = window.__hexfallTest.setAiPersonality("purple", "raider");
+      const purpleAiAfterRaider = window.__hexfallTest.getAiState("purple");
+      if (forcedPurpleRaider !== "raider" || purpleAiAfterRaider?.personality !== "raider") {
+        return { ok: false, reason: "failed-to-force-purple-raider-personality" };
       }
 
       // Advance until player gets a warrior from city production.
@@ -496,11 +568,16 @@ async function run() {
         playerArcher = getUnit(withArcher, "player", "archer");
       }
 
-      const playerWarrior = getUnit(withArcher, "player", "warrior");
-      const enemyCity = withArcher.cities.find((city) => city.owner === "enemy");
-      if (!playerArcher || !playerWarrior || !enemyCity) {
-        return { ok: false, reason: "missing-archer-warrior-or-enemy-city" };
+      const playerCityAssaultUnit =
+        withArcher.units.find((unit) => unit.owner === "player" && unit.type === "warrior") ??
+        withArcher.units.find((unit) => unit.owner === "player" && unit.type === "spearman") ??
+        withArcher.units.find((unit) => unit.owner === "player" && unit.type === "archer");
+      const hostileCity = withArcher.cities.find((city) => city.owner !== "player");
+      if (!playerArcher || !playerCityAssaultUnit || !hostileCity) {
+        return { ok: false, reason: "missing-archer-assault-unit-or-hostile-city" };
       }
+      const hostileCityId = hostileCity.id;
+      const cityAssaultUnitId = playerCityAssaultUnit.id;
 
       // Ranged attack at distance 2.
       const occupiedByOtherUnit = (state, movingUnitId, q, r) =>
@@ -523,30 +600,29 @@ async function run() {
         { dq: 1, dr: 1 },
       ];
       const rangedHexes = ringDistanceTwoOffsets
-        .map((offset) => ({ q: enemyCity.q + offset.dq, r: enemyCity.r + offset.dr }))
+        .map((offset) => ({ q: hostileCity.q + offset.dq, r: hostileCity.r + offset.dr }))
         .filter((hex) => inBounds(withArcher, hex.q, hex.r))
         .filter((hex) => !isBlockedByCity(withArcher, hex.q, hex.r))
         .filter((hex) => !occupiedByOtherUnit(withArcher, playerArcher.id, hex.q, hex.r))
         .sort((a, b) => a.q - b.q || a.r - b.r);
-      let rangedPositioned = false;
+      let cityAttackPreview = null;
       for (const hex of rangedHexes) {
-        if (window.__hexfallTest.setUnitPosition(playerArcher.id, hex.q, hex.r)) {
-          rangedPositioned = true;
+        if (!window.__hexfallTest.setUnitPosition(playerArcher.id, hex.q, hex.r)) {
+          continue;
+        }
+        window.__hexfallTest.selectUnit(playerArcher.id);
+        if (!window.__hexfallTest.hoverHex(hostileCity.q, hostileCity.r)) {
+          continue;
+        }
+        cityAttackPreview = window.__hexfallTest.getActionPreviewState();
+        if (cityAttackPreview?.mode === "attack-city" && cityAttackPreview.cityId === hostileCity.id) {
           break;
         }
       }
-      if (!rangedPositioned) {
-        return { ok: false, reason: "failed-to-position-archer-for-ranged-attack" };
-      }
-      window.__hexfallTest.selectUnit(playerArcher.id);
-      if (!window.__hexfallTest.hoverHex(enemyCity.q, enemyCity.r)) {
-        return { ok: false, reason: "failed-to-hover-city-for-attack-preview" };
-      }
-      const cityAttackPreview = window.__hexfallTest.getActionPreviewState();
-      if (cityAttackPreview?.mode !== "attack-city" || cityAttackPreview.cityId !== enemyCity.id) {
+      if (cityAttackPreview?.mode !== "attack-city" || cityAttackPreview.cityId !== hostileCity.id) {
         return { ok: false, reason: "missing-city-attack-preview" };
       }
-      if (!window.__hexfallTest.attackCity(enemyCity.id)) {
+      if (!window.__hexfallTest.attackCity(hostileCity.id)) {
         return { ok: false, reason: "archer-ranged-city-attack-failed" };
       }
       const rangedAttackState = getState();
@@ -555,7 +631,7 @@ async function run() {
       }
 
       // Unit context + invalid action warning notification.
-      window.__hexfallTest.selectUnit(playerWarrior.id);
+      window.__hexfallTest.selectUnit(cityAssaultUnitId);
       const unitPanel = window.__hexfallTest.getCityPanelState();
       if (!unitPanel?.visible || unitPanel.mode !== "unit") {
         return { ok: false, reason: "unit-context-panel-not-visible" };
@@ -576,8 +652,11 @@ async function run() {
       let pendingLoops = 0;
       while (pendingLoops < 7) {
         const state = getState();
-        const attacker = getUnit(state, "player", "warrior");
-        const targetCity = state.cities.find((city) => city.id === enemyCity.id);
+        const attacker =
+          state.units.find((unit) => unit.id === cityAssaultUnitId) ??
+          state.units.find((unit) => unit.owner === "player" && (unit.type === "warrior" || unit.type === "spearman")) ??
+          null;
+        const targetCity = state.cities.find((city) => city.id === hostileCityId) ?? state.cities.find((city) => city.owner !== "player");
         if (!attacker || !targetCity) {
           return { ok: false, reason: "attacker-or-city-missing-before-resolution" };
         }
@@ -592,14 +671,26 @@ async function run() {
           continue;
         }
 
-        const candidateHexes = [
-          { q: targetCity.q + 1, r: targetCity.r },
-          { q: targetCity.q + 1, r: targetCity.r - 1 },
-          { q: targetCity.q, r: targetCity.r - 1 },
-          { q: targetCity.q - 1, r: targetCity.r },
-          { q: targetCity.q - 1, r: targetCity.r + 1 },
-          { q: targetCity.q, r: targetCity.r + 1 },
-        ];
+        const minRange = Math.max(1, attacker.minAttackRange ?? 1);
+        const maxRange = Math.max(minRange, attacker.attackRange ?? 1);
+        const candidateHexes = [];
+        for (let q = 0; q < state.map.width; q += 1) {
+          for (let r = 0; r < state.map.height; r += 1) {
+            const dist = Math.max(Math.abs(q - targetCity.q), Math.abs(r - targetCity.r), Math.abs(q + r - targetCity.q - targetCity.r));
+            if (dist < minRange || dist > maxRange) {
+              continue;
+            }
+            if (isBlockedByCity(state, q, r)) {
+              continue;
+            }
+            if (occupiedByOtherUnit(state, attacker.id, q, r)) {
+              continue;
+            }
+            candidateHexes.push({ q, r });
+          }
+        }
+        candidateHexes.sort((a, b) => a.q - b.q || a.r - b.r);
+
         let positioned = false;
         for (const hex of candidateHexes) {
           if (window.__hexfallTest.setUnitPosition(attacker.id, hex.q, hex.r)) {
@@ -631,6 +722,7 @@ async function run() {
       if (!withPending.pendingCityResolution) {
         return { ok: false, reason: "city-resolution-never-opened" };
       }
+      const pendingCityId = withPending.pendingCityResolution.cityId;
       const cityModal = window.__hexfallTest.getCityResolutionModalState();
       if (
         !cityModal?.open ||
@@ -650,9 +742,9 @@ async function run() {
       if (afterResolution.pendingCityResolution) {
         return { ok: false, reason: "city-resolution-did-not-close" };
       }
-      const capturedCity = afterResolution.cities.find((city) => city.id === enemyCity.id);
+      const capturedCity = afterResolution.cities.find((city) => city.id === pendingCityId);
       if (!capturedCity || capturedCity.owner !== "player") {
-        return { ok: false, reason: "enemy-city-was-not-captured" };
+        return { ok: false, reason: "hostile-city-was-not-captured" };
       }
 
       const finalState = getState();

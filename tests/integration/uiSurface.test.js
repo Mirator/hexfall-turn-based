@@ -50,7 +50,7 @@ describe("UI surface hints/actions", () => {
     const attackableTargets = getAttackableTargets(warrior.id, gameState);
     const ui = deriveUiSurface(gameState, warrior, null, attackableTargets, []);
     expect(attackableTargets.length).toBeGreaterThan(0);
-    expect(ui.uiHints.primary).toContain("Enemy in range");
+    expect(ui.uiHints.primary).toContain("Hostile unit in range");
   });
 
   it("maps found-city reason codes to user-facing text", () => {
@@ -88,6 +88,11 @@ describe("UI surface hints/actions", () => {
     expect(ui.uiActions.cityProductionChoices.length).toBeGreaterThan(0);
     expect(ui.uiActions.cityBuildingChoices.length).toBeGreaterThan(0);
     expect(ui.uiActions.cityQueueItems).toEqual([]);
+    expect(ui.uiActions.cityFocusChoices.length).toBe(4);
+    expect(ui.uiActions.cityQueueSlots.length).toBe(3);
+    expect(ui.uiActions.cityQueueSlots[0].empty).toBe(true);
+    expect(typeof ui.uiActions.cityProductionStock).toBe("number");
+    expect(typeof ui.uiActions.cityLocalProduction).toBe("number");
     expect(ui.uiHints.primary).toContain("City selected");
   });
 
@@ -138,6 +143,7 @@ describe("UI surface hints/actions", () => {
     const ui = deriveUiSurface(gameState, null, city, [], []);
     expect(ui.uiActions.canQueueProduction).toBe(false);
     expect(ui.uiActions.cityQueueReason).toContain("full");
+    expect(ui.uiActions.disabledActionHints["city-enqueue-warrior"]).toContain("Queue is full");
   });
 
   it("reports building-tab reason when unlocked buildings are already built/queued", () => {
@@ -163,6 +169,33 @@ describe("UI surface hints/actions", () => {
 
     const granaryChoice = ui.uiActions.cityBuildingChoices.find((choice) => choice.id === "granary");
     expect(granaryChoice?.alreadyBuilt).toBe(true);
+    expect(granaryChoice?.reasonCode).toBe("already-built");
+    expect(ui.uiActions.disabledActionHints["city-enqueue-building-granary"]).toContain("already exists");
+  });
+
+  it("exposes locked reasons and queue slot controls for unavailable items", () => {
+    const gameState = createInitialGameState({ seed: 227 });
+    const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
+    expect(settler).toBeTruthy();
+    if (!settler) {
+      return;
+    }
+    const founded = foundCity(settler.id, gameState);
+    expect(founded.ok).toBe(true);
+    const city = gameState.cities[0];
+
+    const ui = deriveUiSurface(gameState, null, city, [], []);
+    const archerChoice = ui.uiActions.cityProductionChoices.find((choice) => choice.type === "archer");
+    expect(archerChoice?.unlocked).toBe(false);
+    expect(archerChoice?.reasonCode).toBe("locked");
+    expect(archerChoice?.reasonText).toContain("Archery");
+    expect(ui.uiActions.disabledActionHints["city-enqueue-archer"]).toContain("Archery");
+
+    const queueSlots = ui.uiActions.cityQueueSlots;
+    expect(queueSlots[0].canMoveUp).toBe(false);
+    expect(queueSlots[0].canMoveDown).toBe(false);
+    expect(ui.uiActions.disabledActionHints["city-queue-move-up-0"]).toContain("empty");
+    expect(ui.uiActions.disabledActionHints["city-queue-remove-0"]).toContain("empty");
   });
 
   it("shows pending city-resolution hint while modal context is active", () => {

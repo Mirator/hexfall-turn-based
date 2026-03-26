@@ -4,15 +4,16 @@
 
 - Add a lightweight action timeline so key gameplay events are visible and easier to follow.
 - Keep gameplay determinism and combat/economy authority in simulation state.
-- Replace instant enemy-phase resolution with sequential, explainable playback.
+- Replace instant AI-phase resolution with sequential, explainable playback.
 
 ## Decisions made (and alternatives rejected)
 
 - Chosen: keep current Graphics renderer and add a tween-driven presentation layer (`no full sprite refactor`).
 - Chosen: movement/combat/founding/outcome visuals are queued clips (`move`, `attack`, `attack-city`, `found-city`, `city-outcome`) and run sequentially.
 - Chosen: authoritative state mutates first; animation reads committed results and visualizes them.
-- Chosen: enemy phase executes as plan-based step playback (`prepare -> prelude -> execute step-by-step -> finalize`).
-- Chosen: adaptive enemy playback speed scaling by action count to avoid long dead time on large turns.
+- Chosen: AI phase executes as plan-based step playback per owner (`prepare -> prelude -> execute step-by-step -> finalize`).
+- Chosen: AI phase runs owners sequentially (`enemy` then `purple`) within the same turn phase.
+- Chosen: adaptive playback speed scaling by action count to avoid long dead time on large turns.
 - Rejected for now: frame-by-frame simulation rewind, manual step-confirm enemy playback mode, and full sprite asset pipeline.
 
 ## Interfaces/types added
@@ -21,11 +22,11 @@
   - `getPathTo(unitId, destination, gameState)`
   - `moveUnit(...)` now returns `path` metadata on success.
 - Enemy turn:
-  - `prepareEnemyTurnPlan(gameState)`
+  - `prepareEnemyTurnPlan(gameState, owner?)`
   - `executeEnemyTurnPrelude(gameState, plan)`
   - `executeEnemyTurnStep(gameState, step)`
   - `finalizeEnemyTurnPlan(gameState, plan, actions, appliedPrelude?)`
-  - `runEnemyTurn(gameState)` retained as compatibility wrapper.
+  - `runEnemyTurn(gameState, owner?)` retained as compatibility wrapper.
 - Runtime payload surfaces:
   - `animationState: { busy, kind, queueLength }`
   - `turnPlayback: { active, actor, stepIndex, totalSteps, message }`
@@ -46,10 +47,11 @@
   - city assault pulse/damage feedback,
   - founding pulse/spawn animation,
   - capture/raze outcome burst animation.
-- Enemy turn flow:
-  - entering enemy turn exposes active `turnPlayback`,
-  - action index advances per executed enemy action,
-  - phase returns to player only after playback finishes and enemy turn post-processing is complete.
+- AI turn flow:
+  - entering AI turn exposes active `turnPlayback`,
+  - playback actor identifies currently resolving owner (`enemy` or `purple`),
+  - action index advances per executed AI action,
+  - phase returns to player only after both AI owners finish playback and AI post-processing is complete.
 - Input lock:
   - player command actions are blocked while animation queue is busy,
   - camera pan remains available while no modal is open.
@@ -61,6 +63,7 @@
 - `npm run test:e2e`
 - `npm run build`
 - E2E smoke now validates non-immediate enemy playback activity (`turnPlayback.active` + step progression) and return to player phase.
+ - E2E smoke validates both AI actors participate in playback/summaries and return-to-player transition remains deterministic.
 
 ## Known gaps and next steps
 

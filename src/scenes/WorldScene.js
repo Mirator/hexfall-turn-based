@@ -11,6 +11,7 @@ import {
   getUnitById,
   isInsideMap,
 } from "../core/gameState.js";
+import { AI_OWNERS, getOwnerLabel, isAiOwner } from "../core/factions.js";
 import { axialKey, axialToWorld, distance, neighbors, worldToAxial } from "../core/hexGrid.js";
 import { TERRAIN } from "../core/terrainData.js";
 import {
@@ -21,6 +22,7 @@ import {
   enqueueCityQueueItem,
   foundCity,
   getFoundCityReasonText,
+  moveCityQueueItem,
   removeCityQueueAt,
   setCityFocus,
   setCityProductionTab,
@@ -36,6 +38,7 @@ import {
   resolveCityOutcome,
 } from "../systems/combatSystem.js";
 import {
+  ensureAiState,
   ensureEnemyAiState,
   executeEnemyTurnPrelude,
   executeEnemyTurnStep,
@@ -50,6 +53,14 @@ import { beginEnemyTurn, beginPlayerTurn } from "../systems/turnSystem.js";
 import { deriveUiSurface } from "../systems/uiSurfaceSystem.js";
 import { getSkipUnitReasonText, skipUnit } from "../systems/unitActionSystem.js";
 import { evaluateMatchState } from "../systems/victorySystem.js";
+import {
+  canOwnerSeeUnit,
+  isHexExploredByOwner,
+  isHexVisibleToOwner,
+  isPlayerDevVisionEnabled,
+  recomputeVisibility,
+  togglePlayerDevVision,
+} from "../systems/visibilitySystem.js";
 
 const SQRT_3 = Math.sqrt(3);
 const RESTART_MIN_FACTION_DISTANCE = DEFAULT_MIN_FACTION_DISTANCE;
@@ -80,6 +91,7 @@ export class WorldScene extends Phaser.Scene {
     this.enemyTurnActivePlan = null;
     this.foundCityKeyBinding = null;
     this.nextUnitKeyBinding = null;
+    this.devVisionKeyBinding = null;
     this.cameraPanKeys = null;
     this.uiModalOpen = false;
     this.runtimeSeedCounter = 0;
@@ -121,6 +133,7 @@ export class WorldScene extends Phaser.Scene {
     this.input.on("pointerup", this.handlePointerUp, this);
     this.foundCityKeyBinding = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.F) ?? null;
     this.nextUnitKeyBinding = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.TAB) ?? null;
+    this.devVisionKeyBinding = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.V) ?? null;
     this.cameraPanKeys =
       this.input.keyboard?.addKeys({
         up: Phaser.Input.Keyboard.KeyCodes.UP,
@@ -134,6 +147,7 @@ export class WorldScene extends Phaser.Scene {
       }) ?? null;
     this.foundCityKeyBinding?.on("down", this.handleFoundCityRequested, this);
     this.nextUnitKeyBinding?.on("down", this.handleNextReadyUnitRequested, this);
+    this.devVisionKeyBinding?.on("down", this.handleDevVisionToggleRequested, this);
     if (this.game.canvas) {
       this.preventContextMenuHandler = (event) => event.preventDefault();
       this.game.canvas.addEventListener("contextmenu", this.preventContextMenuHandler);
@@ -147,6 +161,7 @@ export class WorldScene extends Phaser.Scene {
     gameEvents.on("city-focus-set-requested", this.handleCityFocusSetRequested, this);
     gameEvents.on("city-production-tab-set-requested", this.handleCityProductionTabSetRequested, this);
     gameEvents.on("city-queue-enqueue-requested", this.handleCityQueueEnqueueRequested, this);
+    gameEvents.on("city-queue-move-requested", this.handleCityQueueMoveRequested, this);
     gameEvents.on("city-queue-remove-requested", this.handleCityQueueRemoveRequested, this);
     gameEvents.on("city-outcome-requested", this.handleCityOutcomeRequested, this);
     gameEvents.on("restart-match-requested", this.handleRestartRequested, this);
@@ -159,6 +174,7 @@ export class WorldScene extends Phaser.Scene {
       this.input.off("pointerup", this.handlePointerUp, this);
       this.foundCityKeyBinding?.off("down", this.handleFoundCityRequested, this);
       this.nextUnitKeyBinding?.off("down", this.handleNextReadyUnitRequested, this);
+      this.devVisionKeyBinding?.off("down", this.handleDevVisionToggleRequested, this);
       this.scale.off("resize", this.handleResize, this);
       gameEvents.off("end-turn-requested", this.handleEndTurnRequested, this);
       gameEvents.off("next-ready-unit-requested", this.handleNextReadyUnitRequested, this);
@@ -168,6 +184,7 @@ export class WorldScene extends Phaser.Scene {
       gameEvents.off("city-focus-set-requested", this.handleCityFocusSetRequested, this);
       gameEvents.off("city-production-tab-set-requested", this.handleCityProductionTabSetRequested, this);
       gameEvents.off("city-queue-enqueue-requested", this.handleCityQueueEnqueueRequested, this);
+      gameEvents.off("city-queue-move-requested", this.handleCityQueueMoveRequested, this);
       gameEvents.off("city-queue-remove-requested", this.handleCityQueueRemoveRequested, this);
       gameEvents.off("city-outcome-requested", this.handleCityOutcomeRequested, this);
       gameEvents.off("restart-match-requested", this.handleRestartRequested, this);
@@ -231,13 +248,21 @@ export class WorldScene extends Phaser.Scene {
     const selectedUnit = getUnitById(this.gameState, this.gameState.selectedUnitId);
     const clickedUnit = getUnitAt(this.gameState, clickedHex.q, clickedHex.r);
     const clickedCity = getCityAt(this.gameState, clickedHex.q, clickedHex.r);
+    const clickedUnitVisible = clickedUnit ? this.isUnitVisibleToPlayer(clickedUnit) : false;
+    const clickedCityVisible = clickedCity ? this.isCityVisibleToPlayer(clickedCity) : false;
 
     if (selectedUnit && clickedUnit && clickedUnit.owner !== selectedUnit.owner) {
+      if (!clickedUnitVisible) {
+        return;
+      }
       void this.handlePlayerUnitAttack(selectedUnit.id, clickedUnit.id);
       return;
     }
 
     if (selectedUnit && clickedCity && clickedCity.owner !== selectedUnit.owner) {
+      if (!clickedCityVisible) {
+        return;
+      }
       if (!this.attackableCityLookup.has(clickedCity.id)) {
         return;
       }
@@ -367,6 +392,16 @@ export class WorldScene extends Phaser.Scene {
     this.renderAll();
     this.publishState();
     return true;
+  };
+
+  handleDevVisionToggleRequested = () => {
+    const enabled = togglePlayerDevVision(this.gameState);
+    this.evaluateAndPublish();
+    this.emitNotification(`Dev Vision ${enabled ? "enabled" : "disabled"}.`, {
+      level: "info",
+      category: "System",
+    });
+    return enabled;
   };
 
   handleFoundCityRequested = () => {
@@ -551,6 +586,35 @@ export class WorldScene extends Phaser.Scene {
     });
   };
 
+  handleCityQueueMoveRequested = (payload) => {
+    if (!this.canAcceptPlayerCommands() || !this.gameState.selectedCityId) {
+      return;
+    }
+
+    const slotIndex = Number(payload?.index);
+    const direction = payload?.direction;
+    if (direction !== "up" && direction !== "down") {
+      return;
+    }
+
+    const result = moveCityQueueItem(this.gameState.selectedCityId, slotIndex, direction, this.gameState);
+    if (!result.ok) {
+      this.emitNotification(this.getQueueMoveFailureMessage(result.reason, direction), {
+        level: "warning",
+        category: "City",
+        focus: this.buildSelectionFocusPayload(),
+      });
+      return;
+    }
+
+    this.evaluateAndPublish();
+    this.emitNotification(`Queue item moved ${direction}.`, {
+      level: "info",
+      category: "City",
+      focus: this.buildSelectionFocusPayload(),
+    });
+  };
+
   handleCityQueueRemoveRequested = (payload) => {
     if (!this.canAcceptPlayerCommands() || !this.gameState.selectedCityId) {
       return;
@@ -664,6 +728,22 @@ export class WorldScene extends Phaser.Scene {
     return "Could not add item to queue.";
   }
 
+  getQueueMoveFailureMessage(reason, direction) {
+    if (reason === "queue-index-invalid") {
+      return "Queue slot is empty.";
+    }
+    if (reason === "queue-move-out-of-range") {
+      return direction === "up" ? "Item is already at the top of the queue." : "Item is already at the bottom of the queue.";
+    }
+    if (reason === "queue-move-direction-invalid") {
+      return "Queue move direction is invalid.";
+    }
+    if (reason === "city-not-found") {
+      return "Select a city first.";
+    }
+    return "Could not move queue item.";
+  }
+
   startNewMatch(previousLayout = null) {
     let nextState = null;
     for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -742,10 +822,10 @@ export class WorldScene extends Phaser.Scene {
     beginEnemyTurn(this.gameState);
     this.turnPlayback = {
       active: true,
-      actor: "enemy",
+      actor: AI_OWNERS[0],
       stepIndex: 0,
       totalSteps: 0,
-      message: "Planning enemy actions...",
+      message: "Planning AI actions...",
     };
     this.evaluateAndPublish();
     const playbackToken = ++this.enemyTurnPlaybackToken;
@@ -753,52 +833,65 @@ export class WorldScene extends Phaser.Scene {
   }
 
   async runEnemyTurnPlayback(playbackToken) {
-    const plan = prepareEnemyTurnPlan(this.gameState);
-    this.enemyTurnActivePlan = plan;
-    this.turnPlayback.totalSteps = plan.steps.length;
-    this.turnPlayback.message = plan.steps.length > 0 ? "Enemy is acting..." : "Enemy has no actions.";
-    const appliedPrelude = executeEnemyTurnPrelude(this.gameState, plan);
-    finalizeEnemyTurnPlan(this.gameState, plan, [], appliedPrelude);
-    this.evaluateAndPublish();
-
-    if (!this.isPlaybackTokenCurrent(playbackToken)) {
-      return;
-    }
-
-    /** @type {import("../core/types.js").EnemyActionSummary[]} */
-    const executedActions = [];
-    for (let index = 0; index < plan.steps.length; index += 1) {
+    /** @type {Array<ReturnType<typeof prepareEnemyTurnPlan>>} */
+    const ownerPlans = [];
+    for (const owner of AI_OWNERS) {
       if (!this.isPlaybackTokenCurrent(playbackToken)) {
         return;
       }
 
-      const step = plan.steps[index];
-      this.turnPlayback.stepIndex = index + 1;
-      this.turnPlayback.message = this.describeEnemyStep(step, index + 1, plan.steps.length);
-      this.publishState();
-
-      const execution = executeEnemyTurnStep(this.gameState, step);
-      if (!execution.ok || !execution.actionSummary) {
-        continue;
-      }
-      executedActions.push(execution.actionSummary);
-      this.handleEnemyStepNotification(step, execution);
+      const plan = prepareEnemyTurnPlan(this.gameState, owner);
+      ownerPlans.push(plan);
+      this.enemyTurnActivePlan = ownerPlans;
+      this.turnPlayback.actor = owner;
+      this.turnPlayback.stepIndex = 0;
+      this.turnPlayback.totalSteps = plan.steps.length;
+      this.turnPlayback.message = `Planning ${getOwnerLabel(owner)} actions...`;
+      const appliedPrelude = executeEnemyTurnPrelude(this.gameState, plan);
+      finalizeEnemyTurnPlan(this.gameState, plan, [], appliedPrelude);
       this.evaluateAndPublish();
 
-      await this.animateEnemyStep(step, execution, playbackToken);
       if (!this.isPlaybackTokenCurrent(playbackToken)) {
         return;
       }
+
+      /** @type {import("../core/types.js").EnemyActionSummary[]} */
+      const executedActions = [];
+      for (let index = 0; index < plan.steps.length; index += 1) {
+        if (!this.isPlaybackTokenCurrent(playbackToken)) {
+          return;
+        }
+
+        const step = plan.steps[index];
+        this.turnPlayback.stepIndex = index + 1;
+        this.turnPlayback.message = this.describeEnemyStep(step, index + 1, plan.steps.length, owner);
+        this.publishState();
+
+        const execution = executeEnemyTurnStep(this.gameState, step);
+        if (!execution.ok || !execution.actionSummary) {
+          continue;
+        }
+        executedActions.push(execution.actionSummary);
+        this.handleEnemyStepNotification(owner, step, execution);
+        this.evaluateAndPublish();
+
+        await this.animateEnemyStep(step, execution, playbackToken);
+        if (!this.isPlaybackTokenCurrent(playbackToken)) {
+          return;
+        }
+        await this.waitForAnimationDelay(ENEMY_ACTION_GAP_MS, playbackToken);
+      }
+
+      if (!this.isPlaybackTokenCurrent(playbackToken)) {
+        return;
+      }
+
+      finalizeEnemyTurnPlan(this.gameState, plan, executedActions, appliedPrelude);
+      this.turnPlayback.message = plan.steps.length > 0 ? `${getOwnerLabel(owner)} turn complete.` : `${getOwnerLabel(owner)} is idle.`;
+      this.publishState();
       await this.waitForAnimationDelay(ENEMY_ACTION_GAP_MS, playbackToken);
     }
 
-    if (!this.isPlaybackTokenCurrent(playbackToken)) {
-      return;
-    }
-
-    finalizeEnemyTurnPlan(this.gameState, plan, executedActions, appliedPrelude);
-    this.turnPlayback.message = plan.steps.length > 0 ? "Enemy turn complete." : "Enemy is idle.";
-    this.publishState();
     this.resolveEnemyAndAdvanceTurn();
   }
 
@@ -806,9 +899,13 @@ export class WorldScene extends Phaser.Scene {
     if (this.turnPlayback.active && this.enemyTurnActivePlan) {
       this.enemyTurnActivePlan = null;
     } else {
-      runEnemyTurn(this.gameState);
+      for (const owner of AI_OWNERS) {
+        runEnemyTurn(this.gameState, owner);
+      }
     }
-    processCityTurn(this.gameState, "enemy");
+    for (const owner of AI_OWNERS) {
+      processCityTurn(this.gameState, owner);
+    }
     beginPlayerTurn(this.gameState);
     const cityTurnResult = processCityTurn(this.gameState, "player");
     const researchResult = consumeScienceStock(this.gameState, "player", 1);
@@ -827,7 +924,7 @@ export class WorldScene extends Phaser.Scene {
     this.evaluateAndPublish();
   }
 
-  handleUnitAttackResult(attacker, target, attackResult) {
+  handleUnitAttackResult(attacker, target, attackResult, attackerOwner = null) {
     if (!attackResult.ok) {
       return;
     }
@@ -847,17 +944,20 @@ export class WorldScene extends Phaser.Scene {
 
     const summary = formatCombatBreakdownSummary(attackResult.breakdown);
     const counterSummary = formatCounterattackSummary(attackResult.counterattack);
+    const actorPrefix =
+      attackerOwner && attackerOwner !== "player" ? `${getOwnerLabel(attackerOwner)} ` : "";
     const message =
-      `Hit ${target.id} for ${attackResult.damage ?? 0}${summary}.` +
+      `${actorPrefix}hit ${target.id} for ${attackResult.damage ?? 0}${summary}.` +
       `${attackResult.targetDefeated ? " Target defeated." : ""}${counterSummary}`;
     this.emitNotification(message, {
       level: "info",
       category: "Combat",
       focus: { unitId: target.id, q: target.q, r: target.r },
+      sourceOwner: attackerOwner,
     });
   }
 
-  recordCityAttackEvent(attacker, city, attackResult) {
+  recordCityAttackEvent(attacker, city, attackResult, attackerOwner = null) {
     this.lastCombatEvent = {
       type: "city",
       attackerId: attacker.id,
@@ -875,10 +975,11 @@ export class WorldScene extends Phaser.Scene {
       level: "info",
       category: "Combat",
       focus: { cityId: city.id, q: city.q, r: city.r },
+      sourceOwner: attackerOwner,
     });
   }
 
-  handleCityAttackResult(attackResult) {
+  handleCityAttackResult(attackResult, attackerOwner = null, eventFocus = null) {
     if (!attackResult.cityDefeated) {
       return;
     }
@@ -888,22 +989,29 @@ export class WorldScene extends Phaser.Scene {
         level: "info",
         category: "Combat",
         focus: this.gameState.pendingCityResolution ? { cityId: this.gameState.pendingCityResolution.cityId } : null,
+        sourceOwner: attackerOwner,
       });
       return;
     }
 
     if (attackResult.outcomeChoice === "capture") {
-      this.emitNotification("Enemy captured a city.", {
+      const actorLabel = attackerOwner && attackerOwner !== "player" ? getOwnerLabel(attackerOwner) : "Hostile faction";
+      this.emitNotification(`${actorLabel} captured a city.`, {
         level: "warning",
         category: "Combat",
+        focus: eventFocus,
+        sourceOwner: attackerOwner,
       });
       return;
     }
 
     if (attackResult.outcomeChoice === "raze") {
-      this.emitNotification("Enemy razed a city.", {
+      const actorLabel = attackerOwner && attackerOwner !== "player" ? getOwnerLabel(attackerOwner) : "Hostile faction";
+      this.emitNotification(`${actorLabel} razed a city.`, {
         level: "warning",
         category: "Combat",
+        focus: eventFocus,
+        sourceOwner: attackerOwner,
       });
     }
   }
@@ -994,7 +1102,7 @@ export class WorldScene extends Phaser.Scene {
     return true;
   }
 
-  handleEnemyStepNotification(step, execution) {
+  handleEnemyStepNotification(owner, step, execution) {
     if (!execution?.ok || !execution.result) {
       return;
     }
@@ -1002,10 +1110,15 @@ export class WorldScene extends Phaser.Scene {
     if (step.action === "foundCity") {
       const foundedCityId = execution.result.cityId ?? null;
       const foundedCity = foundedCityId ? this.gameState.cities.find((city) => city.id === foundedCityId) ?? null : null;
-      this.emitNotification("Enemy founded a city.", {
+      this.emitNotification(`${getOwnerLabel(owner)} founded a city.`, {
         level: "warning",
         category: "City",
-        focus: foundedCity ? { cityId: foundedCity.id, q: foundedCity.q, r: foundedCity.r } : null,
+        focus: foundedCity
+          ? { cityId: foundedCity.id, q: foundedCity.q, r: foundedCity.r }
+          : Number.isFinite(step.q) && Number.isFinite(step.r)
+            ? { q: step.q, r: step.r }
+            : null,
+        sourceOwner: owner,
       });
       return;
     }
@@ -1021,7 +1134,8 @@ export class WorldScene extends Phaser.Scene {
           q: targetHex?.q ?? 0,
           r: targetHex?.r ?? 0,
         },
-        execution.result
+        execution.result,
+        owner
       );
       return;
     }
@@ -1037,14 +1151,19 @@ export class WorldScene extends Phaser.Scene {
           q: targetHex?.q ?? 0,
           r: targetHex?.r ?? 0,
         },
-        execution.result
+        execution.result,
+        owner
       );
-      this.handleCityAttackResult(execution.result);
+      this.handleCityAttackResult(
+        execution.result,
+        owner,
+        targetHex ? { cityId: step.targetId ?? undefined, q: targetHex.q, r: targetHex.r } : null
+      );
     }
   }
 
-  describeEnemyStep(step, index, total) {
-    const prefix = `Enemy action ${index}/${Math.max(1, total)}`;
+  describeEnemyStep(step, index, total, owner = "enemy") {
+    const prefix = `${getOwnerLabel(owner)} action ${index}/${Math.max(1, total)}`;
     if (!step) {
       return `${prefix}: thinking...`;
     }
@@ -1689,14 +1808,17 @@ export class WorldScene extends Phaser.Scene {
     this.reachableHexes = getReachable(selectedUnit.id, this.gameState);
     this.reachableLookup = new Set(this.reachableHexes.map((hex) => axialKey(hex)));
     this.reachableCostByKey = new Map(this.reachableHexes.map((hex) => [axialKey(hex), hex.cost]));
-    this.attackableTargets = getAttackableTargets(selectedUnit.id, this.gameState);
+    this.attackableTargets = getAttackableTargets(selectedUnit.id, this.gameState).filter((unit) =>
+      this.isUnitVisibleToPlayer(unit)
+    );
     this.attackableLookup = new Set(this.attackableTargets.map((unit) => unit.id));
-    this.attackableCities = getAttackableCities(selectedUnit.id, this.gameState);
+    this.attackableCities = getAttackableCities(selectedUnit.id, this.gameState).filter((city) => this.isCityVisibleToPlayer(city));
     this.attackableCityLookup = new Set(this.attackableCities.map((city) => city.id));
     this.refreshThreatOverlay(selectedUnit);
   }
 
   evaluateAndPublish() {
+    recomputeVisibility(this.gameState);
     evaluateMatchState(this.gameState);
     this.refreshActionHints();
     this.renderAll();
@@ -1743,6 +1865,7 @@ export class WorldScene extends Phaser.Scene {
       uiHints: uiSurface.uiHints,
       uiActions: uiSurface.uiActions,
       uiModalOpen: this.uiModalOpen,
+      devVisionEnabled: isPlayerDevVisionEnabled(this.gameState),
       animationState: this.getAnimationStatePayload(),
       turnPlayback: structuredClone(this.turnPlayback),
       pauseMenu: {
@@ -1785,10 +1908,31 @@ export class WorldScene extends Phaser.Scene {
 
   renderMap() {
     this.mapGraphics.clear();
+    const revealAll = isPlayerDevVisionEnabled(this.gameState);
 
     for (const tile of this.gameState.map.tiles) {
       const center = this.hexToWorld(tile.q, tile.r);
       const terrainDefinition = TERRAIN[tile.terrainType];
+      const visible = revealAll || isHexVisibleToOwner(this.gameState, "player", tile.q, tile.r);
+      const explored = revealAll || isHexExploredByOwner(this.gameState, "player", tile.q, tile.r);
+      if (!explored) {
+        drawHex(
+          this.mapGraphics,
+          center.x,
+          center.y,
+          HEX_SIZE,
+          COLORS.fogShroudFill,
+          0.94,
+          COLORS.fogShroudStroke,
+          1.2
+        );
+        continue;
+      }
+      if (!visible) {
+        drawHex(this.mapGraphics, center.x, center.y, HEX_SIZE, terrainDefinition.fillColor, 0.35, COLORS.tileStroke, 1.2);
+        drawHex(this.mapGraphics, center.x, center.y, HEX_SIZE, COLORS.fogMemoryFill, 0.46, COLORS.fogMemoryStroke, 1.1);
+        continue;
+      }
       drawHex(this.mapGraphics, center.x, center.y, HEX_SIZE, terrainDefinition.fillColor, 1, COLORS.tileStroke, 1.2);
     }
   }
@@ -1900,12 +2044,15 @@ export class WorldScene extends Phaser.Scene {
   renderCities() {
     this.cityGraphics.clear();
     for (const city of this.gameState.cities) {
+      if (!this.isCityVisibleToPlayer(city)) {
+        continue;
+      }
       const center = this.resolveCityRenderPosition(city);
       const override = this.cityRenderOverrides.get(city.id) ?? null;
       const scale = Math.max(0.2, override?.scale ?? 1);
       const alpha = Phaser.Math.Clamp(override?.alpha ?? 0.95, 0.05, 1);
       const halfSize = 13 * scale;
-      const fillColor = city.owner === "enemy" ? COLORS.cityEnemy : COLORS.cityPlayer;
+      const fillColor = city.owner === "enemy" ? COLORS.cityEnemy : city.owner === "purple" ? COLORS.cityPurple : COLORS.cityPlayer;
       this.cityGraphics.fillStyle(fillColor, alpha);
       this.cityGraphics.fillRect(center.x - halfSize, center.y - halfSize, halfSize * 2, halfSize * 2);
       this.cityGraphics.lineStyle(2, COLORS.cityStroke, alpha);
@@ -1923,12 +2070,21 @@ export class WorldScene extends Phaser.Scene {
   renderUnits() {
     this.unitGraphics.clear();
     for (const unit of this.gameState.units) {
+      if (!this.isUnitVisibleToPlayer(unit)) {
+        continue;
+      }
       const center = this.resolveUnitRenderPosition(unit);
       const override = this.unitRenderOverrides.get(unit.id) ?? null;
       const scale = Math.max(0.15, override?.scale ?? 1);
       const alpha = Phaser.Math.Clamp(override?.alpha ?? 1, 0.05, 1);
-      const fillColor = unit.owner === "enemy" ? COLORS.enemyUnit : COLORS.playerUnit;
-      const strokeColor = unit.owner === "enemy" ? COLORS.enemyUnitStroke : COLORS.playerUnitStroke;
+      const fillColor =
+        unit.owner === "enemy" ? COLORS.enemyUnit : unit.owner === "purple" ? COLORS.purpleUnit : COLORS.playerUnit;
+      const strokeColor =
+        unit.owner === "enemy"
+          ? COLORS.enemyUnitStroke
+          : unit.owner === "purple"
+            ? COLORS.purpleUnitStroke
+            : COLORS.playerUnitStroke;
       const radius = HEX_SIZE * 0.4 * scale;
       this.unitGraphics.fillStyle(fillColor, alpha);
       this.unitGraphics.fillCircle(center.x, center.y, radius);
@@ -2061,6 +2217,7 @@ export class WorldScene extends Phaser.Scene {
         researchIncomeThisTurn: this.gameState.economy.researchIncomeThisTurn,
         player: this.gameState.economy.player,
         enemy: this.gameState.economy.enemy,
+        purple: this.gameState.economy.purple,
       },
       ai: {
         enemy: {
@@ -2068,9 +2225,17 @@ export class WorldScene extends Phaser.Scene {
           lastGoal: this.gameState.ai?.enemy?.lastGoal ?? null,
           lastTurnSummary: this.gameState.ai?.enemy?.lastTurnSummary ?? null,
         },
+        purple: {
+          personality: this.gameState.ai?.purple?.personality ?? null,
+          lastGoal: this.gameState.ai?.purple?.lastGoal ?? null,
+          lastTurnSummary: this.gameState.ai?.purple?.lastTurnSummary ?? null,
+        },
+        byOwner: this.gameState.ai?.byOwner ? structuredClone(this.gameState.ai.byOwner) : null,
       },
+      visibility: structuredClone(this.gameState.visibility),
       hudTopLeft: {
-        turnLabel: `Turn ${this.gameState.turnState.turn} - ${this.gameState.turnState.phase === "enemy" ? "Enemy" : "Player"}`,
+        turnLabel: `Turn ${this.gameState.turnState.turn} - ${this.gameState.turnState.phase === "enemy" ? "AI" : "Player"}`,
+        devVisionEnabled: isPlayerDevVisionEnabled(this.gameState),
         resources: {
           food: { current: playerEconomy.foodStock, delta: projectedNetIncome.food, grossDelta: projectedIncome.food },
           production: {
@@ -2096,6 +2261,7 @@ export class WorldScene extends Phaser.Scene {
       uiHints: uiSurface.uiHints,
       uiActions: uiSurface.uiActions,
       uiModalOpen: this.uiModalOpen,
+      devVisionEnabled: isPlayerDevVisionEnabled(this.gameState),
       simulatedTimeMs: this.manualTimeMs,
       lastCombatEvent: this.lastCombatEvent,
     };
@@ -2189,12 +2355,17 @@ export class WorldScene extends Phaser.Scene {
           typeof item === "string" ? { kind: "unit", id: item } : { kind: item.kind, id: item.id }
         ),
         cityProductionTab: uiSurface.uiActions.cityProductionTab,
+        cityProductionStock: uiSurface.uiActions.cityProductionStock,
+        cityLocalProduction: uiSurface.uiActions.cityLocalProduction,
+        cityFocusChoices: uiSurface.uiActions.cityFocusChoices,
         canSetCityFocus: uiSurface.uiActions.canSetCityFocus,
         canSetCityProductionTab: uiSurface.uiActions.canSetCityProductionTab,
         canQueueProduction: uiSurface.uiActions.canQueueProduction,
         cityQueueReason: uiSurface.uiActions.cityQueueReason,
+        cityQueueSlots: uiSurface.uiActions.cityQueueSlots,
         cityProductionChoices: uiSurface.uiActions.cityProductionChoices,
         cityBuildingChoices: uiSurface.uiActions.cityBuildingChoices,
+        disabledActionHints: uiSurface.uiActions.disabledActionHints,
       };
     }
     if (menuType === "unit" && selectedUnit) {
@@ -2233,12 +2404,42 @@ export class WorldScene extends Phaser.Scene {
     if (!message) {
       return;
     }
+    const sourceOwner = options.sourceOwner ?? null;
+    const focus = options.focus ?? null;
+    if (isAiOwner(sourceOwner) && !this.isNotificationFocusVisibleToPlayer(focus)) {
+      return;
+    }
     gameEvents.emit("ui-toast-requested", {
       message,
       level: options.level ?? "info",
       category: options.category ?? "System",
-      focus: options.focus ?? null,
+      focus,
     });
+  }
+
+  isNotificationFocusVisibleToPlayer(focus) {
+    if (isPlayerDevVisionEnabled(this.gameState)) {
+      return true;
+    }
+    if (!focus || typeof focus !== "object") {
+      return false;
+    }
+    if (Number.isFinite(focus.q) && Number.isFinite(focus.r)) {
+      return this.isHexVisibleToPlayer(focus.q, focus.r);
+    }
+    if (typeof focus.unitId === "string") {
+      const unit = getUnitById(this.gameState, focus.unitId);
+      if (unit) {
+        return this.isUnitVisibleToPlayer(unit);
+      }
+    }
+    if (typeof focus.cityId === "string") {
+      const city = this.gameState.cities.find((candidate) => candidate.id === focus.cityId) ?? null;
+      if (city) {
+        return this.isCityVisibleToPlayer(city);
+      }
+    }
+    return false;
   }
 
   buildSelectionFocusPayload() {
@@ -2276,7 +2477,12 @@ export class WorldScene extends Phaser.Scene {
 
   buildHoverPreview(selectedUnit, hoveredHex) {
     const hoveredUnit = getUnitAt(this.gameState, hoveredHex.q, hoveredHex.r);
-    if (hoveredUnit && hoveredUnit.owner !== selectedUnit.owner && this.attackableLookup.has(hoveredUnit.id)) {
+    if (
+      hoveredUnit &&
+      hoveredUnit.owner !== selectedUnit.owner &&
+      this.isUnitVisibleToPlayer(hoveredUnit) &&
+      this.attackableLookup.has(hoveredUnit.id)
+    ) {
       const prediction = previewAttack(selectedUnit.id, hoveredUnit.id, this.gameState);
       if (!prediction.ok) {
         return null;
@@ -2295,7 +2501,12 @@ export class WorldScene extends Phaser.Scene {
     }
 
     const hoveredCity = getCityAt(this.gameState, hoveredHex.q, hoveredHex.r);
-    if (hoveredCity && hoveredCity.owner !== selectedUnit.owner && this.attackableCityLookup.has(hoveredCity.id)) {
+    if (
+      hoveredCity &&
+      hoveredCity.owner !== selectedUnit.owner &&
+      this.isCityVisibleToPlayer(hoveredCity) &&
+      this.attackableCityLookup.has(hoveredCity.id)
+    ) {
       const prediction = previewCityAttack(selectedUnit.id, hoveredCity.id, this.gameState);
       if (!prediction.ok) {
         return null;
@@ -2326,6 +2537,33 @@ export class WorldScene extends Phaser.Scene {
     }
 
     return null;
+  }
+
+  isHexVisibleToPlayer(q, r) {
+    if (isPlayerDevVisionEnabled(this.gameState)) {
+      return true;
+    }
+    return isHexVisibleToOwner(this.gameState, "player", q, r);
+  }
+
+  isUnitVisibleToPlayer(unit) {
+    if (!unit) {
+      return false;
+    }
+    if (unit.owner === "player") {
+      return true;
+    }
+    return this.isHexVisibleToPlayer(unit.q, unit.r);
+  }
+
+  isCityVisibleToPlayer(city) {
+    if (!city) {
+      return false;
+    }
+    if (city.owner === "player") {
+      return true;
+    }
+    return this.isHexVisibleToPlayer(city.q, city.r);
   }
 
   getReadyPlayerUnits() {
@@ -2432,7 +2670,10 @@ export class WorldScene extends Phaser.Scene {
 
   isHexThreatenedByEnemy(hex) {
     for (const enemyUnit of this.gameState.units) {
-      if (enemyUnit.owner !== "enemy" || enemyUnit.health <= 0) {
+      if (!AI_OWNERS.includes(enemyUnit.owner) || enemyUnit.health <= 0) {
+        continue;
+      }
+      if (!isPlayerDevVisionEnabled(this.gameState) && !canOwnerSeeUnit(this.gameState, "player", enemyUnit)) {
         continue;
       }
       const minRange = Math.max(1, enemyUnit.minAttackRange ?? 1);
@@ -2715,6 +2956,23 @@ export class WorldScene extends Phaser.Scene {
     return [...(result.queue ?? [])];
   }
 
+  testMoveCityQueue(index, direction) {
+    const cityId = this.gameState.selectedCityId;
+    if (!cityId) {
+      return false;
+    }
+    if (direction !== "up" && direction !== "down") {
+      return false;
+    }
+
+    const result = moveCityQueueItem(cityId, Number(index), direction, this.gameState);
+    if (!result.ok) {
+      return false;
+    }
+    this.evaluateAndPublish();
+    return [...(result.queue ?? [])];
+  }
+
   testCycleResearch() {
     this.handleResearchCycleRequested();
     return this.gameState.research.activeTechId;
@@ -2724,30 +2982,73 @@ export class WorldScene extends Phaser.Scene {
     return this.handleUnitActionRequested({ actionId });
   }
 
-  testSetEnemyPersonality(personality) {
+  testToggleDevVision() {
+    const enabled = togglePlayerDevVision(this.gameState);
+    this.evaluateAndPublish();
+    return enabled;
+  }
+
+  testSetDevVision(enabled) {
+    const next = !!enabled;
+    if (isPlayerDevVisionEnabled(this.gameState) === next) {
+      return next;
+    }
+    return this.testToggleDevVision();
+  }
+
+  testSetAiPersonality(owner, personality) {
+    if (!AI_OWNERS.includes(owner)) {
+      return false;
+    }
     if (personality !== "raider" && personality !== "expansionist" && personality !== "guardian") {
       return false;
     }
-    const aiState = ensureEnemyAiState(this.gameState);
-    aiState.personality = normalizeEnemyPersonality(personality, this.gameState.map.seed);
+    const aiState = ensureAiState(this.gameState, owner);
+    aiState.personality = normalizeEnemyPersonality(personality, this.gameState.map.seed, owner);
     this.evaluateAndPublish();
     return aiState.personality;
   }
 
-  testGetEnemyAiState() {
-    return structuredClone(ensureEnemyAiState(this.gameState));
+  testSetEnemyPersonality(personality) {
+    return this.testSetAiPersonality("enemy", personality);
   }
 
-  testClearEnemyCityQueue(cityId) {
+  testSetPurplePersonality(personality) {
+    return this.testSetAiPersonality("purple", personality);
+  }
+
+  testGetAiState(owner = "enemy") {
+    if (!AI_OWNERS.includes(owner)) {
+      return null;
+    }
+    return structuredClone(ensureAiState(this.gameState, owner));
+  }
+
+  testGetEnemyAiState() {
+    return this.testGetAiState("enemy");
+  }
+
+  testGetPurpleAiState() {
+    return this.testGetAiState("purple");
+  }
+
+  testClearAiCityQueue(owner = "enemy", cityId) {
+    if (!AI_OWNERS.includes(owner)) {
+      return false;
+    }
     const targetCity =
-      (cityId ? this.gameState.cities.find((city) => city.id === cityId) : this.gameState.cities.find((city) => city.owner === "enemy")) ??
+      (cityId ? this.gameState.cities.find((city) => city.id === cityId) : this.gameState.cities.find((city) => city.owner === owner)) ??
       null;
-    if (!targetCity || targetCity.owner !== "enemy") {
+    if (!targetCity || targetCity.owner !== owner) {
       return false;
     }
     targetCity.queue = [];
     this.evaluateAndPublish();
     return true;
+  }
+
+  testClearEnemyCityQueue(cityId) {
+    return this.testClearAiCityQueue("enemy", cityId);
   }
 
   testSelectResearch(techId) {

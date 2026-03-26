@@ -359,3 +359,54 @@ Original prompt: I want to make civilization like easy game in JS. Let's init th
 - Validation:
   - all docs references now use 001-008 set,
   - required template sections still present in each remaining spec file.
+## 2026-03-26 (Multi-faction map + fog-of-war + dev vision)
+- Implemented the requested multi-faction + fog-of-war upgrade completion pass.
+- Core/runtime changes finalized:
+  - map size upgraded to seeded `16x16`.
+  - faction model generalized to `player`, `enemy`, `purple` via owner helpers.
+  - match generation now spawns 3 settlers with pairwise distance constraints and safe-terrain normalization around all 3 spawn clusters.
+  - AI phase remains `enemy` turn phase name but now executes sequential owner plans for `enemy` then `purple`.
+  - AI planning/targeting now treats all non-owner factions as hostiles, visibility-gated, and encounter-memory-aware (unseen factions are not targeted/prioritized directly).
+  - per-owner visibility subsystem added (`visible` + `explored` + `seenOwners`) with `unit sight=2`, `city sight=3`.
+  - rendering updated for explored-memory fog rules: unexplored shroud, explored-dimmed memory, hostile units/cities only when visible (unless dev reveal).
+  - player debug reveal mode implemented: `V` toggles full reveal and HUD shows `Dev Vision: ON/OFF`.
+  - ownership-sensitive combat/city/victory logic aligned for three factions (player win requires eliminating both AI factions).
+  - purple palette/city-unit rendering and owner-aware AI playback labels/messages integrated.
+- Test surface and coverage updates:
+  - updated integration expectations for multi-faction wording and victory semantics.
+  - expanded seeded generation tests for 3-faction starts, pairwise distance floor, and spawn-cluster safe terrain normalization.
+  - expanded AI tests for multi-faction hostile targeting and unseen-faction exclusion.
+  - expanded enemy-turn tests for sequential `enemy` + `purple` execution and owner-aware step-wrapper equivalence.
+  - added new visibility integration suite: explored-memory persistence, hostile concealment/encounter memory, AI seen-hostiles memory, and dev-vision toggle behavior.
+  - updated e2e smoke assertions for:
+    - two AI factions existing and acting,
+    - fog payload/hidden-hostile checks,
+    - keyboard `V` dev-vision toggling,
+    - AI playback actor coverage (`enemy` and `purple`),
+    - owner-agnostic hostile city handling in late scenario checks.
+- Docs updated for runtime parity:
+  - `README.md`
+  - `docs/README.md`
+  - `docs/spec-002-core-map-turn-and-victory.md`
+  - `docs/spec-003-testability.md`
+  - `docs/spec-004-combat-siege-and-ranged.md`
+  - `docs/spec-007-hud-context-panels-and-notifications.md`
+  - `docs/spec-008-ai-personalities-and-strategy.md`
+  - `docs/spec-009-action-timeline-and-turn-playback.md`
+- Validation rerun on final state:
+  - `npm run lint` ?
+  - `npm test` ?
+  - `npm run test:e2e` ?
+  - `npm run build` ?
+- Note: Vite build still reports the existing gameplay chunk-size warning (>1200 kB), unchanged in behavior.
+## 2026-03-26 (AI notifications visibility gate)
+- Implemented fog-aware AI notification gating in `WorldScene`.
+- Enemy/Purple notifications now emit only when the event focus is currently visible to player (or when Dev Vision is ON).
+- Added `sourceOwner` metadata to notification calls from AI action paths and routed them through visibility checks.
+- AI event focus is now propagated for found-city and city outcome notifications so fog checks are location-aware.
+- Kept player-origin notifications unchanged.
+- Stability checks:
+  - `npm run lint` ?
+  - `npm test` ?
+  - `npm run test:e2e` ?
+- Hardened e2e smoke scenario against multi-faction variance while validating this change.

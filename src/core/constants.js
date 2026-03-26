@@ -1,5 +1,5 @@
-export const MAP_WIDTH = 12;
-export const MAP_HEIGHT = 12;
+export const MAP_WIDTH = 16;
+export const MAP_HEIGHT = 16;
 
 export const HEX_SIZE = 34;
 export const BASE_GAME_WIDTH = 1280;
@@ -8,6 +8,10 @@ export const BASE_GAME_HEIGHT = 720;
 export const COLORS = {
   worldBackground: 0xf5ebd7,
   tileStroke: 0x7a6641,
+  fogShroudFill: 0x3f3c37,
+  fogShroudStroke: 0x2f2c27,
+  fogMemoryFill: 0x786d5d,
+  fogMemoryStroke: 0x5c5144,
   reachableFill: 0xffef8a,
   reachableStroke: 0xc1a136,
   selectedStroke: 0x1e88e5,
@@ -17,7 +21,10 @@ export const COLORS = {
   playerUnitStroke: 0xf8f3e3,
   enemyUnit: 0x8f2c23,
   enemyUnitStroke: 0xfce7e3,
+  purpleUnit: 0x6a3a98,
+  purpleUnitStroke: 0xf4e9ff,
   cityPlayer: 0x1d6f3e,
   cityEnemy: 0x8e4f1a,
+  cityPurple: 0x5e2d8e,
   cityStroke: 0xf1ebd9,
 };

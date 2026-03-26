@@ -1,3 +1,4 @@
+import { TECH_TREE } from "../core/techTree.js";
 import { getAllUnitTypes, getUnitDefinition } from "../core/unitData.js";
 import {
   CITY_QUEUE_MAX,
@@ -6,8 +7,17 @@ import {
   getBuildingDefinition,
   getFoundCityReasonText,
   isBuildingUnlocked,
+  previewCityYieldForFocus,
 } from "./citySystem.js";
 import { canSkipUnit, getSkipUnitReasonText } from "./unitActionSystem.js";
+
+const FOCUS_ORDER = ["balanced", "food", "production", "science"];
+const FOCUS_DESCRIPTIONS = {
+  balanced: "Balanced picks the strongest combined yields.",
+  food: "Food prioritizes food-rich worked tiles.",
+  production: "Production prioritizes hammer-rich worked tiles.",
+  science: "Science prioritizes science-rich worked tiles.",
+};
 
 /**
  * @typedef {{ kind: "unit"|"building", id: string }} QueueItem
@@ -39,8 +49,53 @@ import { canSkipUnit, getSkipUnitReasonText } from "./unitActionSystem.js";
  *     cityQueueReason: string|null,
  *     cityProductionTab: "units"|"buildings",
  *     cityQueueItems: QueueItem[],
- *     cityProductionChoices: Array<{ type: string, cost: number, unlocked: boolean, affordable: boolean }>,
- *     cityBuildingChoices: Array<{ id: string, cost: number, unlocked: boolean, affordable: boolean, alreadyBuilt: boolean, alreadyQueued: boolean }>
+ *     cityProductionStock: number,
+ *     cityLocalProduction: number,
+ *     cityFocusChoices: Array<{ focus: "balanced"|"food"|"production"|"science", label: string, description: string, active: boolean, projectedYield: { food: number, production: number, science: number } }>,
+ *     cityQueueSlots: Array<{
+ *       index: number,
+ *       empty: boolean,
+ *       kind: "unit"|"building"|null,
+ *       id: string|null,
+ *       label: string,
+ *       cost: number,
+ *       etaTurns: number|null,
+ *       statusTag: string|null,
+ *       blocked: boolean,
+ *       blockedReason: string|null,
+ *       canMoveUp: boolean,
+ *       canMoveDown: boolean,
+ *       canRemove: boolean
+ *     }>,
+ *     cityProductionChoices: Array<{
+ *       type: string,
+ *       cost: number,
+ *       unlocked: boolean,
+ *       affordable: boolean,
+ *       queueable: boolean,
+ *       reasonCode: string|null,
+ *       reasonText: string|null,
+ *       stateTag: string|null,
+ *       unlockTechId: string|null,
+ *       unlockTechName: string|null,
+ *       etaTurns: number
+ *     }>,
+ *     cityBuildingChoices: Array<{
+ *       id: string,
+ *       cost: number,
+ *       unlocked: boolean,
+ *       affordable: boolean,
+ *       queueable: boolean,
+ *       alreadyBuilt: boolean,
+ *       alreadyQueued: boolean,
+ *       reasonCode: string|null,
+ *       reasonText: string|null,
+ *       stateTag: string|null,
+ *       unlockTechId: string|null,
+ *       unlockTechName: string|null,
+ *       etaTurns: number
+ *     }>,
+ *     disabledActionHints: Record<string, string>
  *   }
  * }}
  */
@@ -60,40 +115,75 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
   const cityProductionTab = selectedPlayerCity && selectedCity.productionTab === "buildings" ? "buildings" : "units";
   const queuedBuildingIds = new Set(queueItems.filter((item) => item.kind === "building").map((item) => item.id));
   const builtBuildingIds = new Set(selectedPlayerCity ? selectedCity.buildings ?? [] : []);
+  const isQueueFull = selectedPlayerCity ? queueItems.length >= CITY_QUEUE_MAX : false;
+  const productionStock = cityEconomyBucket.productionStock ?? 0;
+  const localProduction = selectedPlayerCity ? Math.max(0, selectedCity.yieldLastTurn?.production ?? 0) : 0;
+  const productionRate = Math.max(1, localProduction);
 
   const cityProductionChoices = getAllUnitTypes().map((type) => {
     const definition = getUnitDefinition(/** @type {any} */ (type));
+    const cost = definition.productionCost;
     const unlocked = unlockedUnits.has(type);
+    const affordable = productionStock >= cost;
+    const queueable = selectedPlayerCity && !isQueueFull && unlocked;
+    const reason = getUnitQueueReason({
+      selectedPlayerCity,
+      isQueueFull,
+      unlocked,
+      unlockTechId: definition.unlockedByTech ?? null,
+    });
     return {
       type,
-      cost: definition.productionCost,
+      cost,
       unlocked,
-      affordable: cityEconomyBucket.productionStock >= definition.productionCost,
+      affordable,
+      queueable,
+      reasonCode: reason.code,
+      reasonText: reason.text,
+      stateTag: reason.tag,
+      unlockTechId: definition.unlockedByTech ?? null,
+      unlockTechName: definition.unlockedByTech ? getTechName(definition.unlockedByTech) : null,
+      etaTurns: computeEtaTurns(cost, productionStock, productionRate),
     };
   });
 
   const cityBuildingChoices = getAllProductionBuildings().map((id) => {
     const definition = getBuildingDefinition(id);
+    const cost = definition?.productionCost ?? 0;
     const unlocked = isBuildingUnlocked(id, gameState);
     const alreadyBuilt = builtBuildingIds.has(id);
     const alreadyQueued = queuedBuildingIds.has(id);
-    return {
-      id,
-      cost: definition?.productionCost ?? 0,
+    const affordable = productionStock >= cost;
+    const queueable = selectedPlayerCity && !isQueueFull && unlocked && !alreadyBuilt && !alreadyQueued;
+    const reason = getBuildingQueueReason({
+      selectedPlayerCity,
+      isQueueFull,
       unlocked,
-      affordable: cityEconomyBucket.productionStock >= (definition?.productionCost ?? Number.POSITIVE_INFINITY),
       alreadyBuilt,
       alreadyQueued,
+      unlockTechId: definition?.unlockedByTech ?? null,
+    });
+    return {
+      id,
+      cost,
+      unlocked,
+      affordable,
+      queueable,
+      alreadyBuilt,
+      alreadyQueued,
+      reasonCode: reason.code,
+      reasonText: reason.text,
+      stateTag: reason.tag,
+      unlockTechId: definition?.unlockedByTech ?? null,
+      unlockTechName: definition?.unlockedByTech ? getTechName(definition.unlockedByTech) : null,
+      etaTurns: computeEtaTurns(cost, productionStock, productionRate),
     };
   });
 
   const hasUnlockedUnits = cityProductionChoices.some((choice) => choice.unlocked);
   const hasUnlockedBuildings = cityBuildingChoices.some((choice) => choice.unlocked);
-  const hasQueueableBuildings = cityBuildingChoices.some(
-    (choice) => choice.unlocked && !choice.alreadyBuilt && !choice.alreadyQueued
-  );
+  const hasQueueableBuildings = cityBuildingChoices.some((choice) => choice.queueable);
 
-  const isQueueFull = selectedPlayerCity ? queueItems.length >= CITY_QUEUE_MAX : false;
   let cityQueueReason = null;
   if (!selectedPlayerCity) {
     cityQueueReason = "Select one of your cities to manage production.";
@@ -113,6 +203,45 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
   const canQueueProduction = cityProductionTab === "units" ? canQueueUnits : canQueueBuildings;
   const contextMenuType = isPlayerTurn && selectedPlayerCity ? "city" : isPlayerTurn && selectedPlayerUnit ? "unit" : null;
 
+  const cityFocusChoices = selectedPlayerCity
+    ? FOCUS_ORDER.map((focus) => {
+        const preview = previewCityYieldForFocus(selectedCity.id, /** @type {"balanced"|"food"|"production"|"science"} */ (focus), gameState);
+        return {
+          focus: /** @type {"balanced"|"food"|"production"|"science"} */ (focus),
+          label: capitalizeLabel(focus),
+          description: FOCUS_DESCRIPTIONS[focus],
+          active: selectedCity.focus === focus,
+          projectedYield: preview.ok
+            ? {
+                food: preview.yield?.food ?? 0,
+                production: preview.yield?.production ?? 0,
+                science: preview.yield?.science ?? 0,
+              }
+            : {
+                food: selectedCity.yieldLastTurn?.food ?? 0,
+                production: selectedCity.yieldLastTurn?.production ?? 0,
+                science: selectedCity.yieldLastTurn?.science ?? 0,
+              },
+        };
+      })
+    : [];
+
+  const cityQueueSlots = buildQueueSlots({
+    queueItems,
+    productionStock,
+    productionRate,
+    selectedPlayerCity,
+  });
+
+  const disabledActionHints = buildDisabledActionHints({
+    foundCityReason,
+    skipUnitReason,
+    cityQueueReason,
+    cityProductionChoices,
+    cityBuildingChoices,
+    cityQueueSlots,
+  });
+
   /** @type {{ primary: string|null, secondary: string|null, level: "info"|"warning"|null }} */
   const uiHints = {
     primary: null,
@@ -131,7 +260,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
     uiHints.primary = "Match ended. Restart to play again.";
     uiHints.level = "info";
   } else if (gameState.turnState.phase === "enemy") {
-    uiHints.primary = "Enemy is taking its turn.";
+    uiHints.primary = "AI factions are taking their turn.";
     uiHints.level = "info";
   } else if (selectedUnit?.type === "settler") {
     if (canFound) {
@@ -145,14 +274,14 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
   } else if (selectedCity) {
     uiHints.primary = `City selected: focus ${selectedCity.focus}, identity ${selectedCity.identity}.`;
     uiHints.secondary = canQueueProduction
-      ? `Use the bottom city panel to manage ${cityProductionTab}.`
+      ? `Focus changes worked tile priorities (not flat bonuses).`
       : (cityQueueReason ?? "Use the bottom city panel to manage this city.");
     uiHints.level = "info";
   } else if (selectedUnit && attackableCities.length > 0) {
-    uiHints.primary = "Enemy city in range: click city to assault.";
+    uiHints.primary = "Hostile city in range: click city to assault.";
     uiHints.level = "info";
   } else if (selectedUnit && attackableTargets.length > 0) {
-    uiHints.primary = "Enemy in range: click highlighted red target to attack.";
+    uiHints.primary = "Hostile unit in range: click highlighted target to attack.";
     uiHints.level = "info";
   }
 
@@ -175,8 +304,13 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
       cityQueueReason,
       cityProductionTab,
       cityQueueItems: queueItems,
+      cityProductionStock: productionStock,
+      cityLocalProduction: localProduction,
+      cityFocusChoices,
+      cityQueueSlots,
       cityProductionChoices,
       cityBuildingChoices,
+      disabledActionHints,
     },
   };
 }
@@ -207,4 +341,207 @@ function normalizeQueueItems(queue) {
     }
   }
   return items;
+}
+
+function getUnitQueueReason({ selectedPlayerCity, isQueueFull, unlocked, unlockTechId }) {
+  if (!selectedPlayerCity) {
+    return {
+      code: "city-not-selected",
+      text: "Select one of your cities to manage production.",
+      tag: null,
+    };
+  }
+  if (isQueueFull) {
+    return {
+      code: "queue-full",
+      text: `Queue is full (${CITY_QUEUE_MAX}/${CITY_QUEUE_MAX}). Remove one item first.`,
+      tag: "Queue Full",
+    };
+  }
+  if (!unlocked) {
+    const techName = unlockTechId ? getTechName(unlockTechId) : "research";
+    return {
+      code: "locked",
+      text: `Unit is locked until ${techName}.`,
+      tag: "Locked",
+    };
+  }
+  return { code: null, text: null, tag: null };
+}
+
+function getBuildingQueueReason({ selectedPlayerCity, isQueueFull, unlocked, alreadyBuilt, alreadyQueued, unlockTechId }) {
+  if (!selectedPlayerCity) {
+    return {
+      code: "city-not-selected",
+      text: "Select one of your cities to manage production.",
+      tag: null,
+    };
+  }
+  if (isQueueFull) {
+    return {
+      code: "queue-full",
+      text: `Queue is full (${CITY_QUEUE_MAX}/${CITY_QUEUE_MAX}). Remove one item first.`,
+      tag: "Queue Full",
+    };
+  }
+  if (!unlocked) {
+    const techName = unlockTechId ? getTechName(unlockTechId) : "research";
+    return {
+      code: "locked",
+      text: `Building is locked until ${techName}.`,
+      tag: "Locked",
+    };
+  }
+  if (alreadyBuilt) {
+    return {
+      code: "already-built",
+      text: "This building already exists in the city.",
+      tag: "Built",
+    };
+  }
+  if (alreadyQueued) {
+    return {
+      code: "already-queued",
+      text: "This building is already queued.",
+      tag: "Queued",
+    };
+  }
+  return { code: null, text: null, tag: null };
+}
+
+function buildQueueSlots({ queueItems, productionStock, productionRate, selectedPlayerCity }) {
+  const slots = [];
+  let runningStock = Math.max(0, productionStock);
+
+  for (let index = 0; index < CITY_QUEUE_MAX; index += 1) {
+    const queueItem = queueItems[index] ?? null;
+    if (!queueItem) {
+      slots.push({
+        index,
+        empty: true,
+        kind: null,
+        id: null,
+        label: `${index + 1}. Empty`,
+        cost: 0,
+        etaTurns: null,
+        statusTag: "Empty",
+        blocked: true,
+        blockedReason: "Queue slot is empty.",
+        canMoveUp: false,
+        canMoveDown: false,
+        canRemove: false,
+      });
+      continue;
+    }
+
+    const cost = getQueueItemCost(queueItem);
+    const etaTurns = computeEtaTurns(cost, runningStock, productionRate);
+    const buildableNow = runningStock >= cost;
+    if (buildableNow) {
+      runningStock -= cost;
+    } else {
+      const requiredTurns = etaTurns;
+      runningStock = runningStock + requiredTurns * productionRate - cost;
+    }
+
+    const label = `${index + 1}. ${formatQueueItemLabel(queueItem)} (${cost})`;
+    slots.push({
+      index,
+      empty: false,
+      kind: queueItem.kind,
+      id: queueItem.id,
+      label,
+      cost,
+      etaTurns,
+      statusTag: etaTurns === 0 ? "Ready" : `${etaTurns}t`,
+      blocked: false,
+      blockedReason: null,
+      canMoveUp: selectedPlayerCity && index > 0,
+      canMoveDown: selectedPlayerCity && index < queueItems.length - 1,
+      canRemove: selectedPlayerCity,
+    });
+  }
+  return slots;
+}
+
+function buildDisabledActionHints({
+  foundCityReason,
+  skipUnitReason,
+  cityQueueReason,
+  cityProductionChoices,
+  cityBuildingChoices,
+  cityQueueSlots,
+}) {
+  /** @type {Record<string, string>} */
+  const hints = {};
+  if (foundCityReason) {
+    hints["unit-found-city"] = foundCityReason;
+  }
+  if (skipUnitReason) {
+    hints["unit-skip"] = skipUnitReason;
+  }
+
+  for (const choice of cityProductionChoices) {
+    const actionId = `city-enqueue-${choice.type}`;
+    if (choice.reasonText) {
+      hints[actionId] = choice.reasonText;
+    } else if (!choice.affordable) {
+      hints[actionId] = "Not enough production stock yet. You can still queue it.";
+    }
+  }
+
+  for (const choice of cityBuildingChoices) {
+    const actionId = `city-enqueue-building-${choice.id}`;
+    if (choice.reasonText) {
+      hints[actionId] = choice.reasonText;
+    } else if (!choice.affordable) {
+      hints[actionId] = "Not enough production stock yet. You can still queue it.";
+    }
+  }
+
+  for (const slot of cityQueueSlots) {
+    const moveUpAction = `city-queue-move-up-${slot.index}`;
+    const moveDownAction = `city-queue-move-down-${slot.index}`;
+    const removeAction = `city-queue-remove-${slot.index}`;
+    if (!slot.canMoveUp) {
+      hints[moveUpAction] = slot.empty ? "Queue slot is empty." : "This item is already at the top.";
+    }
+    if (!slot.canMoveDown) {
+      hints[moveDownAction] = slot.empty ? "Queue slot is empty." : "This item is already at the bottom.";
+    }
+    if (!slot.canRemove) {
+      hints[removeAction] = slot.empty ? "Queue slot is empty." : (cityQueueReason ?? "Cannot edit queue right now.");
+    }
+  }
+
+  if (cityQueueReason) {
+    hints["city-queue-general"] = cityQueueReason;
+  }
+  return hints;
+}
+
+function computeEtaTurns(cost, stock, productionRate) {
+  return Math.max(0, Math.ceil(Math.max(0, cost - stock) / Math.max(1, productionRate)));
+}
+
+function getQueueItemCost(queueItem) {
+  if (queueItem.kind === "building") {
+    return getBuildingDefinition(/** @type {"granary"|"workshop"|"monument"} */ (queueItem.id))?.productionCost ?? 0;
+  }
+  return getUnitDefinition(/** @type {"warrior"|"settler"|"spearman"|"archer"} */ (queueItem.id))?.productionCost ?? 0;
+}
+
+function formatQueueItemLabel(queueItem) {
+  return capitalizeLabel(queueItem.id);
+}
+
+function getTechName(techId) {
+  return TECH_TREE[techId]?.name ?? capitalizeLabel(techId);
+}
+
+function capitalizeLabel(value) {
+  if (!value) {
+    return "";
+  }
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }

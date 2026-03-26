@@ -13,8 +13,9 @@
 - Chosen: successful city founding emits timeline presentation feedback (settlement pulse + city spawn pop) while game-state mutation remains authoritative.
 - Chosen: economy is empire-wide per owner (`food/production/science` stockpiles).
 - Chosen: city yields are terrain-driven with ring-1 workable area and deterministic assignment.
-- Chosen: city focus is direct-select (`balanced`, `food`, `production`, `science`).
+- Chosen: city focus is direct-select (`balanced`, `food`, `production`, `science`) and affects worked-tile priority only (no growth-order priority side effect).
 - Chosen: shared typed production queue (`unit`/`building`) with max length `3`.
+- Chosen: queue order is player-editable with deterministic up/down reordering.
 - Chosen: queue consumes front item only on successful completion.
 - Chosen: building set for this milestone:
   - `granary` (`cost=9`, unlocked default, `+1 food`)
@@ -42,12 +43,14 @@
   - `getWorkableHexes(cityId, gameState)`
   - `assignWorkedHexes(cityId, gameState)`
   - `computeCityYield(cityId, gameState)`
+  - `previewCityYieldForFocus(cityId, focus, gameState)`
   - `setCityFocus(cityId, focus, gameState)`
   - `setCityProductionTab(cityId, tab, gameState)`
   - `enqueueCityQueue(cityId, unitType, gameState)`
   - `enqueueCityBuilding(cityId, buildingId, gameState)`
   - `enqueueCityQueueItem(cityId, queueItem, gameState)`
   - `removeCityQueueAt(cityId, index, gameState)`
+  - `moveCityQueueItem(cityId, index, direction, gameState)`
   - `processTurn(gameState, owner)`
 
 ## Behavior and acceptance criteria
@@ -64,10 +67,11 @@
 - Turn economy processing:
   - city yields aggregate into `economy[owner].lastTurnIncome` and stockpiles
   - growth threshold: `8 + (population - 1) * 4`
-  - growth spends empire `foodStock` deterministically
+  - growth spends empire `foodStock` deterministically in city-id order
   - production spends empire `productionStock` deterministically
 - Queue/building behavior:
   - shared queue max 3
+  - queue supports deterministic up/down reordering
   - successful unit spawn/building completion pops front item
   - no pop on blocked spawn/insufficient stock
   - duplicate building enqueue/build per city blocked

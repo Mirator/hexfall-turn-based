@@ -7,6 +7,7 @@ import {
   enqueueCityBuilding,
   enqueueCityQueue,
   foundCity,
+  moveCityQueueItem,
   processTurn,
   removeCityQueueAt,
   setCityFocus,
@@ -108,6 +109,38 @@ describe("city economy and identity", () => {
     expect(city.identity).toBe("agricultural");
   });
 
+  it("resolves growth order deterministically by city id (focus does not change priority)", () => {
+    const gameState = createInitialGameState({ seed: 331 });
+    gameState.units = [];
+    gameState.cities = [
+      createCity("player-city-1", "player", 2, 2),
+      createCity("player-city-2", "player", 8, 8),
+    ];
+    ensureLocalPassableArea(gameState, 2, 2);
+    ensureLocalPassableArea(gameState, 8, 8);
+
+    const cityA = gameState.cities[0];
+    const cityB = gameState.cities[1];
+    cityA.population = 1;
+    cityB.population = 1;
+    cityA.growthProgress = 0;
+    cityB.growthProgress = 0;
+    cityA.focus = "science";
+    cityB.focus = "food";
+
+    setTerrain(gameState, cityA.q, cityA.r, "plains");
+    setTerrain(gameState, cityB.q, cityB.r, "plains");
+
+    gameState.economy.player.foodStock = 3;
+    gameState.economy.player.productionStock = 0;
+    gameState.economy.player.scienceStock = 0;
+
+    processTurn(gameState, "player");
+
+    expect(cityA.growthProgress).toBe(7);
+    expect(cityB.growthProgress).toBe(0);
+  });
+
   it("spends empire production in deterministic city-id order", () => {
     const gameState = createInitialGameState({ seed: 44 });
     gameState.units = [];
@@ -171,6 +204,51 @@ describe("city economy and identity", () => {
       { kind: "unit", id: "warrior" },
       { kind: "unit", id: "warrior" },
     ]);
+  });
+
+  it("supports deterministic queue reordering via move up/down", () => {
+    const gameState = createInitialGameState({ seed: 449 });
+    const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
+    expect(settler).toBeTruthy();
+    if (!settler) {
+      return;
+    }
+    const founded = foundCity(settler.id, gameState);
+    expect(founded.ok).toBe(true);
+    if (!founded.cityId) {
+      return;
+    }
+    const city = gameState.cities.find((candidate) => candidate.id === founded.cityId);
+    expect(city).toBeTruthy();
+    if (!city) {
+      return;
+    }
+
+    city.queue = [
+      { kind: "unit", id: "warrior" },
+      { kind: "unit", id: "settler" },
+      { kind: "building", id: "granary" },
+    ];
+
+    const moveUp = moveCityQueueItem(city.id, 2, "up", gameState);
+    expect(moveUp.ok).toBe(true);
+    expect(city.queue).toEqual([
+      { kind: "unit", id: "warrior" },
+      { kind: "building", id: "granary" },
+      { kind: "unit", id: "settler" },
+    ]);
+
+    const moveDown = moveCityQueueItem(city.id, 0, "down", gameState);
+    expect(moveDown.ok).toBe(true);
+    expect(city.queue).toEqual([
+      { kind: "building", id: "granary" },
+      { kind: "unit", id: "warrior" },
+      { kind: "unit", id: "settler" },
+    ]);
+
+    const cannotMovePastTop = moveCityQueueItem(city.id, 0, "up", gameState);
+    expect(cannotMovePastTop.ok).toBe(false);
+    expect(cannotMovePastTop.reason).toBe("queue-move-out-of-range");
   });
 
   it("consumes player queue front item after successful production", () => {

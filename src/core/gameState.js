@@ -1,30 +1,52 @@
 import { MAP_HEIGHT, MAP_WIDTH } from "./constants.js";
 import { axialKey, distance, neighbors } from "./hexGrid.js";
+import { AI_OWNERS } from "./factions.js";
 import { createSeededRng, mixSeed, normalizeSeed, shuffleInPlace } from "./random.js";
 import { applyTerrainDefinition, generateTerrainTiles } from "./terrainData.js";
 import { DEFAULT_UNLOCKED_UNITS, createUnit } from "./unitData.js";
+import { createVisibilityState, recomputeVisibility } from "../systems/visibilitySystem.js";
 
 export const DEFAULT_MATCH_SEED = 20260324;
 export const DEFAULT_MIN_FACTION_DISTANCE = 7;
 export const ENEMY_PERSONALITY_ORDER = ["raider", "expansionist", "guardian"];
 
 const MATCH_LAYOUT_ATTEMPTS = 72;
+const OWNER_PERSONALITY_OFFSETS = {
+  enemy: 0,
+  purple: 1,
+};
 
 /**
  * @param {{
  *   seed?: number|string,
  *   minFactionDistance?: number,
- *   enemyPersonality?: import("./types.js").EnemyPersonality
+ *   enemyPersonality?: import("./types.js").EnemyPersonality,
+ *   purplePersonality?: import("./types.js").EnemyPersonality,
+ *   aiPersonalities?: Partial<Record<import("./types.js").AiOwner, import("./types.js").EnemyPersonality>>
  * }} [options]
  * @returns {import("./types.js").GameState}
  */
 export function createInitialGameState(options = {}) {
   const normalizedSeed = normalizeSeed(options.seed ?? DEFAULT_MATCH_SEED);
   const minFactionDistance = Math.max(3, options.minFactionDistance ?? DEFAULT_MIN_FACTION_DISTANCE);
-  const enemyPersonality = resolveEnemyPersonality(options.enemyPersonality, normalizedSeed);
   const layout = generateMatchLayout(MAP_WIDTH, MAP_HEIGHT, normalizedSeed, minFactionDistance);
 
-  return {
+  const enemyPersonality = resolveAiPersonality(
+    options.aiPersonalities?.enemy ?? options.enemyPersonality,
+    normalizedSeed,
+    "enemy"
+  );
+  const purplePersonality = resolveAiPersonality(
+    options.aiPersonalities?.purple ?? options.purplePersonality,
+    normalizedSeed,
+    "purple"
+  );
+
+  const enemyAiState = createAiState(enemyPersonality);
+  const purpleAiState = createAiState(purplePersonality);
+
+  /** @type {import("./types.js").GameState} */
+  const gameState = {
     turnState: {
       turn: 1,
       phase: "player",
@@ -58,6 +80,13 @@ export function createInitialGameState(options = {}) {
         q: layout.spawns.enemySettler.q,
         r: layout.spawns.enemySettler.r,
       }),
+      createUnit({
+        id: "purple-1",
+        owner: "purple",
+        type: "settler",
+        q: layout.spawns.purpleSettler.q,
+        r: layout.spawns.purpleSettler.r,
+      }),
     ],
     cities: [],
     selectedUnitId: null,
@@ -75,36 +104,56 @@ export function createInitialGameState(options = {}) {
       reason: null,
     },
     ai: {
-      enemy: {
-        personality: enemyPersonality,
-        lastGoal: null,
-        lastTurnSummary: null,
+      enemy: enemyAiState,
+      purple: purpleAiState,
+      byOwner: {
+        enemy: enemyAiState,
+        purple: purpleAiState,
       },
     },
     economy: {
       player: createEmptyEconomyBucket(),
       enemy: createEmptyEconomyBucket(),
+      purple: createEmptyEconomyBucket(),
       researchIncomeThisTurn: 0,
     },
+    visibility: createVisibilityState(),
     pendingCityResolution: null,
     nextIds: {
       unit: 1,
       city: 1,
     },
   };
+
+  recomputeVisibility(gameState);
+  return gameState;
 }
 
 /**
  * @param {import("./types.js").EnemyPersonality|undefined} override
  * @param {number} seed
+ * @param {import("./types.js").AiOwner} owner
  * @returns {import("./types.js").EnemyPersonality}
  */
-function resolveEnemyPersonality(override, seed) {
+function resolveAiPersonality(override, seed, owner) {
   if (override === "raider" || override === "expansionist" || override === "guardian") {
     return override;
   }
-  const index = Math.abs(seed) % ENEMY_PERSONALITY_ORDER.length;
+  const offset = OWNER_PERSONALITY_OFFSETS[owner] ?? 0;
+  const index = Math.abs(seed + offset) % ENEMY_PERSONALITY_ORDER.length;
   return /** @type {import("./types.js").EnemyPersonality} */ (ENEMY_PERSONALITY_ORDER[index]);
+}
+
+/**
+ * @param {import("./types.js").EnemyPersonality} personality
+ * @returns {import("./types.js").EnemyAiState}
+ */
+function createAiState(personality) {
+  return {
+    personality,
+    lastGoal: null,
+    lastTurnSummary: null,
+  };
 }
 
 function createEmptyEconomyBucket() {
@@ -130,10 +179,7 @@ function generateMatchLayout(width, height, seed, minFactionDistance) {
     }
 
     applySafeSpawnTerrain(tiles, width, height, attemptedLayout.spawns);
-    const nearestFactionDistance = computeNearestFactionDistance(
-      [attemptedLayout.spawns.playerSettler],
-      [attemptedLayout.spawns.enemySettler]
-    );
+    const nearestFactionDistance = computeNearestFactionDistanceFromSpawns(attemptedLayout.spawns);
 
     if (nearestFactionDistance >= minFactionDistance) {
       return {
@@ -154,41 +200,47 @@ function generateMatchLayout(width, height, seed, minFactionDistance) {
 function buildAttemptedLayout(tiles, width, height, attemptSeed, minFactionDistance) {
   const tileByKey = new Map(tiles.map((tile) => [axialKey(tile), tile]));
   const passableTiles = tiles.filter((tile) => !tile.blocksMovement);
-  if (passableTiles.length < Math.floor(width * height * 0.48)) {
+  if (passableTiles.length < Math.floor(width * height * 0.52)) {
     return null;
   }
 
   const anchorCandidates = passableTiles.filter((tile) => countPassableNeighbors(tile, tileByKey, width, height) >= 3);
-  if (anchorCandidates.length < 2) {
+  if (anchorCandidates.length < 3) {
     return null;
   }
 
-  const anchors = selectAnchorPair(anchorCandidates, tileByKey, width, height, attemptSeed, minFactionDistance);
+  const anchors = selectAnchorTrio(anchorCandidates, tileByKey, width, height, attemptSeed, minFactionDistance);
   if (!anchors) {
     return null;
   }
 
-  const playerSettler = { ...anchors.player };
-  const enemySettler = { ...anchors.enemy };
+  const spawns = {
+    playerSettler: { ...anchors.player },
+    enemySettler: { ...anchors.enemy },
+    purpleSettler: { ...anchors.purple },
+  };
 
-  const nearestFactionDistance = computeNearestFactionDistance([playerSettler], [enemySettler]);
+  const nearestFactionDistance = computeNearestFactionDistanceFromSpawns(spawns);
   if (nearestFactionDistance < minFactionDistance) {
     return null;
   }
 
-  const allOccupied = new Set([axialKey(playerSettler), axialKey(enemySettler)]);
-  const playerSafeNeighbors = countFreePassableNeighbors(playerSettler, tileByKey, width, height, allOccupied);
-  const enemySafeNeighbors = countFreePassableNeighbors(enemySettler, tileByKey, width, height, allOccupied);
-  if (playerSafeNeighbors < 1 || enemySafeNeighbors < 1) {
+  const occupiedKeys = new Set([
+    axialKey(spawns.playerSettler),
+    axialKey(spawns.enemySettler),
+    axialKey(spawns.purpleSettler),
+  ]);
+  if (
+    countFreePassableNeighbors(spawns.playerSettler, tileByKey, width, height, occupiedKeys) < 1 ||
+    countFreePassableNeighbors(spawns.enemySettler, tileByKey, width, height, occupiedKeys) < 1 ||
+    countFreePassableNeighbors(spawns.purpleSettler, tileByKey, width, height, occupiedKeys) < 1
+  ) {
     return null;
   }
 
   return {
     anchors,
-    spawns: {
-      playerSettler,
-      enemySettler,
-    },
+    spawns,
   };
 }
 
@@ -196,8 +248,14 @@ function buildFallbackLayout(width, height, seed, minFactionDistance) {
   const fallbackSeed = mixSeed(seed, "fallback-layout");
   const tiles = generateTerrainTiles(width, height, { seed: fallbackSeed });
   const playerSettler = { q: clamp(2, 0, width - 1), r: clamp(2, 0, height - 1) };
-  const enemySettler = { q: clamp(width - 3, 0, width - 1), r: clamp(height - 3, 0, height - 1) };
-  const spawns = { playerSettler, enemySettler };
+  const enemySettler = { q: clamp(width - 3, 0, width - 1), r: clamp(2, 0, height - 1) };
+  const purpleSettler = { q: clamp(Math.floor(width / 2), 0, width - 1), r: clamp(height - 3, 0, height - 1) };
+
+  const spawns = {
+    playerSettler,
+    enemySettler,
+    purpleSettler,
+  };
 
   applySafeSpawnTerrain(tiles, width, height, spawns);
 
@@ -208,44 +266,98 @@ function buildFallbackLayout(width, height, seed, minFactionDistance) {
     anchors: {
       player: playerSettler,
       enemy: enemySettler,
+      purple: purpleSettler,
     },
     attempts: MATCH_LAYOUT_ATTEMPTS,
     fallbackUsed: true,
-    nearestFactionDistance: Math.max(minFactionDistance, computeNearestFactionDistance([playerSettler], [enemySettler])),
+    nearestFactionDistance: Math.max(minFactionDistance, computeNearestFactionDistanceFromSpawns(spawns)),
   };
 }
 
-function selectAnchorPair(candidates, tileByKey, width, height, seed, minFactionDistance) {
-  const rng = createSeededRng(mixSeed(seed, "anchor-pair"));
+function selectAnchorTrio(candidates, tileByKey, width, height, seed, minFactionDistance) {
+  const rng = createSeededRng(mixSeed(seed, "anchor-trio"));
   const shuffled = shuffleInPlace([...candidates], rng);
-  let bestPair = null;
+  let bestTrio = null;
   let bestScore = -Infinity;
 
-  for (const player of shuffled) {
-    const playerNeighborScore = countPassableNeighbors(player, tileByKey, width, height);
-    for (const enemy of shuffled) {
-      if (player.q === enemy.q && player.r === enemy.r) {
+  const sampleCount = Math.max(240, Math.min(1200, shuffled.length * 12));
+  for (let sample = 0; sample < sampleCount; sample += 1) {
+    const player = shuffled[Math.floor(rng() * shuffled.length)];
+    const enemy = shuffled[Math.floor(rng() * shuffled.length)];
+    const purple = shuffled[Math.floor(rng() * shuffled.length)];
+    if (!player || !enemy || !purple) {
+      continue;
+    }
+    if (
+      (player.q === enemy.q && player.r === enemy.r) ||
+      (player.q === purple.q && player.r === purple.r) ||
+      (enemy.q === purple.q && enemy.r === purple.r)
+    ) {
+      continue;
+    }
+
+    if (!isAnchorTrioSeparated(player, enemy, purple, minFactionDistance)) {
+      continue;
+    }
+
+    const score = scoreAnchorTrio(player, enemy, purple, tileByKey, width, height, rng);
+    if (score > bestScore) {
+      bestScore = score;
+      bestTrio = {
+        player: { q: player.q, r: player.r },
+        enemy: { q: enemy.q, r: enemy.r },
+        purple: { q: purple.q, r: purple.r },
+      };
+    }
+  }
+
+  if (bestTrio) {
+    return bestTrio;
+  }
+
+  const fallbackSlice = shuffled.slice(0, Math.min(48, shuffled.length));
+  for (let i = 0; i < fallbackSlice.length; i += 1) {
+    const player = fallbackSlice[i];
+    for (let j = 0; j < fallbackSlice.length; j += 1) {
+      if (j === i) {
         continue;
       }
-
-      const separation = distance(player, enemy);
-      if (separation < minFactionDistance) {
-        continue;
-      }
-
-      const enemyNeighborScore = countPassableNeighbors(enemy, tileByKey, width, height);
-      const score = separation * 10 + playerNeighborScore + enemyNeighborScore + rng();
-      if (score > bestScore) {
-        bestScore = score;
-        bestPair = {
+      const enemy = fallbackSlice[j];
+      for (let k = 0; k < fallbackSlice.length; k += 1) {
+        if (k === i || k === j) {
+          continue;
+        }
+        const purple = fallbackSlice[k];
+        if (!isAnchorTrioSeparated(player, enemy, purple, minFactionDistance)) {
+          continue;
+        }
+        return {
           player: { q: player.q, r: player.r },
           enemy: { q: enemy.q, r: enemy.r },
+          purple: { q: purple.q, r: purple.r },
         };
       }
     }
   }
 
-  return bestPair;
+  return null;
+}
+
+function isAnchorTrioSeparated(player, enemy, purple, minFactionDistance) {
+  return (
+    distance(player, enemy) >= minFactionDistance &&
+    distance(player, purple) >= minFactionDistance &&
+    distance(enemy, purple) >= minFactionDistance
+  );
+}
+
+function scoreAnchorTrio(player, enemy, purple, tileByKey, width, height, rng) {
+  const separationScore = distance(player, enemy) + distance(player, purple) + distance(enemy, purple);
+  const neighborScore =
+    countPassableNeighbors(player, tileByKey, width, height) +
+    countPassableNeighbors(enemy, tileByKey, width, height) +
+    countPassableNeighbors(purple, tileByKey, width, height);
+  return separationScore * 9 + neighborScore + rng();
 }
 
 function applySafeSpawnTerrain(tiles, width, height, spawns) {
@@ -253,8 +365,10 @@ function applySafeSpawnTerrain(tiles, width, height, spawns) {
   const safetyHexes = [
     spawns.playerSettler,
     spawns.enemySettler,
+    spawns.purpleSettler,
     ...neighbors(spawns.playerSettler),
     ...neighbors(spawns.enemySettler),
+    ...neighbors(spawns.purpleSettler),
   ];
 
   for (const hex of safetyHexes) {
@@ -294,11 +408,12 @@ function isHexInsideBounds(hex, width, height) {
   return hex.q >= 0 && hex.q < width && hex.r >= 0 && hex.r < height;
 }
 
-function computeNearestFactionDistance(playerHexes, enemyHexes) {
+function computeNearestFactionDistanceFromSpawns(spawns) {
+  const points = [spawns.playerSettler, spawns.enemySettler, spawns.purpleSettler];
   let minDistance = Number.POSITIVE_INFINITY;
-  for (const playerHex of playerHexes) {
-    for (const enemyHex of enemyHexes) {
-      minDistance = Math.min(minDistance, distance(playerHex, enemyHex));
+  for (let i = 0; i < points.length; i += 1) {
+    for (let j = i + 1; j < points.length; j += 1) {
+      minDistance = Math.min(minDistance, distance(points[i], points[j]));
     }
   }
   if (!Number.isFinite(minDistance)) {
@@ -378,7 +493,7 @@ export function getTileAt(map, q, r) {
 /**
  * @param {import("./types.js").GameState} gameState
  * @param {"unit"|"city"} kind
- * @param {"player"|"enemy"} owner
+ * @param {import("./types.js").Owner} owner
  * @returns {string}
  */
 export function allocateEntityId(gameState, kind, owner) {
@@ -412,3 +527,16 @@ export function removeUnitById(gameState, unitId) {
 export function cloneGameState(gameState) {
   return structuredClone(gameState);
 }
+
+/**
+ * @param {import("./types.js").AiOwner} owner
+ * @returns {import("./types.js").AiOwner}
+ */
+export function getNextAiOwner(owner) {
+  const index = AI_OWNERS.indexOf(owner);
+  if (index === -1) {
+    return AI_OWNERS[0];
+  }
+  return AI_OWNERS[(index + 1) % AI_OWNERS.length];
+}
+

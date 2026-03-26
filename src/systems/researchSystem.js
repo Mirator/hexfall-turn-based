@@ -111,7 +111,7 @@ export function advanceResearch(gameState, points) {
 
 /**
  * @param {import("../core/types.js").GameState} gameState
- * @param {"player"|"enemy"} owner
+ * @param {import("../core/types.js").Owner} owner
  * @param {number} baseIncome
  * @returns {{ completedTechIds: string[], spentScience: number, remainingScience: number, income: number }}
  */

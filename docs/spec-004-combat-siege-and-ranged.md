@@ -39,7 +39,7 @@
 - Runtime/testability payloads:
   - `lastCombatEvent`
   - `pendingCityResolution`
-  - enemy action playback metadata `EnemyActionSummary.presentation` (`from`/`to`/`target`) for deterministic render choreography
+  - AI action playback metadata `EnemyActionSummary.presentation` (`from`/`to`/`target`) for deterministic render choreography
   - hooks: `attackCity`, `chooseCityOutcome`
 
 ## Behavior and acceptance criteria

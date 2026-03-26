@@ -55,6 +55,7 @@
   - `window.__hexfallTest.enqueueCityProduction(unitType)`
   - `window.__hexfallTest.enqueueCityBuilding(buildingId)`
   - `window.__hexfallTest.removeCityQueueAt(index)`
+  - `window.__hexfallTest.moveCityQueue(index, direction)`
   - `window.__hexfallTest.cycleResearch()`
   - `window.__hexfallTest.selectResearch(techId)`
   - `window.__hexfallTest.getAnimationState()`
@@ -63,8 +64,13 @@
   - `window.__hexfallTest.setUnitPosition(unitId, q, r)`
   - `window.__hexfallTest.arrangeCombatSkirmish(playerUnitId, enemyUnitId)`
   - `window.__hexfallTest.setEnemyPersonality(personality)`
+  - `window.__hexfallTest.setAiPersonality(owner, personality)`
   - `window.__hexfallTest.getEnemyAiState()`
+  - `window.__hexfallTest.getAiState(owner)`
   - `window.__hexfallTest.clearEnemyCityQueue(cityId?)`
+  - `window.__hexfallTest.clearAiCityQueue(owner, cityId?)`
+  - `window.__hexfallTest.toggleDevVision()`
+  - `window.__hexfallTest.setDevVision(enabled)`
 - E2E command:
   - `npm run test:e2e`
 
@@ -86,9 +92,11 @@
   - `uiNotifications` feed payload with `category` and optional `focus`
   - `cameraScroll` payload (`{ x, y }`) for deterministic camera movement assertions
   - `cameraFocusHex` for notification jump verification
-  - `ai.enemy` runtime payload (`personality`, `lastGoal`, `lastTurnSummary`)
+  - `ai.enemy`, `ai.purple`, and `ai.byOwner` runtime payloads (`personality`, `lastGoal`, `lastTurnSummary`)
+  - `visibility` payload (per-owner `visibleHexes`, `exploredHexes`, `seenOwners`)
+  - `devVisionEnabled` payload for player debug reveal mode
   - `lastCombatEvent` breakdown payload
-  - city production context details for units/buildings tabs and typed queue items
+  - city production context details for units/buildings tabs, per-item disabled reasons, queue slot metadata, and typed queue items
   - contextual `uiHints` + `uiActions`
 - `advanceTime` remains available for deterministic stepping.
 - `endTurnImmediate()` remains unchanged as deterministic fast-path bypass for smoke/integration flows that do not need playback assertions.
@@ -100,8 +108,9 @@
   - non-focus notification row click returns `false` without adding warning notification
   - keyboard camera pan (`Arrow`/`WASD`) and right-drag camera pan both move `cameraScroll`
   - manual pan clears prior `cameraFocusHex`
-  - real End Turn enters enemy playback (`turnPlayback.active=true`) and step index progresses before returning to player phase
-  - founding, queue/focus management, research, combat, city resolution, restart/pause flows
+  - real End Turn enters AI playback (`turnPlayback.active=true`), both AI actors (`enemy`,`purple`) produce summaries, and phase returns to player phase
+  - fog-of-war payload assertions (`visible` subset of map, hostile concealment) and keyboard `V` dev-vision toggle behavior
+  - founding, queue/focus management (including queue reorder and unavailable-reason payload checks), research, combat, city resolution, restart/pause flows
   - no unexpected defeat during validated scenario flow
   - zero console/page errors
 - Smoke runner closes Playwright/browser/server reliably on success/failure/interrupt; Windows cleanup handles orphaned headless browser processes.

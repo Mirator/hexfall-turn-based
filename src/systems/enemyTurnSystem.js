@@ -1,10 +1,19 @@
-import { cloneGameState, ENEMY_PERSONALITY_ORDER, getTileAt, getUnitById } from "../core/gameState.js";
+import { cloneGameState, getTileAt, getUnitById } from "../core/gameState.js";
+import { AI_OWNERS, getHostileOwners, isAiOwner } from "../core/factions.js";
 import { distance } from "../core/hexGrid.js";
+import { mixSeed, normalizeSeed } from "../core/random.js";
 import { getUnitDefinition } from "../core/unitData.js";
 import { canFoundCity, foundCity, getAvailableProductionBuildings, getAvailableProductionUnits } from "./citySystem.js";
 import { getAttackableCities, getAttackableTargets, resolveAttack, resolveCityAttack } from "./combatSystem.js";
 import { getReachable, moveUnit } from "./movementSystem.js";
 import { getSelectableTechIds, selectResearch } from "./researchSystem.js";
+import {
+  canOwnerSeeCity,
+  canOwnerSeeUnit,
+  getExploredHexSet,
+  getSeenHostileOwners,
+  recomputeVisibility,
+} from "./visibilitySystem.js";
 
 export const ENEMY_GOAL_ORDER = ["foundFirstCity", "expand", "defend", "assaultCity", "huntUnits", "regroup", "idle"];
 const GOAL_STEP = {
@@ -168,38 +177,94 @@ const QUEUE_PRIORITY_ITEMS = {
 const THREATENED_CITY_DISTANCE = 2;
 
 /**
+ * @param {import("../core/types.js").AiOwner|undefined|null|string} owner
+ * @returns {import("../core/types.js").AiOwner}
+ */
+function normalizeAiOwner(owner) {
+  return owner === "purple" ? "purple" : "enemy";
+}
+
+/**
+ * @param {number} seed
+ * @param {import("../core/types.js").AiOwner} owner
+ * @returns {import("../core/types.js").EnemyPersonality}
+ */
+function derivePersonalityFromSeed(seed, owner) {
+  const normalizedSeed = normalizeSeed(seed);
+  const mixed = mixSeed(normalizedSeed, `ai-personality-${owner}`);
+  const index = Math.abs(mixed) % 3;
+  if (index === 0) {
+    return "raider";
+  }
+  if (index === 1) {
+    return "expansionist";
+  }
+  return "guardian";
+}
+
+/**
+ * @param {import("../core/types.js").GameState} gameState
+ * @param {import("../core/types.js").AiOwner} [owner]
+ * @returns {import("../core/types.js").EnemyAiState}
+ */
+export function ensureAiState(gameState, owner = "enemy") {
+  const targetOwner = normalizeAiOwner(owner);
+  if (!gameState.ai || typeof gameState.ai !== "object") {
+    gameState.ai = /** @type {import("../core/types.js").GameState["ai"]} */ ({
+      enemy: {
+        personality: derivePersonalityFromSeed(gameState.map.seed, "enemy"),
+        lastGoal: null,
+        lastTurnSummary: null,
+      },
+      purple: {
+        personality: derivePersonalityFromSeed(gameState.map.seed, "purple"),
+        lastGoal: null,
+        lastTurnSummary: null,
+      },
+      byOwner: {},
+    });
+  }
+
+  for (const aiOwner of AI_OWNERS) {
+    const existing =
+      gameState.ai?.byOwner?.[aiOwner] ??
+      (aiOwner === "enemy" ? gameState.ai?.enemy : aiOwner === "purple" ? gameState.ai?.purple : null);
+    const personality = normalizeEnemyPersonality(existing?.personality, gameState.map.seed, aiOwner);
+    const state = {
+      personality,
+      lastGoal: existing?.lastGoal ?? null,
+      lastTurnSummary: existing?.lastTurnSummary ?? null,
+    };
+
+    if (!gameState.ai.byOwner) {
+      gameState.ai.byOwner = /** @type {Record<import("../core/types.js").AiOwner, import("../core/types.js").EnemyAiState>} */ ({});
+    }
+    gameState.ai.byOwner[aiOwner] = state;
+    if (aiOwner === "enemy") {
+      gameState.ai.enemy = state;
+    } else {
+      gameState.ai.purple = state;
+    }
+  }
+
+  return gameState.ai.byOwner[targetOwner];
+}
+
+/**
  * @param {import("../core/types.js").GameState} gameState
  * @returns {import("../core/types.js").EnemyAiState}
  */
 export function ensureEnemyAiState(gameState) {
-  if (!gameState.ai) {
-    gameState.ai = {
-      enemy: {
-        personality: deriveEnemyPersonality(gameState.map.seed),
-        lastGoal: null,
-        lastTurnSummary: null,
-      },
-    };
-    return gameState.ai.enemy;
-  }
+  return ensureAiState(gameState, "enemy");
+}
 
-  if (!gameState.ai.enemy) {
-    gameState.ai.enemy = {
-      personality: deriveEnemyPersonality(gameState.map.seed),
-      lastGoal: null,
-      lastTurnSummary: null,
-    };
-    return gameState.ai.enemy;
-  }
-
-  gameState.ai.enemy.personality = normalizeEnemyPersonality(gameState.ai.enemy.personality, gameState.map.seed);
-  if (!("lastGoal" in gameState.ai.enemy)) {
-    gameState.ai.enemy.lastGoal = null;
-  }
-  if (!("lastTurnSummary" in gameState.ai.enemy)) {
-    gameState.ai.enemy.lastTurnSummary = null;
-  }
-  return gameState.ai.enemy;
+/**
+ * @param {import("../core/types.js").GameState} gameState
+ * @param {import("../core/types.js").AiOwner} [owner]
+ * @returns {import("../core/types.js").EnemyPersonality}
+ */
+export function getAiPersonality(gameState, owner = "enemy") {
+  return ensureAiState(gameState, owner).personality;
 }
 
 /**
@@ -207,30 +272,29 @@ export function ensureEnemyAiState(gameState) {
  * @returns {import("../core/types.js").EnemyPersonality}
  */
 export function getEnemyPersonality(gameState) {
-  return ensureEnemyAiState(gameState).personality;
+  return getAiPersonality(gameState, "enemy");
 }
 
 /**
  * @param {number} seed
+ * @param {import("../core/types.js").AiOwner} [owner]
  * @returns {import("../core/types.js").EnemyPersonality}
  */
-export function deriveEnemyPersonality(seed) {
-  const normalizedSeed = Number.isFinite(seed) ? Math.abs(Math.trunc(seed)) : 0;
-  return /** @type {import("../core/types.js").EnemyPersonality} */ (
-    ENEMY_PERSONALITY_ORDER[normalizedSeed % ENEMY_PERSONALITY_ORDER.length]
-  );
+export function deriveEnemyPersonality(seed, owner = "enemy") {
+  return derivePersonalityFromSeed(seed, normalizeAiOwner(owner));
 }
 
 /**
  * @param {import("../core/types.js").EnemyPersonality|string|undefined|null} personality
  * @param {number} fallbackSeed
+ * @param {import("../core/types.js").AiOwner} [owner]
  * @returns {import("../core/types.js").EnemyPersonality}
  */
-export function normalizeEnemyPersonality(personality, fallbackSeed = 0) {
+export function normalizeEnemyPersonality(personality, fallbackSeed = 0, owner = "enemy") {
   if (personality === "raider" || personality === "expansionist" || personality === "guardian") {
     return personality;
   }
-  return deriveEnemyPersonality(fallbackSeed);
+  return deriveEnemyPersonality(fallbackSeed, owner);
 }
 
 /**
@@ -286,10 +350,12 @@ export function pickEnemyQueueUnit(gameState, personality = getEnemyPersonality(
 /**
  * @param {import("../core/types.js").GameState} gameState
  * @param {import("../core/types.js").EnemyPersonality} [personality]
+ * @param {import("../core/types.js").AiOwner} [owner]
  * @returns {import("../core/types.js").EnemyGoal}
  */
-export function pickEnemyGoal(gameState, personality = getEnemyPersonality(gameState)) {
-  const context = buildGoalContext(gameState);
+export function pickEnemyGoal(gameState, personality = getEnemyPersonality(gameState), owner = "enemy") {
+  const aiOwner = normalizeAiOwner(owner);
+  const context = buildGoalContext(gameState, aiOwner);
   const scores = ENEMY_GOAL_ORDER.map((goal) => ({
     goal,
     score: scoreGoal(goal, personality, context),
@@ -303,19 +369,18 @@ export function pickEnemyGoal(gameState, personality = getEnemyPersonality(gameS
 }
 
 /**
- * @param {"player"|"enemy"} attackerOwner
+ * @param {"player"|"enemy"|"purple"} attackerOwner
  * @param {import("../core/types.js").City} targetCity
  * @param {import("../core/types.js").GameState} gameState
  * @returns {"capture"|"raze"}
  */
 export function pickEnemyCityOutcome(attackerOwner, targetCity, gameState) {
-  if (attackerOwner !== "enemy") {
-    const ownedCities = gameState.cities.filter((city) => city.owner === attackerOwner).length;
+  const ownedCities = gameState.cities.filter((city) => city.owner === attackerOwner).length;
+  if (!isAiOwner(attackerOwner)) {
     return ownedCities === 0 ? "capture" : "raze";
   }
 
-  const personality = getEnemyPersonality(gameState);
-  const ownedCities = gameState.cities.filter((city) => city.owner === attackerOwner).length;
+  const personality = getAiPersonality(gameState, attackerOwner);
   if (personality === "expansionist") {
     return "capture";
   }
@@ -338,7 +403,9 @@ export function pickEnemyCityOutcome(attackerOwner, targetCity, gameState) {
 
 /**
  * @param {import("../core/types.js").GameState} gameState
+ * @param {import("../core/types.js").AiOwner} [owner]
  * @returns {{
+ *   owner: import("../core/types.js").AiOwner,
  *   turn: number,
  *   personality: import("../core/types.js").EnemyPersonality,
  *   goal: import("../core/types.js").EnemyGoal,
@@ -347,18 +414,21 @@ export function pickEnemyCityOutcome(attackerOwner, targetCity, gameState) {
  *   steps: import("../core/types.js").EnemyActionSummary[]
  * }}
  */
-export function prepareEnemyTurnPlan(gameState) {
+export function prepareEnemyTurnPlan(gameState, owner = "enemy") {
+  const aiOwner = normalizeAiOwner(owner);
   const planningState = cloneGameState(gameState);
-  const aiState = ensureEnemyAiState(planningState);
-  const enemyUnits = getAliveUnits(planningState, "enemy");
-  const playerPresence = hasFactionPresence(planningState, "player");
-  if (!playerPresence) {
-    return buildIdleTurnPlan(gameState, aiState.personality);
+  recomputeVisibility(planningState);
+  const aiState = ensureAiState(planningState, aiOwner);
+  const aiUnits = getAliveUnits(planningState, aiOwner);
+  const hasHostilePresence = getHostileOwners(aiOwner).some((hostileOwner) => hasFactionPresence(planningState, hostileOwner));
+  if (!hasHostilePresence) {
+    return buildIdleTurnPlan(gameState, aiOwner, aiState.personality);
   }
 
-  const prelude = resolveEnemyTurnPrelude(planningState, aiState.personality);
-  const steps = enemyUnits.length > 0 ? collectEnemyTurnSteps(planningState, prelude.goal, aiState.personality) : [];
+  const prelude = resolveEnemyTurnPrelude(planningState, aiState.personality, aiOwner);
+  const steps = aiUnits.length > 0 ? collectEnemyTurnSteps(planningState, prelude.goal, aiState.personality, aiOwner) : [];
   return {
+    owner: aiOwner,
     turn: gameState.turnState.turn,
     personality: aiState.personality,
     goal: prelude.goal,
@@ -371,12 +441,14 @@ export function prepareEnemyTurnPlan(gameState) {
 /**
  * @param {import("../core/types.js").GameState} gameState
  * @param {{
+ *   owner?: import("../core/types.js").AiOwner,
  *   selectedResearch?: string|null,
  *   queueRefills?: Array<{ cityId: string, item: string }>
  * }} plan
  * @returns {{ selectedResearch: string|null, queueRefills: Array<{ cityId: string, item: string }> }}
  */
 export function executeEnemyTurnPrelude(gameState, plan) {
+  const owner = normalizeAiOwner(plan.owner ?? "enemy");
   let selectedResearch = null;
   if (plan.selectedResearch) {
     const selected = selectResearch(plan.selectedResearch, gameState);
@@ -387,11 +459,12 @@ export function executeEnemyTurnPrelude(gameState, plan) {
 
   const appliedQueueRefills = [];
   for (const refill of plan.queueRefills ?? []) {
-    if (applyQueueRefillFromPlan(gameState, refill)) {
+    if (applyQueueRefillFromPlan(gameState, refill, owner)) {
       appliedQueueRefills.push({ cityId: refill.cityId, item: refill.item });
     }
   }
 
+  recomputeVisibility(gameState);
   return {
     selectedResearch,
     queueRefills: appliedQueueRefills,
@@ -455,6 +528,7 @@ export function executeEnemyTurnStep(gameState, step) {
     return { ok: false, reason: result?.reason ?? "step-failed" };
   }
 
+  recomputeVisibility(gameState);
   const detail = getActionResultDetail(step.action, result);
   const afterUnit = getUnitById(gameState, step.unitId);
   const to =
@@ -489,6 +563,7 @@ export function executeEnemyTurnStep(gameState, step) {
 /**
  * @param {import("../core/types.js").GameState} gameState
  * @param {{
+ *   owner?: import("../core/types.js").AiOwner,
  *   goal: import("../core/types.js").EnemyGoal,
  *   selectedResearch?: string|null,
  *   queueRefills?: Array<{ cityId: string, item: string }>
@@ -498,7 +573,8 @@ export function executeEnemyTurnStep(gameState, step) {
  * @returns {import("../core/types.js").EnemyTurnSummary}
  */
 export function finalizeEnemyTurnPlan(gameState, plan, actions, appliedPrelude = null) {
-  const aiState = ensureEnemyAiState(gameState);
+  const owner = normalizeAiOwner(plan.owner ?? "enemy");
+  const aiState = ensureAiState(gameState, owner);
   aiState.lastGoal = plan.goal;
   aiState.lastTurnSummary = {
     turn: gameState.turnState.turn,
@@ -507,15 +583,19 @@ export function finalizeEnemyTurnPlan(gameState, plan, actions, appliedPrelude =
     queueRefills: appliedPrelude?.queueRefills ?? plan.queueRefills ?? [],
     actions: [...actions],
   };
+  ensureAiState(gameState, owner);
   return aiState.lastTurnSummary;
 }
 
 /**
  * @param {import("../core/types.js").GameState} gameState
+ * @param {import("../core/types.js").AiOwner} [owner]
  * @returns {import("../core/types.js").GameState}
  */
-export function runEnemyTurn(gameState) {
-  const plan = prepareEnemyTurnPlan(gameState);
+export function runEnemyTurn(gameState, owner = "enemy") {
+  const aiOwner = normalizeAiOwner(owner);
+  recomputeVisibility(gameState);
+  const plan = prepareEnemyTurnPlan(gameState, aiOwner);
   const appliedPrelude = executeEnemyTurnPrelude(gameState, plan);
   const actions = [];
   for (const step of plan.steps) {
@@ -525,11 +605,13 @@ export function runEnemyTurn(gameState) {
     }
   }
   finalizeEnemyTurnPlan(gameState, plan, actions, appliedPrelude);
+  recomputeVisibility(gameState);
   return gameState;
 }
 
-function buildIdleTurnPlan(gameState, personality) {
+function buildIdleTurnPlan(gameState, owner, personality) {
   return {
+    owner,
     turn: gameState.turnState.turn,
     personality,
     goal: "idle",
@@ -539,10 +621,10 @@ function buildIdleTurnPlan(gameState, personality) {
   };
 }
 
-function resolveEnemyTurnPrelude(gameState, personality) {
+function resolveEnemyTurnPrelude(gameState, personality, owner) {
   const selectedResearch = maybeSelectEnemyResearch(gameState, personality);
-  const queueRefills = syncEnemyQueuesForPersonality(gameState, personality);
-  const goal = pickEnemyGoal(gameState, personality);
+  const queueRefills = syncEnemyQueuesForPersonality(gameState, personality, owner);
+  const goal = pickEnemyGoal(gameState, personality, owner);
   return {
     selectedResearch,
     queueRefills,
@@ -550,34 +632,35 @@ function resolveEnemyTurnPrelude(gameState, personality) {
   };
 }
 
-function collectEnemyTurnSteps(gameState, goal, personality) {
-  const enemyUnits = getAliveUnits(gameState, "enemy");
+function collectEnemyTurnSteps(gameState, goal, personality, owner) {
+  const aiUnits = getAliveUnits(gameState, owner);
   const steps = [];
-  for (const enemyUnit of orderEnemyUnits(enemyUnits, goal)) {
-    const refreshedEnemy = getUnitById(gameState, enemyUnit.id);
-    if (!refreshedEnemy || refreshedEnemy.health <= 0) {
+  for (const aiUnit of orderEnemyUnits(aiUnits, goal)) {
+    const refreshedUnit = getUnitById(gameState, aiUnit.id);
+    if (!refreshedUnit || refreshedUnit.health <= 0) {
       continue;
     }
 
-    const action = pickBestActionForUnit(refreshedEnemy, goal, personality, gameState);
+    const action = pickBestActionForUnit(refreshedUnit, goal, personality, gameState, owner);
     if (!action) {
       continue;
     }
 
-    const from = { q: refreshedEnemy.q, r: refreshedEnemy.r };
+    const from = { q: refreshedUnit.q, r: refreshedUnit.r };
     const result = executeAction(action);
     if (!result.ok) {
       continue;
     }
+    recomputeVisibility(gameState);
     const detail = result.detail ?? null;
 
-    const refreshedAfterAction = getUnitById(gameState, refreshedEnemy.id);
+    const refreshedAfterAction = getUnitById(gameState, refreshedUnit.id);
     const to = refreshedAfterAction ? { q: refreshedAfterAction.q, r: refreshedAfterAction.r } : { ...from };
     const target =
       Number.isFinite(action.q) && Number.isFinite(action.r) ? { q: Math.trunc(action.q), r: Math.trunc(action.r) } : null;
 
     steps.push({
-      unitId: refreshedEnemy.id,
+      unitId: refreshedUnit.id,
       action: action.type,
       targetId: action.targetId ?? null,
       q: target ? target.q : null,
@@ -595,12 +678,12 @@ function collectEnemyTurnSteps(gameState, goal, personality) {
   return steps;
 }
 
-function applyQueueRefillFromPlan(gameState, refill) {
+function applyQueueRefillFromPlan(gameState, refill, owner) {
   if (!refill || typeof refill.cityId !== "string" || typeof refill.item !== "string") {
     return false;
   }
 
-  const city = gameState.cities.find((candidate) => candidate.id === refill.cityId && candidate.owner === "enemy");
+  const city = gameState.cities.find((candidate) => candidate.id === refill.cityId && candidate.owner === owner);
   if (!city) {
     return false;
   }
@@ -661,11 +744,11 @@ function maybeSelectEnemyResearch(gameState, personality) {
   return techToSelect;
 }
 
-function syncEnemyQueuesForPersonality(gameState, personality) {
+function syncEnemyQueuesForPersonality(gameState, personality, owner) {
   const refills = [];
-  const enemyCities = gameState.cities.filter((city) => city.owner === "enemy").sort((a, b) => a.id.localeCompare(b.id));
+  const ownerCities = gameState.cities.filter((city) => city.owner === owner).sort((a, b) => a.id.localeCompare(b.id));
 
-  for (const city of enemyCities) {
+  for (const city of ownerCities) {
     city.queue = normalizeQueueItems(city.queue);
     if (city.queue.length > 0) {
       continue;
@@ -677,11 +760,7 @@ function syncEnemyQueuesForPersonality(gameState, personality) {
     }
 
     city.queue = [{ ...preferredQueueItem }];
-    if (preferredQueueItem.kind === "building") {
-      city.productionTab = "buildings";
-    } else {
-      city.productionTab = "units";
-    }
+    city.productionTab = preferredQueueItem.kind === "building" ? "buildings" : "units";
     refills.push({ cityId: city.id, item: `${preferredQueueItem.kind}:${preferredQueueItem.id}` });
   }
 
@@ -748,8 +827,8 @@ function normalizeQueueItems(queue) {
   return normalized;
 }
 
-function orderEnemyUnits(enemyUnits, goal) {
-  return [...enemyUnits].sort((a, b) => {
+function orderEnemyUnits(units, goal) {
+  return [...units].sort((a, b) => {
     if (goal === "foundFirstCity" || goal === "expand") {
       const settlerDelta = Number(a.type !== "settler") - Number(b.type !== "settler");
       if (settlerDelta !== 0) {
@@ -769,7 +848,7 @@ function orderEnemyUnits(enemyUnits, goal) {
   });
 }
 
-function pickBestActionForUnit(unit, goal, personality, gameState) {
+function pickBestActionForUnit(unit, goal, personality, gameState, owner) {
   const candidates = [];
   const foundCheck = canFoundCity(unit.id, gameState);
 
@@ -781,14 +860,14 @@ function pickBestActionForUnit(unit, goal, personality, gameState) {
       q: unit.q,
       r: unit.r,
       cost: 0,
-      score: scoreFoundCityAction(unit, goal, personality, gameState),
+      score: scoreFoundCityAction(unit, goal, personality, gameState, owner),
       execute: () => foundCity(unit.id, gameState),
     });
   }
 
-  const attackableUnitTargets = getAttackableTargets(unit.id, gameState).sort((a, b) => {
-    return distance(unit, a) - distance(unit, b) || a.q - b.q || a.r - b.r || a.id.localeCompare(b.id);
-  });
+  const attackableUnitTargets = getAttackableTargets(unit.id, gameState)
+    .filter((target) => canOwnerSeeUnit(gameState, owner, target))
+    .sort((a, b) => distance(unit, a) - distance(unit, b) || a.q - b.q || a.r - b.r || a.id.localeCompare(b.id));
   for (const target of attackableUnitTargets) {
     candidates.push({
       type: "attackUnit",
@@ -797,14 +876,14 @@ function pickBestActionForUnit(unit, goal, personality, gameState) {
       q: target.q,
       r: target.r,
       cost: 0,
-      score: scoreAttackUnitAction(unit, target, goal, personality, gameState),
+      score: scoreAttackUnitAction(unit, target, goal, personality, gameState, owner),
       execute: () => resolveAttack(unit.id, target.id, gameState),
     });
   }
 
-  const attackableCityTargets = getAttackableCities(unit.id, gameState).sort((a, b) => {
-    return distance(unit, a) - distance(unit, b) || a.q - b.q || a.r - b.r || a.id.localeCompare(b.id);
-  });
+  const attackableCityTargets = getAttackableCities(unit.id, gameState)
+    .filter((cityTarget) => canOwnerSeeCity(gameState, owner, cityTarget))
+    .sort((a, b) => distance(unit, a) - distance(unit, b) || a.q - b.q || a.r - b.r || a.id.localeCompare(b.id));
   for (const cityTarget of attackableCityTargets) {
     candidates.push({
       type: "attackCity",
@@ -818,7 +897,7 @@ function pickBestActionForUnit(unit, goal, personality, gameState) {
     });
   }
 
-  const moveTarget = chooseMoveTarget(unit, goal, gameState);
+  const moveTarget = chooseMoveTarget(unit, goal, gameState, owner);
   const reachable = getReachable(unit.id, gameState);
   for (const hex of reachable) {
     candidates.push({
@@ -873,33 +952,37 @@ function executeAction(action) {
   return { ok: true, detail: getActionResultDetail(action.type, result), result };
 }
 
-function chooseMoveTarget(unit, goal, gameState) {
+function chooseMoveTarget(unit, goal, gameState, owner) {
   if ((goal === "foundFirstCity" || goal === "expand") && unit.type === "settler") {
     return chooseSettlerExpansionTarget(unit, gameState);
   }
 
   if (goal === "assaultCity") {
-    return pickClosestTarget(unit, getAliveCities(gameState, "player"));
+    const hostileCities = getVisibleHostileCities(gameState, owner);
+    return pickClosestTarget(unit, hostileCities) ?? chooseExplorationTarget(unit, gameState, owner);
   }
 
   if (goal === "huntUnits") {
-    return pickClosestTarget(unit, getAliveUnits(gameState, "player"));
+    const hostileUnits = getVisibleHostileUnits(gameState, owner);
+    return pickClosestTarget(unit, hostileUnits) ?? chooseExplorationTarget(unit, gameState, owner);
   }
 
   if (goal === "defend") {
-    const threatenedCity = pickClosestTarget(unit, getThreatenedCities(gameState));
+    const threatenedCity = pickClosestTarget(unit, getThreatenedCities(gameState, owner));
     if (threatenedCity) {
       return threatenedCity;
     }
-    return pickClosestTarget(unit, getAliveUnits(gameState, "player"));
+    const visibleHostiles = [...getVisibleHostileUnits(gameState, owner), ...getVisibleHostileCities(gameState, owner)];
+    return pickClosestTarget(unit, visibleHostiles) ?? chooseExplorationTarget(unit, gameState, owner);
   }
 
   if (goal === "regroup") {
-    return pickClosestTarget(unit, getAliveCities(gameState, "enemy"));
+    const ownCities = getAliveCities(gameState, owner);
+    return pickClosestTarget(unit, ownCities) ?? chooseExplorationTarget(unit, gameState, owner);
   }
 
-  const hostileTargets = [...getAliveUnits(gameState, "player"), ...getAliveCities(gameState, "player")];
-  return pickClosestTarget(unit, hostileTargets);
+  const hostileTargets = [...getVisibleHostileUnits(gameState, owner), ...getVisibleHostileCities(gameState, owner)];
+  return pickClosestTarget(unit, hostileTargets) ?? chooseExplorationTarget(unit, gameState, owner);
 }
 
 function chooseSettlerExpansionTarget(unit, gameState) {
@@ -920,6 +1003,32 @@ function chooseSettlerExpansionTarget(unit, gameState) {
   );
 }
 
+function chooseExplorationTarget(unit, gameState, owner) {
+  const explored = getExploredHexSet(gameState, owner);
+  const occupied = new Set([
+    ...gameState.units.filter((candidate) => candidate.id !== unit.id).map((candidate) => `${candidate.q},${candidate.r}`),
+    ...gameState.cities.map((city) => `${city.q},${city.r}`),
+  ]);
+  return (
+    [...gameState.map.tiles]
+      .filter((tile) => !tile.blocksMovement)
+      .filter((tile) => !occupied.has(`${tile.q},${tile.r}`))
+      .sort((a, b) => {
+        const scoreA = scoreExplorationTile(a, unit, explored);
+        const scoreB = scoreExplorationTile(b, unit, explored);
+        return scoreB - scoreA || a.q - b.q || a.r - b.r;
+      })[0] ?? null
+  );
+}
+
+function scoreExplorationTile(tile, unit, explored) {
+  const key = `${tile.q},${tile.r}`;
+  const unseenBonus = explored.has(key) ? 0 : 36;
+  const terrainScore = tile.yields.food * 2 + tile.yields.production * 2 + tile.yields.science * 2;
+  const proximityPenalty = distance(unit, tile);
+  return unseenBonus + terrainScore - proximityPenalty * 2;
+}
+
 function scoreSettlerTarget(tile, unit) {
   const terrainScore = tile.yields.food * 3 + tile.yields.production * 2 + tile.yields.science * 2;
   const proximityPenalty = distance(unit, tile);
@@ -936,15 +1045,15 @@ function pickClosestTarget(origin, targets) {
   })[0];
 }
 
-function scoreFoundCityAction(unit, goal, personality, gameState) {
+function scoreFoundCityAction(unit, goal, personality, gameState, owner) {
   const tile = getTileAt(gameState.map, unit.q, unit.r);
   const tileScore = tile ? tile.yields.food * 2 + tile.yields.production * 2 + tile.yields.science : 0;
-  const enemyCityCount = getAliveCities(gameState, "enemy").length;
+  const ownCityCount = getAliveCities(gameState, owner).length;
   const bonus = PERSONALITY_ACTION_BONUS[personality].foundCity + GOAL_ACTION_BONUS[goal].foundCity;
-  return bonus + tileScore + (enemyCityCount === 0 ? 25 : 0);
+  return bonus + tileScore + (ownCityCount === 0 ? 25 : 0);
 }
 
-function scoreAttackUnitAction(unit, target, goal, personality, gameState) {
+function scoreAttackUnitAction(unit, target, goal, personality, gameState, owner) {
   let score = PERSONALITY_ACTION_BONUS[personality].attackUnit + GOAL_ACTION_BONUS[goal].attackUnit;
   if (target.health <= unit.attack) {
     score += 16;
@@ -952,7 +1061,7 @@ function scoreAttackUnitAction(unit, target, goal, personality, gameState) {
   if (target.type === "settler") {
     score += 8;
   }
-  const threatenedCities = getThreatenedCities(gameState);
+  const threatenedCities = getThreatenedCities(gameState, owner);
   if (goal === "defend" && threatenedCities.some((city) => distance(city, target) <= THREATENED_CITY_DISTANCE)) {
     score += 10;
   }
@@ -1008,89 +1117,106 @@ function scoreGoal(goal, personality, context) {
   let score = PERSONALITY_GOAL_BONUS[personality][goal] ?? 0;
 
   if (goal === "foundFirstCity") {
-    score += context.enemyCityCount === 0 && context.enemySettlerCount > 0 ? 66 : -50;
+    score += context.ownCityCount === 0 && context.ownSettlerCount > 0 ? 66 : -50;
     score += context.canFoundImmediately ? 20 : 0;
     return score;
   }
 
   if (goal === "expand") {
-    score += context.enemySettlerCount > 0 ? 24 : -14;
-    score += context.enemyCityCount > 0 ? 14 : 0;
+    score += context.ownSettlerCount > 0 ? 24 : -14;
+    score += context.ownCityCount > 0 ? 14 : 0;
     score += context.canFoundImmediately ? 8 : 0;
     score -= context.immediateUnitAttacks * 36;
     score -= context.immediateCityAttacks * 24;
-    score -= context.threatenedEnemyCities * 8;
+    score -= context.threatenedOwnCities * 8;
     return score;
   }
 
   if (goal === "defend") {
-    score += context.threatenedEnemyCities * 22 + context.playerUnitsNearEnemyCities * 6;
+    score += context.threatenedOwnCities * 22 + context.hostileUnitsNearOwnCities * 6;
     return score;
   }
 
   if (goal === "assaultCity") {
-    score += context.playerCityCount * 8 + context.immediateCityAttacks * 18;
-    score += context.enemyCityCount === 0 ? -6 : 0;
+    score += context.visibleHostileCityCount * 8 + context.immediateCityAttacks * 18;
+    score += context.knownHostileOwnerCount * 4;
+    score += context.ownCityCount === 0 ? -6 : 0;
     return score;
   }
 
   if (goal === "huntUnits") {
-    score += context.playerUnitCount * 6 + context.immediateUnitAttacks * 18;
+    score += context.visibleHostileUnitCount * 6 + context.immediateUnitAttacks * 18;
+    score += context.knownHostileOwnerCount * 3;
     return score;
   }
 
   if (goal === "regroup") {
-    score += context.lowHealthEnemyUnits * 12;
-    score += context.actionableEnemyUnits === 0 ? 5 : 0;
+    score += context.lowHealthOwnUnits * 12;
+    score += context.actionableOwnUnits === 0 ? 5 : 0;
     return score;
   }
 
   if (goal === "idle") {
     score += context.immediateUnitAttacks + context.immediateCityAttacks > 0 ? -6 : 1;
+    score += context.hasVisibleHostile ? -4 : 0;
     return score;
   }
 
   return score;
 }
 
-function buildGoalContext(gameState) {
-  const enemyUnits = getAliveUnits(gameState, "enemy");
-  const enemyCities = getAliveCities(gameState, "enemy");
-  const playerUnits = getAliveUnits(gameState, "player");
-  const playerCities = getAliveCities(gameState, "player");
-  const enemySettlers = enemyUnits.filter((unit) => unit.type === "settler");
+function buildGoalContext(gameState, owner) {
+  const ownUnits = getAliveUnits(gameState, owner);
+  const ownCities = getAliveCities(gameState, owner);
+  const hostileUnits = getVisibleHostileUnits(gameState, owner);
+  const hostileCities = getVisibleHostileCities(gameState, owner);
+  const ownSettlers = ownUnits.filter((unit) => unit.type === "settler");
 
   let immediateUnitAttacks = 0;
   let immediateCityAttacks = 0;
-  for (const enemyUnit of enemyUnits) {
-    immediateUnitAttacks += getAttackableTargets(enemyUnit.id, gameState).length;
-    immediateCityAttacks += getAttackableCities(enemyUnit.id, gameState).length;
+  for (const ownUnit of ownUnits) {
+    immediateUnitAttacks += getAttackableTargets(ownUnit.id, gameState).filter((target) => canOwnerSeeUnit(gameState, owner, target))
+      .length;
+    immediateCityAttacks += getAttackableCities(ownUnit.id, gameState).filter((city) => canOwnerSeeCity(gameState, owner, city)).length;
   }
 
-  const threatenedEnemyCities = getThreatenedCities(gameState).length;
-  const playerUnitsNearEnemyCities = playerUnits.filter((unit) => {
-    return enemyCities.some((city) => distance(unit, city) <= THREATENED_CITY_DISTANCE);
+  const threatenedOwnCities = getThreatenedCities(gameState, owner).length;
+  const hostileUnitsNearOwnCities = hostileUnits.filter((unit) => {
+    return ownCities.some((city) => distance(unit, city) <= THREATENED_CITY_DISTANCE);
   }).length;
+  const knownHostileOwnerCount = getSeenHostileOwners(gameState, owner).length;
 
   return {
-    enemyCityCount: enemyCities.length,
-    playerCityCount: playerCities.length,
-    playerUnitCount: playerUnits.length,
-    enemySettlerCount: enemySettlers.length,
-    canFoundImmediately: enemySettlers.some((settler) => canFoundCity(settler.id, gameState).ok),
+    ownCityCount: ownCities.length,
+    visibleHostileCityCount: hostileCities.length,
+    visibleHostileUnitCount: hostileUnits.length,
+    ownSettlerCount: ownSettlers.length,
+    knownHostileOwnerCount,
+    canFoundImmediately: ownSettlers.some((settler) => canFoundCity(settler.id, gameState).ok),
     immediateUnitAttacks,
     immediateCityAttacks,
-    threatenedEnemyCities,
-    playerUnitsNearEnemyCities,
-    lowHealthEnemyUnits: enemyUnits.filter((unit) => unit.health / Math.max(1, unit.maxHealth) < 0.5).length,
-    actionableEnemyUnits: enemyUnits.filter((unit) => !unit.hasActed && unit.movementRemaining > 0).length,
+    threatenedOwnCities,
+    hostileUnitsNearOwnCities,
+    lowHealthOwnUnits: ownUnits.filter((unit) => unit.health / Math.max(1, unit.maxHealth) < 0.5).length,
+    actionableOwnUnits: ownUnits.filter((unit) => !unit.hasActed && unit.movementRemaining > 0).length,
+    hasVisibleHostile: hostileUnits.length > 0 || hostileCities.length > 0,
   };
 }
 
-function getThreatenedCities(gameState) {
-  const enemyCities = getAliveCities(gameState, "enemy");
-  const playerUnits = getAliveUnits(gameState, "player");
-  return enemyCities.filter((city) => playerUnits.some((unit) => distance(unit, city) <= THREATENED_CITY_DISTANCE));
+function getThreatenedCities(gameState, owner) {
+  const ownCities = getAliveCities(gameState, owner);
+  const visibleHostileUnits = getVisibleHostileUnits(gameState, owner);
+  return ownCities.filter((city) => visibleHostileUnits.some((unit) => distance(unit, city) <= THREATENED_CITY_DISTANCE));
+}
+
+function getVisibleHostileUnits(gameState, owner) {
+  const hostileOwners = new Set(getHostileOwners(owner));
+  return gameState.units.filter((unit) => hostileOwners.has(unit.owner) && unit.health > 0 && canOwnerSeeUnit(gameState, owner, unit));
+}
+
+function getVisibleHostileCities(gameState, owner) {
+  const hostileOwners = new Set(getHostileOwners(owner));
+  return gameState.cities.filter((city) => hostileOwners.has(city.owner) && city.health > 0 && canOwnerSeeCity(gameState, owner, city));
 }
 
 function getAliveUnits(gameState, owner) {

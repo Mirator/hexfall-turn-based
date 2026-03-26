@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cloneGameState, createInitialGameState } from "../../src/core/gameState.js";
+import { AI_OWNERS } from "../../src/core/factions.js";
 import {
   executeEnemyTurnPrelude,
   executeEnemyTurnStep,
@@ -58,11 +59,26 @@ describe("enemy turn flow", () => {
     const gameState = createInitialGameState({ seed: 711 });
     expect(gameState.cities).toHaveLength(0);
     beginEnemyTurn(gameState);
-    runEnemyTurn(gameState);
+    runEnemyTurn(gameState, "enemy");
 
     const enemyCities = gameState.cities.filter((city) => city.owner === "enemy");
     expect(enemyCities.length).toBe(1);
     expect(gameState.units.some((unit) => unit.owner === "enemy" && unit.type === "settler")).toBe(false);
+  });
+
+  it("runs enemy and purple AI owners sequentially within one AI phase", () => {
+    const gameState = createInitialGameState({ seed: 712 });
+    beginEnemyTurn(gameState);
+
+    runEnemyTurn(gameState, "enemy");
+    runEnemyTurn(gameState, "purple");
+
+    expect(gameState.ai.enemy.lastTurnSummary?.turn).toBe(1);
+    expect(gameState.ai.purple.lastTurnSummary?.turn).toBe(1);
+    expect(gameState.cities.some((city) => city.owner === "enemy")).toBe(true);
+    expect(gameState.cities.some((city) => city.owner === "purple")).toBe(true);
+    expect(gameState.units.some((unit) => unit.owner === "enemy" && unit.type === "settler")).toBe(false);
+    expect(gameState.units.some((unit) => unit.owner === "purple" && unit.type === "settler")).toBe(false);
   });
 
   it("still applies enemy prelude queue refill when no enemy units remain", () => {
@@ -103,26 +119,28 @@ describe("enemy turn flow", () => {
     expect(enemyCity.queue.length).toBeGreaterThan(0);
   });
 
-  it("step-based enemy flow matches runEnemyTurn wrapper behavior", () => {
-    const initial = createInitialGameState({ seed: 811, enemyPersonality: "guardian" });
-    beginEnemyTurn(initial);
+  it("step-based flow matches runEnemyTurn wrapper behavior for each AI owner", () => {
+    for (const owner of AI_OWNERS) {
+      const initial = createInitialGameState({ seed: 811, enemyPersonality: "guardian", purplePersonality: "guardian" });
+      beginEnemyTurn(initial);
 
-    const wrapperState = cloneGameState(initial);
-    const stepState = cloneGameState(initial);
+      const wrapperState = cloneGameState(initial);
+      const stepState = cloneGameState(initial);
 
-    runEnemyTurn(wrapperState);
+      runEnemyTurn(wrapperState, owner);
 
-    const plan = prepareEnemyTurnPlan(stepState);
-    const prelude = executeEnemyTurnPrelude(stepState, plan);
-    const actionSummaries = [];
-    for (const step of plan.steps) {
-      const execution = executeEnemyTurnStep(stepState, step);
-      if (execution.ok && execution.actionSummary) {
-        actionSummaries.push(execution.actionSummary);
+      const plan = prepareEnemyTurnPlan(stepState, owner);
+      const prelude = executeEnemyTurnPrelude(stepState, plan);
+      const actionSummaries = [];
+      for (const step of plan.steps) {
+        const execution = executeEnemyTurnStep(stepState, step);
+        if (execution.ok && execution.actionSummary) {
+          actionSummaries.push(execution.actionSummary);
+        }
       }
-    }
-    finalizeEnemyTurnPlan(stepState, plan, actionSummaries, prelude);
+      finalizeEnemyTurnPlan(stepState, plan, actionSummaries, prelude);
 
-    expect(stepState).toEqual(wrapperState);
+      expect(stepState).toEqual(wrapperState);
+    }
   });
 });

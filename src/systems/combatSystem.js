@@ -437,11 +437,14 @@ export function resolveCityOutcome(cityId, choice, gameState) {
 
 function pickAiCityOutcome(attackerOwner, targetCity, gameState) {
   const ownedCities = gameState.cities.filter((city) => city.owner === attackerOwner).length;
-  if (attackerOwner !== "enemy") {
+  if (attackerOwner === "player") {
     return ownedCities === 0 ? "capture" : "raze";
   }
 
-  const personality = gameState.ai?.enemy?.personality ?? "expansionist";
+  const aiState =
+    gameState.ai?.byOwner?.[attackerOwner] ??
+    (attackerOwner === "enemy" ? gameState.ai?.enemy : attackerOwner === "purple" ? gameState.ai?.purple : null);
+  const personality = aiState?.personality ?? "expansionist";
   if (personality === "expansionist") {
     return "capture";
   }
