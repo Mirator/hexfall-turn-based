@@ -24,7 +24,6 @@ import {
   getFoundCityReasonText,
   moveCityQueueItem,
   removeCityQueueAt,
-  setCityFocus,
   setCityProductionTab,
   processTurn as processCityTurn,
 } from "../systems/citySystem.js";
@@ -158,7 +157,6 @@ export class WorldScene extends Phaser.Scene {
     gameEvents.on("found-city-requested", this.handleFoundCityRequested, this);
     gameEvents.on("research-cycle-requested", this.handleResearchCycleRequested, this);
     gameEvents.on("unit-action-requested", this.handleUnitActionRequested, this);
-    gameEvents.on("city-focus-set-requested", this.handleCityFocusSetRequested, this);
     gameEvents.on("city-production-tab-set-requested", this.handleCityProductionTabSetRequested, this);
     gameEvents.on("city-queue-enqueue-requested", this.handleCityQueueEnqueueRequested, this);
     gameEvents.on("city-queue-move-requested", this.handleCityQueueMoveRequested, this);
@@ -181,7 +179,6 @@ export class WorldScene extends Phaser.Scene {
       gameEvents.off("found-city-requested", this.handleFoundCityRequested, this);
       gameEvents.off("research-cycle-requested", this.handleResearchCycleRequested, this);
       gameEvents.off("unit-action-requested", this.handleUnitActionRequested, this);
-      gameEvents.off("city-focus-set-requested", this.handleCityFocusSetRequested, this);
       gameEvents.off("city-production-tab-set-requested", this.handleCityProductionTabSetRequested, this);
       gameEvents.off("city-queue-enqueue-requested", this.handleCityQueueEnqueueRequested, this);
       gameEvents.off("city-queue-move-requested", this.handleCityQueueMoveRequested, this);
@@ -500,33 +497,6 @@ export class WorldScene extends Phaser.Scene {
     return false;
   };
 
-  handleCityFocusSetRequested = (payload) => {
-    if (!this.canAcceptPlayerCommands() || !this.gameState.selectedCityId) {
-      return;
-    }
-
-    const focus = payload?.focus;
-    if (focus !== "balanced" && focus !== "food" && focus !== "production" && focus !== "science") {
-      return;
-    }
-
-    const result = setCityFocus(this.gameState.selectedCityId, focus, this.gameState);
-    if (result.ok) {
-      this.evaluateAndPublish();
-      const city = this.gameState.cities.find((candidate) => candidate.id === this.gameState.selectedCityId) ?? null;
-      this.emitNotification(`City focus: ${result.focus}.`, {
-        level: "info",
-        category: "City",
-        focus: city ? { cityId: city.id, q: city.q, r: city.r } : null,
-      });
-      return;
-    }
-    this.emitNotification("Could not set city focus.", {
-      level: "warning",
-      category: "City",
-    });
-  };
-
   handleCityProductionTabSetRequested = (payload) => {
     if (!this.canAcceptPlayerCommands() || !this.gameState.selectedCityId) {
       return;
@@ -733,7 +703,9 @@ export class WorldScene extends Phaser.Scene {
       return "Queue slot is empty.";
     }
     if (reason === "queue-move-out-of-range") {
-      return direction === "up" ? "Item is already at the top of the queue." : "Item is already at the bottom of the queue.";
+      return direction === "up"
+        ? "Item is already in the left-most queue slot."
+        : "Item is already in the right-most queue slot.";
     }
     if (reason === "queue-move-direction-invalid") {
       return "Queue move direction is invalid.";
@@ -2206,7 +2178,6 @@ export class WorldScene extends Phaser.Scene {
         q: city.q,
         r: city.r,
         population: city.population,
-        focus: city.focus,
         identity: city.identity,
         specialization: city.specialization,
         growthProgress: city.growthProgress,
@@ -2350,7 +2321,6 @@ export class WorldScene extends Phaser.Scene {
         population: selectedCity.population,
         health: selectedCity.health,
         maxHealth: selectedCity.maxHealth,
-        focus: selectedCity.focus,
         identity: selectedCity.identity,
         specialization: selectedCity.specialization,
         productionTab: selectedCity.productionTab,
@@ -2377,8 +2347,6 @@ export class WorldScene extends Phaser.Scene {
         cityProductionTab: uiSurface.uiActions.cityProductionTab,
         cityProductionStock: uiSurface.uiActions.cityProductionStock,
         cityLocalProduction: uiSurface.uiActions.cityLocalProduction,
-        cityFocusChoices: uiSurface.uiActions.cityFocusChoices,
-        canSetCityFocus: uiSurface.uiActions.canSetCityFocus,
         canSetCityProductionTab: uiSurface.uiActions.canSetCityProductionTab,
         canQueueProduction: uiSurface.uiActions.canQueueProduction,
         cityQueueReason: uiSurface.uiActions.cityQueueReason,
@@ -2873,46 +2841,6 @@ export class WorldScene extends Phaser.Scene {
     }
     this.evaluateAndPublish();
     return true;
-  }
-
-  testCycleCityFocus() {
-    const cityId = this.gameState.selectedCityId;
-    if (!cityId) {
-      return false;
-    }
-    const city = this.gameState.cities.find((candidate) => candidate.id === cityId);
-    if (!city) {
-      return false;
-    }
-    const focusOrder = ["balanced", "food", "production", "science"];
-    const currentIndex = focusOrder.indexOf(city.focus);
-    const nextFocus = focusOrder[(currentIndex + 1 + focusOrder.length) % focusOrder.length];
-    const result = setCityFocus(
-      cityId,
-      /** @type {"balanced"|"food"|"production"|"science"} */ (nextFocus),
-      this.gameState
-    );
-    if (!result.ok) {
-      return false;
-    }
-    this.evaluateAndPublish();
-    return result.focus;
-  }
-
-  testSetCityFocus(focus) {
-    const cityId = this.gameState.selectedCityId;
-    if (!cityId) {
-      return false;
-    }
-    if (focus !== "balanced" && focus !== "food" && focus !== "production" && focus !== "science") {
-      return false;
-    }
-    const result = setCityFocus(cityId, focus, this.gameState);
-    if (!result.ok) {
-      return false;
-    }
-    this.evaluateAndPublish();
-    return result.focus;
   }
 
   testEnqueueCityProduction(unitType) {

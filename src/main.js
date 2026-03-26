@@ -63,6 +63,14 @@ window.__hexfallTest = {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testGetCityPanelState() : null;
   },
+  showCityActionTooltip(actionId) {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testShowActionTooltip(actionId) : false;
+  },
+  hideCityActionTooltip() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testHideActionTooltip() : false;
+  },
   getPauseMenuState() {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testGetPauseMenuState() : null;
@@ -146,14 +154,6 @@ window.__hexfallTest = {
   chooseCityOutcome(choice) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testChooseCityOutcome(choice) : false;
-  },
-  cycleCityFocus() {
-    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
-    return worldScene ? worldScene.testCycleCityFocus() : null;
-  },
-  setCityFocus(focus) {
-    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
-    return worldScene ? worldScene.testSetCityFocus(focus) : null;
   },
   setCityProductionTab(tab) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;

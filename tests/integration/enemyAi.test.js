@@ -257,7 +257,6 @@ function createCity(id, owner, q, r) {
     q,
     r,
     population: 1,
-    focus: "balanced",
     workedHexes: [{ q, r }],
     yieldLastTurn: { food: 0, production: 0, science: 0 },
     identity: "balanced",

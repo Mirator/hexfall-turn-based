@@ -69,7 +69,6 @@
  * @property {number} q
  * @property {number} r
  * @property {number} population
- * @property {"balanced"|"food"|"production"|"science"} focus
  * @property {Hex[]} workedHexes
  * @property {YieldBundle} yieldLastTurn
  * @property {"agricultural"|"industrial"|"scholarly"|"balanced"} identity

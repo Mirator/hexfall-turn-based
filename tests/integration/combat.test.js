@@ -429,7 +429,6 @@ describe("combat system", () => {
       q: Math.max(0, playerCity.q - 2),
       r: playerCity.r,
       population: 1,
-      focus: "balanced",
       workedHexes: [{ q: Math.max(0, playerCity.q - 2), r: playerCity.r }],
       yieldLastTurn: { food: 0, production: 0, science: 0 },
       identity: "balanced",

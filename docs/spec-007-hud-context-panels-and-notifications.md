@@ -11,15 +11,16 @@
 - Chosen: fixed HUD zones:
   - top-left: turn + full resource names with value/projected delta + `Dev Vision: ON/OFF (V)` indicator
   - top-right: persistent notification center
+  - right-side middle: city queue card (visible only while a city is selected), positioned under notifications and above `Attention needed`
   - bottom-left: selected entity card (hidden when no selection)
   - bottom-center: contextual action panel
   - bottom-right: End Turn + turn readiness assistant
 - Chosen: bottom contextual panel is shared for city and unit actions.
 - Chosen: panel has visible expand/collapse and pin controls; auto-expands on valid selection; pin persists expanded mode across selection changes.
-- Chosen: city mode supports direct focus tabs with projected-yield explanations, `Units|Buildings` tabbed production, and 3-slot queue management.
-- Chosen: city production choices expose explicit cost/ETA context and per-item unavailable-state tags (`Locked`, `Built`, `Queued`, `Queue Full`).
+- Chosen: city mode supports `Units|Buildings` tabbed production with always-available production-cost/estimated-turn hover tooltip details.
+- Chosen: city production choices expose explicit cost context and per-item unavailable-state tags (`Locked`, `Built`, `Queued`, `Queue Full`).
 - Chosen: disabled city actions show exact unavailable reasons on hover via pointer-following tooltip and hint text paths.
-- Chosen: queue supports deterministic per-slot up/down reorder controls plus explicit remove controls.
+- Chosen: queue supports deterministic per-slot left/right reorder controls plus explicit remove controls in a horizontal single-row layout in the right-side city queue card.
 - Chosen: unit mode supports `Found City` + `Skip Unit`.
 - Chosen: hover-driven action preview surfaces (`move`, `attack-unit`, `attack-city`) with no state mutation.
 - Chosen: map clarity overlays include reachable/attackable emphasis and threat visualization when a player unit is selected.
@@ -52,7 +53,6 @@
   - `pauseMenu`
 - Key UI events:
   - `unit-action-requested`
-  - `city-focus-set-requested`
   - `city-production-tab-set-requested`
   - `city-queue-enqueue-requested`
   - `city-queue-move-requested`
@@ -77,8 +77,9 @@
 - HUD layout remains readable on desktop and compact/mobile viewports.
 - City/unit contextual controls appear only when relevant selection is active.
 - Disabled actions expose contextual reason feedback through hint/notification paths and disabled-button hover tooltips.
-- City focus controls explain that focus changes worked-tile priority (not direct flat yield buffs) and expose projected local F/P/S per focus mode.
-- City production buttons show cost + ETA context; queue rows show per-slot status with reorder/remove affordances.
+- City production buttons show clear production cost labels and always expose hover tooltip details (`production cost`, `estimated turns`, `current production stock`, `local production per turn`, unavailable reason when blocked).
+- City queue renders in the right-side city queue card as a horizontal 3-slot row with per-slot status and left/right reorder + remove affordances.
+- Right-side city queue card appears only for city selection and remains vertically between notifications and `Attention needed`.
 - Hover preview lifecycle:
   - appears for reachable/attackable hover targets
   - shows deterministic move/combat prediction

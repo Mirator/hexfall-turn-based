@@ -249,11 +249,7 @@ async function run() {
         return { ok: false, reason: "player-city-missing" };
       }
       const cityPanel = window.__hexfallTest.getCityPanelState();
-      if (
-        !cityPanel?.visible ||
-        cityPanel.mode !== "city" ||
-        cityPanel.cityFocusButtons.filter((button) => button.visible).length !== 4
-      ) {
+      if (!cityPanel?.visible || cityPanel.mode !== "city") {
         return { ok: false, reason: "city-panel-not-visible-after-founding" };
       }
       if (!cityPanel.expanded) {
@@ -307,16 +303,7 @@ async function run() {
       }
       window.__hexfallTest.setNotificationFilter("All");
 
-      // Direct focus + tabs + typed queue flow.
-      const focusResult = window.__hexfallTest.setCityFocus("production");
-      if (focusResult !== "production") {
-        return { ok: false, reason: "direct-focus-set-failed" };
-      }
-      const focusedCity = getState().cities.find((city) => city.owner === "player");
-      if (!focusedCity || focusedCity.focus !== "production") {
-        return { ok: false, reason: "focus-not-updated" };
-      }
-
+      // Tabs + typed queue flow.
       const switchedToBuildings = window.__hexfallTest.setCityProductionTab("buildings");
       if (switchedToBuildings !== "buildings") {
         return { ok: false, reason: "city-tab-switch-buildings-failed" };
@@ -339,10 +326,47 @@ async function run() {
       if (!Array.isArray(queueAfterUnitAdd) || queueAfterUnitAdd.length < 2) {
         return { ok: false, reason: "queue-unit-enqueue-failed" };
       }
+      if (!window.__hexfallTest.showCityActionTooltip("city-enqueue-warrior")) {
+        return { ok: false, reason: "city-action-tooltip-show-failed" };
+      }
+      const hoverPanel = window.__hexfallTest.getCityPanelState();
+      const hoverText = hoverPanel?.disabledTooltip?.text ?? "";
+      if (
+        !hoverPanel?.disabledTooltip?.visible ||
+        !String(hoverText).includes("Production Cost") ||
+        !String(hoverText).includes("Estimated Turns")
+      ) {
+        return { ok: false, reason: "city-action-tooltip-missing-cost-eta" };
+      }
+      window.__hexfallTest.hideCityActionTooltip();
+      const firstChoiceHover = getState().uiActions?.cityProductionChoices?.[0]?.hoverText ?? "";
+      if (!String(firstChoiceHover).includes("Production Cost") || !String(firstChoiceHover).includes("Estimated Turns")) {
+        return { ok: false, reason: "production-hover-text-missing-cost-eta" };
+      }
       const cityPanelAfterQueue = window.__hexfallTest.getCityPanelState();
       const firstProductionLabel = cityPanelAfterQueue?.cityProductionButtons?.[0]?.label ?? "";
-      if (!String(firstProductionLabel).includes("/")) {
+      if (!String(firstProductionLabel).includes("Cost")) {
         return { ok: false, reason: "production-cost-eta-label-not-visible" };
+      }
+      const queueRail = cityPanelAfterQueue?.cityQueueRail;
+      if (!queueRail?.visible) {
+        return { ok: false, reason: "right-rail-city-queue-not-visible" };
+      }
+      if (
+        typeof queueRail.y !== "number" ||
+        typeof cityPanelAfterQueue?.notificationPanel?.y !== "number" ||
+        typeof cityPanelAfterQueue?.turnAssistant?.y !== "number" ||
+        queueRail.y <= cityPanelAfterQueue.notificationPanel.y ||
+        queueRail.y >= cityPanelAfterQueue.turnAssistant.y
+      ) {
+        return { ok: false, reason: "right-rail-city-queue-not-between-notifications-and-attention" };
+      }
+      if (!String(queueRail.detailsPrimary ?? "").includes("Population")) {
+        return { ok: false, reason: "right-rail-city-queue-missing-city-details" };
+      }
+      const queueSlotY = cityPanelAfterQueue?.cityQueueButtons?.map((button) => button.y).filter(Number.isFinite) ?? [];
+      if (queueSlotY.length !== 3 || new Set(queueSlotY.map((value) => Math.round(value))).size !== 1) {
+        return { ok: false, reason: "queue-slots-should-be-horizontal" };
       }
       let queueFillState = queueAfterUnitAdd;
       let queueFillSafety = 0;
@@ -358,6 +382,14 @@ async function run() {
       if (!String(overfillHint).toLowerCase().includes("queue is full")) {
         return { ok: false, reason: "missing-unavailable-reason-for-overfill" };
       }
+      if (!window.__hexfallTest.showCityActionTooltip("city-enqueue-warrior")) {
+        return { ok: false, reason: "city-action-tooltip-show-unavailable-failed" };
+      }
+      const unavailablePanel = window.__hexfallTest.getCityPanelState();
+      if (!String(unavailablePanel?.disabledTooltip?.text ?? "").toLowerCase().includes("queue is full")) {
+        return { ok: false, reason: "city-action-tooltip-missing-unavailable-reason" };
+      }
+      window.__hexfallTest.hideCityActionTooltip();
 
       const queueAfterMove = window.__hexfallTest.moveCityQueue(2, "up");
       if (!Array.isArray(queueAfterMove) || queueAfterMove.length !== 3) {

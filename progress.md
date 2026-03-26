@@ -419,3 +419,29 @@ Original prompt: I want to make civilization like easy game in JS. Let's init th
   - `npm test` ?
   - `npm run test:e2e` ? (second rerun; smoke remains seed-variant sensitive)
   - `npm run build` ?
+## 2026-03-26 (City UI copy cleanup + right-rail queue relocation)
+- Implemented city UI clarity pass and queue relocation:
+  - replaced abbreviated city copy with full words (`Local Food/Production/Science`, `Production stock`, `Local production per turn`, `Health`, `Movement`, `Attack`).
+  - updated production hover payload text to full words (`Production Cost`, `Estimated Turns`, `Current Production Stock`, `Local Production Per Turn`).
+  - moved city queue controls out of bottom city panel into a new right-rail `City Queue` card.
+  - positioned right-rail queue card under notifications and above `Attention needed`, visible only when a city is selected.
+  - kept queue behavior (3 slots, left/right reorder + remove) and reused existing queue actions.
+  - added richer right-rail details: city identity/population, local yields, production stock/per-turn, next completion summary.
+  - updated city panel state hook payload with right-rail queue + notification/attention panel geometry for layout assertions.
+- UI formatting changes:
+  - production buttons now show explicit cost/turn text in full words.
+  - queue slot labels use full-word cost/turn format.
+- Updated tests/docs:
+  - updated e2e smoke assertions for full-word hover text and right-rail queue placement.
+  - updated integration UI-surface assertions to new hover wording.
+  - updated docs: `spec-003`, `spec-005`, `spec-007` to reflect right-rail queue and full-word production text.
+- Validation:
+  - `npm run lint` passed.
+  - `npm test` passed (13 files, 73 tests).
+  - `npm run test:e2e` passed.
+  - ran required skill Playwright client (`web_game_playwright_client.js`) with local dev server; state output verified updated full-word payloads.
+  - captured/inspected new artifact showing selected-city right-rail queue:
+    - `tests/e2e/artifacts/ui-city-queue-right-rail.png`
+    - `tests/e2e/artifacts/ui-city-queue-right-rail-state.json`
+- Note:
+  - skill client screenshots (`tests/e2e/artifacts/web-game-client/shot-*.png`) were black in this environment, but state snapshots were valid and project e2e artifacts rendered correctly.

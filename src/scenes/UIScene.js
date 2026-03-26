@@ -4,34 +4,28 @@ import { gameEvents } from "../core/eventBus.js";
 const BUTTON_WIDTH = 180;
 const BUTTON_HEIGHT = 40;
 const COMPACT_BREAKPOINT = 900;
-const CITY_PANEL_FOCUS_WIDTH = 88;
 const CITY_PANEL_TAB_WIDTH = 102;
-const CITY_PANEL_ACTION_WIDTH = 92;
-const CITY_PANEL_QUEUE_ITEM_WIDTH = 210;
-const CITY_PANEL_QUEUE_MOVE_WIDTH = 28;
-const CITY_PANEL_QUEUE_REMOVE_WIDTH = 44;
+const CITY_PANEL_ACTION_WIDTH = 100;
+const CITY_PANEL_QUEUE_ITEM_WIDTH = 76;
+const CITY_PANEL_QUEUE_MOVE_WIDTH = 12;
+const CITY_PANEL_QUEUE_REMOVE_WIDTH = 12;
 const CITY_PANEL_BUTTON_HEIGHT = 30;
 const UNIT_PANEL_ACTION_WIDTH = 160;
 const CONTEXT_PANEL_COLLAPSED_HEIGHT = 76;
-const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY = 286;
-const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY_COMPACT = 344;
+const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY = 250;
+const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY_COMPACT = 300;
 const CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT = 188;
 const CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT_COMPACT = 232;
 const CONTEXT_PANEL_MIN_WIDTH_CITY = 420;
 const CONTEXT_PANEL_MIN_WIDTH_UNIT = 340;
 const CONTEXT_PANEL_WIDTH_PADDING = 560;
-const FOCUS_MODES = ["balanced", "food", "production", "science"];
+const RIGHT_RAIL_QUEUE_PANEL_HEIGHT = 156;
+const RIGHT_RAIL_QUEUE_PANEL_HEIGHT_COMPACT = 124;
+const RIGHT_RAIL_QUEUE_PANEL_MIN_HEIGHT = 78;
 const PRODUCTION_TABS = ["units", "buildings"];
 const UNIT_PRODUCTION_TYPES = ["warrior", "settler", "spearman", "archer"];
 const BUILDING_PRODUCTION_TYPES = ["granary", "workshop", "monument"];
 const NOTIFICATION_FILTERS = ["All", "Combat", "City", "Research", "System"];
-
-const FOCUS_LABELS = {
-  balanced: "Balanced",
-  food: "Food",
-  production: "Production",
-  science: "Science",
-};
 
 const UNIT_LABELS = {
   warrior: "Warrior",
@@ -136,23 +130,6 @@ export class UIScene extends Phaser.Scene {
     this.contextPanelMetaPrimary = this.createLabel("", 0, 0, "14px", "#3f2d18", 13).setOrigin(0.5).setVisible(false);
     this.contextPanelMetaSecondary = this.createLabel("", 0, 0, "13px", "#5a4224", 13).setOrigin(0.5).setVisible(false);
 
-    this.cityFocusButtons = FOCUS_MODES.map((focus) =>
-      this.createButton(
-        FOCUS_LABELS[focus],
-        `city-focus-${focus}`,
-        () => gameEvents.emit("city-focus-set-requested", { focus }),
-        {
-          width: CITY_PANEL_FOCUS_WIDTH,
-          height: CITY_PANEL_BUTTON_HEIGHT,
-          fontSize: "14px",
-          enabledFill: 0x4f6b4a,
-          hoverFill: 0x5d8156,
-          activeFill: 0x2f7a41,
-          disabledFill: 0x6f776d,
-          stroke: 0xe6dbbf,
-        }
-      )
-    );
     this.cityProductionTabButtons = PRODUCTION_TABS.map((tab) =>
       this.createButton(
         PRODUCTION_TAB_LABELS[tab],
@@ -182,7 +159,7 @@ export class UIScene extends Phaser.Scene {
         {
           width: CITY_PANEL_ACTION_WIDTH,
           height: CITY_PANEL_BUTTON_HEIGHT,
-          fontSize: "13px",
+          fontSize: "11px",
           enabledFill: 0x355e94,
           hoverFill: 0x4a76ae,
           activeFill: 0x355e94,
@@ -203,7 +180,7 @@ export class UIScene extends Phaser.Scene {
         {
           width: CITY_PANEL_ACTION_WIDTH,
           height: CITY_PANEL_BUTTON_HEIGHT,
-          fontSize: "13px",
+          fontSize: "11px",
           enabledFill: 0x3d6e58,
           hoverFill: 0x4d866b,
           activeFill: 0x3d6e58,
@@ -212,15 +189,20 @@ export class UIScene extends Phaser.Scene {
         }
       )
     );
+    for (const productionButton of [...this.cityProductionButtons, ...this.cityBuildingButtons]) {
+      productionButton.label.setWordWrapWidth(Math.max(48, productionButton.width - 8), true);
+      productionButton.label.setAlign("center");
+      productionButton.label.setLineSpacing(-1);
+    }
     this.cityQueueButtons = [0, 1, 2].map((index) =>
       this.createButton(
-        `${index + 1}. Empty`,
+        `${index + 1}: --`,
         `city-queue-slot-${index}`,
         () => {},
         {
           width: CITY_PANEL_QUEUE_ITEM_WIDTH,
           height: CITY_PANEL_BUTTON_HEIGHT,
-          fontSize: "12px",
+          fontSize: "10px",
           enabledFill: 0x5f5a4a,
           hoverFill: 0x6d6755,
           activeFill: 0x5f5a4a,
@@ -231,13 +213,13 @@ export class UIScene extends Phaser.Scene {
     );
     this.cityQueueMoveUpButtons = [0, 1, 2].map((index) =>
       this.createButton(
-        "^",
+        "<",
         `city-queue-move-up-${index}`,
         () => gameEvents.emit("city-queue-move-requested", { index, direction: "up" }),
         {
           width: CITY_PANEL_QUEUE_MOVE_WIDTH,
           height: CITY_PANEL_BUTTON_HEIGHT,
-          fontSize: "13px",
+          fontSize: "10px",
           enabledFill: 0x44617d,
           hoverFill: 0x537496,
           disabledFill: 0x6b6f75,
@@ -247,13 +229,13 @@ export class UIScene extends Phaser.Scene {
     );
     this.cityQueueMoveDownButtons = [0, 1, 2].map((index) =>
       this.createButton(
-        "v",
+        ">",
         `city-queue-move-down-${index}`,
         () => gameEvents.emit("city-queue-move-requested", { index, direction: "down" }),
         {
           width: CITY_PANEL_QUEUE_MOVE_WIDTH,
           height: CITY_PANEL_BUTTON_HEIGHT,
-          fontSize: "13px",
+          fontSize: "10px",
           enabledFill: 0x44617d,
           hoverFill: 0x537496,
           disabledFill: 0x6b6f75,
@@ -263,13 +245,13 @@ export class UIScene extends Phaser.Scene {
     );
     this.cityQueueRemoveButtons = [0, 1, 2].map((index) =>
       this.createButton(
-        "X",
+        "x",
         `city-queue-remove-${index}`,
         () => gameEvents.emit("city-queue-remove-requested", { index }),
         {
           width: CITY_PANEL_QUEUE_REMOVE_WIDTH,
           height: CITY_PANEL_BUTTON_HEIGHT,
-          fontSize: "12px",
+          fontSize: "10px",
           enabledFill: 0x7c4e2b,
           hoverFill: 0x956039,
           activeFill: 0x7c4e2b,
@@ -278,6 +260,17 @@ export class UIScene extends Phaser.Scene {
         }
       )
     );
+    for (const queueButton of this.cityQueueButtons) {
+      queueButton.rectangle.setDepth(18);
+      queueButton.label.setDepth(19);
+      queueButton.label.setWordWrapWidth(Math.max(38, queueButton.width - 6), true);
+      queueButton.label.setAlign("center");
+      queueButton.label.setLineSpacing(-1);
+    }
+    for (const controlButton of [...this.cityQueueMoveUpButtons, ...this.cityQueueMoveDownButtons, ...this.cityQueueRemoveButtons]) {
+      controlButton.rectangle.setDepth(18);
+      controlButton.label.setDepth(19);
+    }
     this.unitFoundCityButton = this.createButton("Found City", "unit-found-city", () =>
       gameEvents.emit("unit-action-requested", { actionId: "foundCity" }),
       {
@@ -339,6 +332,13 @@ export class UIScene extends Phaser.Scene {
       row.on("pointerdown", () => this.focusNotificationByRow(index));
       return row;
     });
+
+    this.cityQueueRailPanel = this.add.rectangle(0, 0, 10, 10, 0xeadcc0, 0.95).setDepth(16).setVisible(false);
+    this.cityQueueRailPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
+    this.cityQueueRailTitle = this.createLabel("City Queue", 0, 0, "17px", "#4a3318", 17).setVisible(false);
+    this.cityQueueRailDetailsPrimary = this.createLabel("", 0, 0, "13px", "#3f2d18", 17).setVisible(false);
+    this.cityQueueRailDetailsSecondary = this.createLabel("", 0, 0, "13px", "#5a4224", 17).setVisible(false);
+    this.cityQueueRailDetailsTertiary = this.createLabel("", 0, 0, "12px", "#5a4224", 17).setVisible(false);
 
     this.modalBackdrop = this.add
       .rectangle(0, 0, 10, 10, 0x2a1b10, 0.34)
@@ -528,13 +528,19 @@ export class UIScene extends Phaser.Scene {
     if (this.isAnyModalOpen() && !this.isModalButton(button.actionId)) {
       return;
     }
+    const productionHoverText = this.getProductionHoverText(button.actionId);
     if (button.enabled) {
       if (isEntering) {
         button.rectangle.setFillStyle(button.palette.hoverFill, button.palette.hoverAlpha);
-        const focusHint = this.getFocusHoverHint(button.actionId);
-        if (focusHint) {
-          this.hoverHint = focusHint;
+        if (productionHoverText) {
+          this.hoverHint = {
+            primary: truncateText(productionHoverText.replace(/\n/g, " | "), 160),
+            secondary: null,
+            level: "info",
+          };
           this.updateContextualHint();
+          this.showDisabledTooltip(productionHoverText);
+          return;
         }
       } else {
         this.applyButtonVisualState(button);
@@ -548,6 +554,16 @@ export class UIScene extends Phaser.Scene {
       this.hoverHint = null;
       this.updateContextualHint();
       this.hideDisabledTooltip();
+      return;
+    }
+    if (productionHoverText) {
+      this.hoverHint = {
+        primary: truncateText(productionHoverText.replace(/\n/g, " | "), 160),
+        secondary: null,
+        level: "warning",
+      };
+      this.updateContextualHint();
+      this.showDisabledTooltip(productionHoverText);
       return;
     }
     const disabledHint = this.getDisabledActionHint(button.actionId);
@@ -626,9 +642,6 @@ export class UIScene extends Phaser.Scene {
     ) {
       return actionHints[actionId] ?? "This queue control is unavailable right now.";
     }
-    if (actionId.startsWith("city-focus-")) {
-      return "Focus cannot be changed right now.";
-    }
     if (actionId === "context-expand-toggle") {
       return "No contextual panel to expand.";
     }
@@ -638,31 +651,33 @@ export class UIScene extends Phaser.Scene {
     return null;
   }
 
-  getFocusHoverHint(actionId) {
-    if (!this.latestState || !actionId.startsWith("city-focus-")) {
+  getProductionHoverText(actionId) {
+    if (!this.latestState) {
       return null;
     }
-    const focus = actionId.replace("city-focus-", "");
-    const focusChoices = this.latestState.uiActions?.cityFocusChoices ?? [];
-    const choice = focusChoices.find((entry) => entry.focus === focus);
-    if (!choice) {
-      return null;
+    if (actionId.startsWith("city-enqueue-building-")) {
+      const buildingId = actionId.replace("city-enqueue-building-", "");
+      const choice = (this.latestState.uiActions?.cityBuildingChoices ?? []).find((entry) => entry.id === buildingId);
+      return choice?.hoverText ?? null;
     }
-    return {
-      primary: `${choice.label}: ${choice.description}`,
-      secondary: `Projected local F/P/S ${choice.projectedYield.food}/${choice.projectedYield.production}/${choice.projectedYield.science}`,
-      level: "info",
-    };
+    if (actionId.startsWith("city-enqueue-")) {
+      const unitType = actionId.replace("city-enqueue-", "");
+      const choice = (this.latestState.uiActions?.cityProductionChoices ?? []).find((entry) => entry.type === unitType);
+      return choice?.hoverText ?? null;
+    }
+    return null;
   }
 
   layout(gameSize) {
     const isCompact = gameSize.width < COMPACT_BREAKPOINT;
     const edgePadding = isCompact ? 10 : 24;
     const menuType = this.latestState?.uiActions?.contextMenuType ?? null;
+    const selectedCity = this.latestState?.cities?.find((city) => city.id === this.latestState?.selectedCityId) ?? null;
     const isCityMenu = menuType === "city";
     const isUnitMenu = menuType === "unit";
     const contextVisible = menuType !== null && this.latestState?.match?.status === "ongoing";
     const contextExpanded = contextVisible ? this.contextPanelExpanded : false;
+    const showCityQueueRail = this.shouldShowCityQueueRail(this.latestState, menuType, selectedCity);
 
     this.turnLabel.setPosition(edgePadding, 16);
     this.foodLabel.setPosition(edgePadding, 48);
@@ -681,7 +696,10 @@ export class UIScene extends Phaser.Scene {
 
     this.notificationVisibleRows = isCompact ? 5 : this.notificationRows.length;
     const notificationWidth = isCompact ? Math.max(250, Math.floor(gameSize.width * 0.62)) : 380;
-    const notificationHeight = Math.max(70, this.notificationPanel.displayHeight || 70);
+    const visibleNotificationCount = Math.min(this.notificationVisibleRows, this.getFilteredNotifications().length);
+    const notificationFilterHeight = isCompact ? 60 : 34;
+    const notificationContentHeight = visibleNotificationCount > 0 ? visibleNotificationCount * 20 + 14 : 0;
+    const notificationHeight = 34 + notificationFilterHeight + notificationContentHeight;
     const notificationLeft = gameSize.width - edgePadding - notificationWidth;
     this.notificationPanel.setPosition(notificationLeft + notificationWidth / 2, edgePadding + notificationHeight / 2);
     this.notificationPanel.setSize(notificationWidth, notificationHeight);
@@ -722,9 +740,9 @@ export class UIScene extends Phaser.Scene {
     const contextX = gameSize.width / 2;
     const contextY = gameSize.height - contextHeight / 2 - (isCompact ? 8 : 12);
     const contextTop = contextY - contextHeight / 2;
-    const titleOffset = contextExpanded ? (isCompact ? (isCityMenu ? 140 : 90) : isCityMenu ? 112 : 58) : 4;
-    const metaPrimaryOffset = isCompact ? (isCityMenu ? 114 : 62) : isCityMenu ? 88 : 34;
-    const metaSecondaryOffset = isCompact ? (isCityMenu ? 94 : 42) : isCityMenu ? 68 : 14;
+    const titleOffset = contextExpanded ? (isCompact ? (isCityMenu ? 124 : 90) : isCityMenu ? 96 : 58) : 4;
+    const metaPrimaryOffset = isCompact ? (isCityMenu ? 96 : 62) : isCityMenu ? 70 : 34;
+    const metaSecondaryOffset = isCompact ? (isCityMenu ? 78 : 42) : isCityMenu ? 52 : 14;
     const activeCityProductionButtons =
       (this.latestState?.uiActions?.cityProductionTab ?? "units") === "buildings"
         ? this.cityBuildingButtons
@@ -747,26 +765,17 @@ export class UIScene extends Phaser.Scene {
 
     if (contextExpanded) {
       if (isCompact) {
-        this.layoutButtonRow(this.cityFocusButtons, contextX, contextY - 56, 6);
-        this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY - 24, 8);
-        this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 8, 6);
-        this.layoutQueueRows(contextX, contextY + 44, 4);
+        this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY - 10, 8);
+        this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 24, 6);
         this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 30, 10);
       } else {
-        this.layoutButtonRow(this.cityFocusButtons, contextX, contextY - 40, 6);
-        this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY - 8, 8);
-        this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 24, 6);
-        this.layoutQueueRows(contextX, contextY + 60, 6);
+        this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY + 4, 8);
+        this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 36, 6);
         this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 24, 16);
       }
     } else {
-      this.layoutButtonRow(this.cityFocusButtons, contextX, contextY + 36, 6);
       this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY + 36, 8);
       this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 36, 6);
-      this.layoutButtonRow(this.cityQueueButtons, contextX, contextY + 36, 6);
-      this.layoutButtonRow(this.cityQueueMoveUpButtons, contextX, contextY + 36, 6);
-      this.layoutButtonRow(this.cityQueueMoveDownButtons, contextX, contextY + 36, 6);
-      this.layoutButtonRow(this.cityQueueRemoveButtons, contextX, contextY + 36, 6);
       this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 36, 16);
     }
 
@@ -796,6 +805,17 @@ export class UIScene extends Phaser.Scene {
     this.turnAssistantPanel.setSize(statusWidth, statusHeight);
     this.turnAssistantPanel.setDisplaySize(statusWidth, statusHeight);
     this.turnAssistantLabel.setPosition(endTurnX, statusY);
+
+    this.layoutCityQueueRail({
+      isCompact,
+      edgePadding,
+      notificationLeft,
+      notificationWidth,
+      statusY,
+      statusHeight,
+      selectedCity,
+      visible: showCityQueueRail,
+    });
 
     const hintWidth = isCompact ? gameSize.width - edgePadding * 2 : 440;
     const hintHeight = isCompact ? 82 : 74;
@@ -861,17 +881,95 @@ export class UIScene extends Phaser.Scene {
     }
   }
 
-  layoutQueueRows(centerX, startY, gap) {
-    const rowGap = CITY_PANEL_BUTTON_HEIGHT + 4;
-    for (let i = 0; i < this.cityQueueButtons.length; i += 1) {
-      const y = startY + i * rowGap;
-      const rowButtons = [
-        this.cityQueueButtons[i],
-        this.cityQueueMoveUpButtons[i],
-        this.cityQueueMoveDownButtons[i],
-        this.cityQueueRemoveButtons[i],
-      ];
-      this.layoutButtonRow(rowButtons, centerX, y, gap);
+  layoutQueueHorizontalRow(centerX, y, innerGap, clusterGap) {
+    const clusters = this.cityQueueButtons.map((_, index) => [
+      this.cityQueueMoveUpButtons[index],
+      this.cityQueueButtons[index],
+      this.cityQueueMoveDownButtons[index],
+      this.cityQueueRemoveButtons[index],
+    ]);
+    const clusterWidths = clusters.map(
+      (cluster) => cluster.reduce((sum, button) => sum + button.width, 0) + Math.max(0, cluster.length - 1) * innerGap
+    );
+    const totalWidth = clusterWidths.reduce((sum, width) => sum + width, 0) + Math.max(0, clusters.length - 1) * clusterGap;
+    let cursor = centerX - totalWidth / 2;
+    for (let i = 0; i < clusters.length; i += 1) {
+      const clusterWidth = clusterWidths[i];
+      const clusterCenterX = cursor + clusterWidth / 2;
+      this.layoutButtonRow(clusters[i], clusterCenterX, y, innerGap);
+      cursor += clusterWidth + clusterGap;
+    }
+  }
+
+  shouldShowCityQueueRail(gameState, menuType, selectedCity) {
+    if (!gameState) {
+      return false;
+    }
+    return menuType === "city" && !!selectedCity && gameState.match?.status === "ongoing";
+  }
+
+  setCityQueueRailVisible(visible) {
+    this.cityQueueRailPanel.setVisible(visible);
+    this.cityQueueRailTitle.setVisible(visible);
+    this.cityQueueRailDetailsPrimary.setVisible(visible);
+    this.cityQueueRailDetailsSecondary.setVisible(visible);
+    this.cityQueueRailDetailsTertiary.setVisible(visible);
+  }
+
+  layoutCityQueueRail({ isCompact, edgePadding, notificationLeft, notificationWidth, statusY, statusHeight, selectedCity, visible }) {
+    if (!visible || !selectedCity || !this.latestState) {
+      this.setCityQueueRailVisible(false);
+      return;
+    }
+
+    const notificationBottom = this.notificationPanel.getBounds().bottom;
+    const queueTop = notificationBottom + (isCompact ? 8 : 10);
+    const queueBottomLimit = statusY - statusHeight / 2 - (isCompact ? 8 : 10);
+    const availableHeight = queueBottomLimit - queueTop;
+    if (availableHeight < RIGHT_RAIL_QUEUE_PANEL_MIN_HEIGHT) {
+      this.setCityQueueRailVisible(false);
+      return;
+    }
+
+    const preferredHeight = isCompact ? RIGHT_RAIL_QUEUE_PANEL_HEIGHT_COMPACT : RIGHT_RAIL_QUEUE_PANEL_HEIGHT;
+    const panelHeight = Math.min(preferredHeight, availableHeight);
+    const panelCenterX = notificationLeft + notificationWidth / 2;
+    const panelCenterY = queueTop + panelHeight / 2;
+    this.cityQueueRailPanel.setPosition(panelCenterX, panelCenterY);
+    this.cityQueueRailPanel.setSize(notificationWidth, panelHeight);
+    this.cityQueueRailPanel.setDisplaySize(notificationWidth, panelHeight);
+    this.cityQueueRailTitle.setPosition(notificationLeft + 12, queueTop + 10);
+
+    const lineWrap = Math.max(120, notificationWidth - 22);
+    this.cityQueueRailDetailsPrimary.setWordWrapWidth(lineWrap, true);
+    this.cityQueueRailDetailsSecondary.setWordWrapWidth(lineWrap, true);
+    this.cityQueueRailDetailsTertiary.setWordWrapWidth(lineWrap, true);
+
+    const details = this.buildCityQueueRailDetails(selectedCity, this.latestState);
+    this.cityQueueRailDetailsPrimary.setText(details.primary);
+    this.cityQueueRailDetailsSecondary.setText(details.secondary);
+    this.cityQueueRailDetailsTertiary.setText(details.tertiary);
+    this.cityQueueRailDetailsPrimary.setPosition(notificationLeft + 12, queueTop + 34);
+    this.cityQueueRailDetailsSecondary.setPosition(notificationLeft + 12, queueTop + 52);
+    this.cityQueueRailDetailsTertiary.setPosition(notificationLeft + 12, queueTop + 70);
+    this.layoutQueueHorizontalRow(panelCenterX, queueTop + panelHeight - 18, 2, 4);
+    this.setCityQueueRailVisible(true);
+
+    if (isCompact) {
+      this.cityQueueRailDetailsSecondary.setVisible(false);
+      this.cityQueueRailDetailsTertiary.setVisible(false);
+      this.cityQueueRailDetailsPrimary.setPosition(notificationLeft + 12, queueTop + 38);
+      this.layoutQueueHorizontalRow(panelCenterX, queueTop + panelHeight - 16, 2, 4);
+    }
+
+    if (panelCenterX + notificationWidth / 2 > this.scale.width - edgePadding) {
+      const correctedX = this.scale.width - edgePadding - notificationWidth / 2;
+      this.cityQueueRailPanel.setPosition(correctedX, panelCenterY);
+      this.cityQueueRailTitle.setPosition(correctedX - notificationWidth / 2 + 12, this.cityQueueRailTitle.y);
+      this.cityQueueRailDetailsPrimary.setPosition(correctedX - notificationWidth / 2 + 12, this.cityQueueRailDetailsPrimary.y);
+      this.cityQueueRailDetailsSecondary.setPosition(correctedX - notificationWidth / 2 + 12, this.cityQueueRailDetailsSecondary.y);
+      this.cityQueueRailDetailsTertiary.setPosition(correctedX - notificationWidth / 2 + 12, this.cityQueueRailDetailsTertiary.y);
+      this.layoutQueueHorizontalRow(correctedX, this.cityQueueRailDetailsPrimary.visible ? this.cityQueueRailPanel.getBounds().bottom - 18 : this.cityQueueRailPanel.getBounds().bottom - 16, 2, 4);
     }
   }
 
@@ -1012,7 +1110,7 @@ export class UIScene extends Phaser.Scene {
 
     if (menuType === "city" && selectedCity) {
       this.contextPanelTitle.setText(
-        `City Commands  Pop ${selectedCity.population}  Queue ${selectedCity.queue.length}/${gameState.uiActions.cityQueueMax}`
+        `City Commands  Population ${selectedCity.population}  Queue ${selectedCity.queue.length}/${gameState.uiActions.cityQueueMax}`
       );
       this.setCityControlsVisible(expanded);
       this.setUnitControlsVisible(false);
@@ -1022,21 +1120,9 @@ export class UIScene extends Phaser.Scene {
         const productionStock = gameState.uiActions?.cityProductionStock ?? 0;
         const localProduction = gameState.uiActions?.cityLocalProduction ?? 0;
         this.contextPanelMetaPrimary.setText(
-          `Focus ${selectedCity.focus} | Local F/P/S ${localYield.food}/${localYield.production}/${localYield.science} | Identity ${selectedCity.identity}`
+          `Local Food ${localYield.food} | Local Production ${localYield.production} | Local Science ${localYield.science} | Identity ${selectedCity.identity}`
         );
-        this.contextPanelMetaSecondary.setText(
-          `Production stock ${productionStock} | Local +${localProduction}/t | Focus changes worked tiles only.`
-        );
-      }
-
-      const focusChoiceById = new Map((gameState.uiActions?.cityFocusChoices ?? []).map((choice) => [choice.focus, choice]));
-      for (let i = 0; i < this.cityFocusButtons.length; i += 1) {
-        const focus = FOCUS_MODES[i];
-        const button = this.cityFocusButtons[i];
-        const choice = focusChoiceById.get(focus);
-        this.setButtonLabel(button, choice?.label ?? FOCUS_LABELS[focus]);
-        this.setButtonActive(button, selectedCity.focus === focus);
-        this.setButtonEnabled(button, canIssueOrders && !!gameState.uiActions?.canSetCityFocus);
+        this.contextPanelMetaSecondary.setText(`Production stock ${productionStock} | Local production per turn +${localProduction}`);
       }
 
       const productionTab = gameState.uiActions?.cityProductionTab ?? "units";
@@ -1072,26 +1158,26 @@ export class UIScene extends Phaser.Scene {
       }
 
       const queueSlots = gameState.uiActions?.cityQueueSlots ?? [];
+      const queueRailVisible = this.shouldShowCityQueueRail(gameState, menuType, selectedCity);
       for (let i = 0; i < this.cityQueueButtons.length; i += 1) {
         const slot = queueSlots[i] ?? null;
         const slotButton = this.cityQueueButtons[i];
         const moveUpButton = this.cityQueueMoveUpButtons[i];
         const moveDownButton = this.cityQueueMoveDownButtons[i];
         const removeButton = this.cityQueueRemoveButtons[i];
-        const slotStatus = slot?.statusTag ? ` ${slot.statusTag}` : "";
-        this.setButtonLabel(slotButton, `${slot?.label ?? `${i + 1}. Empty`}${slotStatus}`);
-        this.setCompositeVisible(slotButton, expanded);
+        this.setButtonLabel(slotButton, formatQueueSlotLabel(slot, i));
+        this.setCompositeVisible(slotButton, queueRailVisible);
         this.setButtonEnabled(slotButton, false);
         this.setButtonWarning(slotButton, false);
         slotButton.label.setColor(slot?.empty ? "#d7c9ae" : "#f5e8ca");
         slotButton.label.setAlpha(slot?.empty ? 0.92 : 1);
 
-        this.setCompositeVisible(moveUpButton, expanded);
-        this.setCompositeVisible(moveDownButton, expanded);
-        this.setCompositeVisible(removeButton, expanded);
-        this.setButtonEnabled(moveUpButton, expanded && canIssueOrders && !!slot?.canMoveUp);
-        this.setButtonEnabled(moveDownButton, expanded && canIssueOrders && !!slot?.canMoveDown);
-        this.setButtonEnabled(removeButton, expanded && canIssueOrders && !!slot?.canRemove);
+        this.setCompositeVisible(moveUpButton, queueRailVisible);
+        this.setCompositeVisible(moveDownButton, queueRailVisible);
+        this.setCompositeVisible(removeButton, queueRailVisible);
+        this.setButtonEnabled(moveUpButton, queueRailVisible && canIssueOrders && !!slot?.canMoveUp);
+        this.setButtonEnabled(moveDownButton, queueRailVisible && canIssueOrders && !!slot?.canMoveDown);
+        this.setButtonEnabled(removeButton, queueRailVisible && canIssueOrders && !!slot?.canRemove);
       }
       return;
     }
@@ -1103,7 +1189,7 @@ export class UIScene extends Phaser.Scene {
       if (expanded) {
         const previewSummary = summarizePreview(gameState.uiPreview);
         this.contextPanelMetaPrimary.setText(
-          `Move ${selectedUnit.movementRemaining}/${selectedUnit.maxMovement} | Atk ${selectedUnit.attack} | Range ${selectedUnit.minAttackRange}-${selectedUnit.attackRange} | Armor ${selectedUnit.armor}`
+          `Movement ${selectedUnit.movementRemaining}/${selectedUnit.maxMovement} | Attack ${selectedUnit.attack} | Range ${selectedUnit.minAttackRange}-${selectedUnit.attackRange} | Armor ${selectedUnit.armor}`
         );
         this.contextPanelMetaSecondary.setText(previewSummary || "Hover reachable or attackable hexes for action previews.");
       }
@@ -1117,9 +1203,6 @@ export class UIScene extends Phaser.Scene {
   }
 
   setCityControlsVisible(visible) {
-    for (const button of this.cityFocusButtons) {
-      this.setCompositeVisible(button, visible);
-    }
     for (const button of this.cityProductionTabButtons) {
       this.setCompositeVisible(button, visible);
     }
@@ -1150,11 +1233,11 @@ export class UIScene extends Phaser.Scene {
 
   getSelectedInfoText(selectedUnit, selectedCity) {
     if (selectedUnit) {
-      return `Unit ${formatUnitLabel(selectedUnit.type)} | HP ${selectedUnit.health}/${selectedUnit.maxHealth} | Move ${selectedUnit.movementRemaining}/${selectedUnit.maxMovement} | Attack ${selectedUnit.attack} | ${selectedUnit.hasActed ? "Acted" : "Ready"}`;
+      return `Unit ${formatUnitLabel(selectedUnit.type)} | Health ${selectedUnit.health}/${selectedUnit.maxHealth} | Movement ${selectedUnit.movementRemaining}/${selectedUnit.maxMovement} | Attack ${selectedUnit.attack} | ${selectedUnit.hasActed ? "Acted" : "Ready"}`;
     }
     if (selectedCity) {
       const localYield = selectedCity.yieldLastTurn ?? { food: 0, production: 0, science: 0 };
-      return `City Pop ${selectedCity.population} | HP ${selectedCity.health}/${selectedCity.maxHealth} | Focus ${selectedCity.focus} | Identity ${selectedCity.identity} | Specialization ${selectedCity.specialization ?? "balanced"} | Yield ${localYield.food}/${localYield.production}/${localYield.science}`;
+      return `City Population ${selectedCity.population} | Health ${selectedCity.health}/${selectedCity.maxHealth} | Identity ${selectedCity.identity} | Specialization ${selectedCity.specialization ?? "balanced"} | Local Food ${localYield.food} | Local Production ${localYield.production} | Local Science ${localYield.science}`;
     }
     return "No unit or city selected.";
   }
@@ -1172,11 +1255,29 @@ export class UIScene extends Phaser.Scene {
     return formatUnitLabel(queueItem.id);
   }
 
+  buildCityQueueRailDetails(selectedCity, gameState) {
+    const localYield = selectedCity.yieldLastTurn ?? { food: 0, production: 0, science: 0 };
+    const productionStock = gameState.uiActions?.cityProductionStock ?? 0;
+    const localProduction = gameState.uiActions?.cityLocalProduction ?? 0;
+    const queueSlots = gameState.uiActions?.cityQueueSlots ?? [];
+    const nextSlot = queueSlots.find((slot) => !slot.empty) ?? null;
+    const nextCompletion = !nextSlot
+      ? "Queue is empty."
+      : nextSlot.etaTurns === 0
+        ? `${nextSlot.label} is ready now.`
+        : `${nextSlot.label} in ${formatTurns(nextSlot.etaTurns)}.`;
+    return {
+      primary: `${formatCityName(selectedCity.id)} | Population ${selectedCity.population} | Identity ${selectedCity.identity}`,
+      secondary: `Local Food ${localYield.food} | Local Production ${localYield.production} | Local Science ${localYield.science}`,
+      tertiary: `Production stock ${productionStock} | Local production per turn +${localProduction} | Next completion: ${nextCompletion}`,
+    };
+  }
+
   buildCityQueueSummary(_selectedCity, gameState) {
     const queueSlots = gameState.uiActions?.cityQueueSlots ?? [];
     const populatedSlots = queueSlots.filter((slot) => !slot.empty);
     if (populatedSlots.length === 0) {
-      return "Queue empty. Add units/buildings from the buttons below.";
+      return "Queue is empty. Add units or buildings from the production buttons.";
     }
     return populatedSlots
       .map((slot) => `${slot.label}${slot.statusTag ? ` [${slot.statusTag}]` : ""}`)
@@ -1217,7 +1318,7 @@ export class UIScene extends Phaser.Scene {
 
     if (mode === "attack-city") {
       this.previewTitle.setText(`City Assault Preview -> ${uiPreview.cityId ?? "city"}`);
-      this.previewDetails.setText(`Damage ${uiPreview.damage ?? 0} | City HP after hit ${uiPreview.cityRemainingHealth ?? "?"}`);
+      this.previewDetails.setText(`Damage ${uiPreview.damage ?? 0} | City health after hit ${uiPreview.cityRemainingHealth ?? "?"}`);
       this.previewDetails.setColor("#7b3024");
       return;
     }
@@ -1752,12 +1853,29 @@ export class UIScene extends Phaser.Scene {
       pinned: this.contextPanelPinned,
       metaPrimary: this.contextPanelMetaPrimary.text,
       metaSecondary: this.contextPanelMetaSecondary.text,
-      cityFocusButtons: this.cityFocusButtons.map((button) => ({
-        actionId: button.actionId,
-        visible: button.rectangle.visible && button.label.visible,
-        enabled: button.enabled,
-        active: button.isActive,
-      })),
+      notificationPanel: {
+        x: this.notificationPanel.x,
+        y: this.notificationPanel.y,
+        width: this.notificationPanel.displayWidth,
+        height: this.notificationPanel.displayHeight,
+      },
+      turnAssistant: {
+        x: this.turnAssistantPanel.x,
+        y: this.turnAssistantPanel.y,
+        width: this.turnAssistantPanel.displayWidth,
+        height: this.turnAssistantPanel.displayHeight,
+      },
+      cityQueueRail: {
+        visible: this.cityQueueRailPanel.visible && this.cityQueueRailTitle.visible,
+        title: this.cityQueueRailTitle.text,
+        detailsPrimary: this.cityQueueRailDetailsPrimary.text,
+        detailsSecondary: this.cityQueueRailDetailsSecondary.visible ? this.cityQueueRailDetailsSecondary.text : "",
+        detailsTertiary: this.cityQueueRailDetailsTertiary.visible ? this.cityQueueRailDetailsTertiary.text : "",
+        x: this.cityQueueRailPanel.x,
+        y: this.cityQueueRailPanel.y,
+        width: this.cityQueueRailPanel.displayWidth,
+        height: this.cityQueueRailPanel.displayHeight,
+      },
       cityProductionTabButtons: this.cityProductionTabButtons.map((button) => ({
         actionId: button.actionId,
         label: button.label.text,
@@ -1782,24 +1900,32 @@ export class UIScene extends Phaser.Scene {
         label: button.label.text,
         visible: button.rectangle.visible && button.label.visible,
         enabled: button.enabled,
+        x: button.rectangle.x,
+        y: button.rectangle.y,
       })),
       cityQueueMoveUpButtons: this.cityQueueMoveUpButtons.map((button) => ({
         actionId: button.actionId,
         label: button.label.text,
         visible: button.rectangle.visible && button.label.visible,
         enabled: button.enabled,
+        x: button.rectangle.x,
+        y: button.rectangle.y,
       })),
       cityQueueMoveDownButtons: this.cityQueueMoveDownButtons.map((button) => ({
         actionId: button.actionId,
         label: button.label.text,
         visible: button.rectangle.visible && button.label.visible,
         enabled: button.enabled,
+        x: button.rectangle.x,
+        y: button.rectangle.y,
       })),
       cityQueueRemoveButtons: this.cityQueueRemoveButtons.map((button) => ({
         actionId: button.actionId,
         label: button.label.text,
         visible: button.rectangle.visible && button.label.visible,
         enabled: button.enabled,
+        x: button.rectangle.x,
+        y: button.rectangle.y,
       })),
       disabledTooltip: {
         visible: this.disabledTooltipPanel.visible && this.disabledTooltipLabel.visible,
@@ -1812,6 +1938,23 @@ export class UIScene extends Phaser.Scene {
         enabled: button.enabled,
       })),
     };
+  }
+
+  testShowActionTooltip(actionId) {
+    if (typeof actionId !== "string") {
+      return false;
+    }
+    const message = this.getProductionHoverText(actionId) ?? this.getDisabledActionHint(actionId);
+    if (!message) {
+      return false;
+    }
+    this.showDisabledTooltip(message);
+    return true;
+  }
+
+  testHideActionTooltip() {
+    this.hideDisabledTooltip();
+    return !this.disabledTooltipVisible;
   }
 
   testGetNotificationCenterState() {
@@ -1879,30 +2022,18 @@ function formatBuildingLabel(type) {
 function formatProductionChoiceLabel(baseLabel, choice) {
   const cost = choice?.cost ?? 0;
   const eta = choice?.etaTurns ?? 0;
-  const compactTag = abbreviateStateTag(choice?.stateTag ?? null);
-  if (compactTag) {
-    return `${baseLabel} ${cost}/${eta}t ${compactTag}`;
-  }
-  return `${baseLabel} ${cost}/${eta}t`;
+  const stateTag = choice?.stateTag ?? null;
+  const details = `Cost ${cost}, ${formatTurns(eta)}${stateTag ? ` (${stateTag})` : ""}`;
+  return `${baseLabel}\n${details}`;
 }
 
-function abbreviateStateTag(stateTag) {
-  if (!stateTag) {
-    return "";
+function formatQueueSlotLabel(slot, index) {
+  if (!slot || slot.empty) {
+    return `${index + 1}: Empty`;
   }
-  if (stateTag === "Locked") {
-    return "Lk";
-  }
-  if (stateTag === "Built") {
-    return "Bd";
-  }
-  if (stateTag === "Queued") {
-    return "Qd";
-  }
-  if (stateTag === "Queue Full") {
-    return "Full";
-  }
-  return stateTag;
+  const itemLabel = truncateText(slot.label ?? "--", 8);
+  const eta = Number.isFinite(slot.etaTurns) ? slot.etaTurns : 0;
+  return `${index + 1} ${itemLabel}\nCost ${slot.cost}, ${formatTurns(eta)}`;
 }
 
 function capitalizeLabel(value) {
@@ -1910,6 +2041,21 @@ function capitalizeLabel(value) {
     return "";
   }
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function formatCityName(cityId) {
+  if (typeof cityId !== "string" || cityId.length === 0) {
+    return "Unknown";
+  }
+  return cityId
+    .split("-")
+    .map((segment) => capitalizeLabel(segment))
+    .join(" ");
+}
+
+function formatTurns(turns) {
+  const normalized = Math.max(0, Number.isFinite(turns) ? Math.round(turns) : 0);
+  return normalized === 1 ? "1 turn" : `${normalized} turns`;
 }
 
 function normalizeNotificationCategory(input, message = "") {
@@ -1976,7 +2122,7 @@ function summarizePreview(uiPreview) {
     return `Attack preview -> ${uiPreview.damage ?? 0} damage, no counter.`;
   }
   if (mode === "attack-city") {
-    return `City assault preview -> ${uiPreview.damage ?? 0} damage, city HP after hit ${uiPreview.cityRemainingHealth ?? "?"}.`;
+    return `City assault preview -> ${uiPreview.damage ?? 0} damage, city health after hit ${uiPreview.cityRemainingHealth ?? "?"}.`;
   }
   return "";
 }

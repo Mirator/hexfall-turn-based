@@ -65,7 +65,7 @@ describe("UI surface hints/actions", () => {
     expect(ui.uiHints.level).toBe("info");
   });
 
-  it("enables direct focus and queue actions for player city selection", () => {
+  it("enables city production and queue actions for player city selection", () => {
     const gameState = createInitialGameState({ seed: 121 });
     const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
     expect(settler).toBeTruthy();
@@ -78,7 +78,6 @@ describe("UI surface hints/actions", () => {
 
     const city = gameState.cities[0];
     const ui = deriveUiSurface(gameState, null, city, [], []);
-    expect(ui.uiActions.canSetCityFocus).toBe(true);
     expect(ui.uiActions.canQueueProduction).toBe(true);
     expect(ui.uiActions.canQueueUnits).toBe(true);
     expect(ui.uiActions.canQueueBuildings).toBe(true);
@@ -88,11 +87,12 @@ describe("UI surface hints/actions", () => {
     expect(ui.uiActions.cityProductionChoices.length).toBeGreaterThan(0);
     expect(ui.uiActions.cityBuildingChoices.length).toBeGreaterThan(0);
     expect(ui.uiActions.cityQueueItems).toEqual([]);
-    expect(ui.uiActions.cityFocusChoices.length).toBe(4);
     expect(ui.uiActions.cityQueueSlots.length).toBe(3);
     expect(ui.uiActions.cityQueueSlots[0].empty).toBe(true);
     expect(typeof ui.uiActions.cityProductionStock).toBe("number");
     expect(typeof ui.uiActions.cityLocalProduction).toBe("number");
+    expect(ui.uiActions.cityProductionChoices[0].hoverText).toContain("Production Cost");
+    expect(ui.uiActions.cityBuildingChoices[0].hoverText).toContain("Estimated Turns");
     expect(ui.uiHints.primary).toContain("City selected");
   });
 
@@ -189,6 +189,8 @@ describe("UI surface hints/actions", () => {
     expect(archerChoice?.unlocked).toBe(false);
     expect(archerChoice?.reasonCode).toBe("locked");
     expect(archerChoice?.reasonText).toContain("Archery");
+    expect(archerChoice?.hoverText).toContain("Production Cost");
+    expect(archerChoice?.hoverText).toContain("Archery");
     expect(ui.uiActions.disabledActionHints["city-enqueue-archer"]).toContain("Archery");
 
     const queueSlots = ui.uiActions.cityQueueSlots;

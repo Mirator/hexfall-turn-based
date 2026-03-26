@@ -3,7 +3,7 @@
 ## Goal and scope
 
 - Define city founding, city management, and empire-wide economy behavior.
-- Keep city outcomes strategic through focus, yields, production queues, and buildings.
+- Keep city outcomes strategic through yields, production queues, and buildings.
 - Preserve deterministic single-player + AI behavior.
 
 ## Decisions made (and alternatives rejected)
@@ -13,7 +13,7 @@
 - Chosen: successful city founding emits timeline presentation feedback (settlement pulse + city spawn pop) while game-state mutation remains authoritative.
 - Chosen: economy is empire-wide per owner (`food/production/science` stockpiles).
 - Chosen: city yields are terrain-driven with ring-1 workable area and deterministic assignment.
-- Chosen: city focus is direct-select (`balanced`, `food`, `production`, `science`) and affects worked-tile priority only (no growth-order priority side effect).
+- Chosen: city worked tiles are assigned with a single deterministic balanced priority (best combined local yields).
 - Chosen: shared typed production queue (`unit`/`building`) with max length `3`.
 - Chosen: queue order is player-editable with deterministic up/down reordering.
 - Chosen: queue consumes front item only on successful completion.
@@ -33,7 +33,7 @@
   - `EmpireEconomy`
   - `GameState.economy.{player,enemy,researchIncomeThisTurn}`
 - City fields:
-  - `focus`, `workedHexes`, `yieldLastTurn`, `identity`, `growthProgress`
+  - `workedHexes`, `yieldLastTurn`, `identity`, `growthProgress`
   - `productionTab`, `queue` (typed items), `buildings`, `specialization`
   - `health`, `maxHealth`
 - City system APIs:
@@ -43,8 +43,6 @@
   - `getWorkableHexes(cityId, gameState)`
   - `assignWorkedHexes(cityId, gameState)`
   - `computeCityYield(cityId, gameState)`
-  - `previewCityYieldForFocus(cityId, focus, gameState)`
-  - `setCityFocus(cityId, focus, gameState)`
   - `setCityProductionTab(cityId, tab, gameState)`
   - `enqueueCityQueue(cityId, unitType, gameState)`
   - `enqueueCityBuilding(cityId, buildingId, gameState)`
@@ -75,6 +73,8 @@
   - successful unit spawn/building completion pops front item
   - no pop on blocked spawn/insufficient stock
   - duplicate building enqueue/build per city blocked
+  - UI-facing queue payload supports right-rail 3-slot rendering with per-slot move/remove availability and estimated turns
+  - UI-facing production hover payload uses full-word phrasing (`Production Cost`, `Estimated Turns`, `Current Production Stock`, `Local Production Per Turn`)
 - Capture/raze interaction:
   - capture preserves city economy identity fields with owner flip
   - raze removes city
@@ -87,7 +87,7 @@
   - `tests/integration/enemyTurn.test.js`
   - `tests/integration/researchSystem.test.js` (science stock interaction)
 - E2E:
-  - `tests/e2e/smoke.mjs` (founding clip visibility + queue/focus/building interactions + economy progression)
+  - `tests/e2e/smoke.mjs` (founding clip visibility + queue/building interactions + economy progression)
 
 ## Known gaps and next steps
 

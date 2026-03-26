@@ -13,7 +13,6 @@ const FOUND_CITY_REASON_TEXT = {
   "invalid-tile": "City cannot be founded on blocked terrain.",
 };
 
-const CITY_FOCUS_ORDER = ["balanced", "food", "production", "science"];
 const CITY_PRODUCTION_TAB_ORDER = ["units", "buildings"];
 
 const BUILDING_DEFINITIONS = {
@@ -123,7 +122,6 @@ export function foundCity(unitId, gameState) {
     q: settler.q,
     r: settler.r,
     population: 1,
-    focus: "balanced",
     workedHexes: [{ q: settler.q, r: settler.r }],
     yieldLastTurn: createEmptyYield(),
     identity: "balanced",
@@ -175,51 +173,6 @@ export function cycleCityQueue(cityId, gameState) {
   const nextType = availableTypes[(currentIndex + 1 + availableTypes.length) % availableTypes.length];
   city.queue = [createQueueItem("unit", nextType)];
   return { ok: true, queue: cloneQueue(city.queue) };
-}
-
-/**
- * @param {string} cityId
- * @param {"balanced"|"food"|"production"|"science"} focus
- * @param {import("../core/types.js").GameState} gameState
- * @returns {{ ok: boolean, reason?: string, focus?: string }}
- */
-export function setCityFocus(cityId, focus, gameState) {
-  const city = getCityById(gameState, cityId);
-  if (!city) {
-    return { ok: false, reason: "city-not-found" };
-  }
-
-  ensureCityEconomyFields(city);
-
-  if (!CITY_FOCUS_ORDER.includes(focus)) {
-    return { ok: false, reason: "invalid-focus" };
-  }
-
-  city.focus = focus;
-  assignWorkedHexes(cityId, gameState);
-  const cityYield = computeCityYield(cityId, gameState);
-  city.yieldLastTurn = cityYield;
-  city.identity = deriveCityIdentity(cityYield);
-  city.specialization = deriveCitySpecialization(city.buildings ?? []);
-  return { ok: true, focus: city.focus };
-}
-
-/**
- * @param {string} cityId
- * @param {import("../core/types.js").GameState} gameState
- * @returns {{ ok: boolean, reason?: string, focus?: string }}
- */
-export function cycleCityFocus(cityId, gameState) {
-  const city = getCityById(gameState, cityId);
-  if (!city) {
-    return { ok: false, reason: "city-not-found" };
-  }
-
-  ensureCityEconomyFields(city);
-
-  const currentIndex = CITY_FOCUS_ORDER.indexOf(city.focus);
-  const nextFocus = CITY_FOCUS_ORDER[(currentIndex + 1 + CITY_FOCUS_ORDER.length) % CITY_FOCUS_ORDER.length];
-  return setCityFocus(cityId, /** @type {"balanced"|"food"|"production"|"science"} */ (nextFocus), gameState);
 }
 
 /**
@@ -418,39 +371,9 @@ export function assignWorkedHexes(cityId, gameState) {
   }
 
   ensureCityEconomyFields(city);
-  const selected = computeWorkedHexesForFocus(city, city.focus, gameState);
+  const selected = computeWorkedHexes(city, gameState);
   city.workedHexes = selected;
   return [...selected];
-}
-
-/**
- * Pure preview helper for UI: computes local yield/worked tiles for a focus mode
- * without mutating city focus or queue state.
- *
- * @param {string} cityId
- * @param {"balanced"|"food"|"production"|"science"} focus
- * @param {import("../core/types.js").GameState} gameState
- * @returns {{ ok: boolean, reason?: string, focus?: "balanced"|"food"|"production"|"science", workedHexes?: import("../core/types.js").Hex[], yield?: import("../core/types.js").YieldBundle }}
- */
-export function previewCityYieldForFocus(cityId, focus, gameState) {
-  const city = getCityById(gameState, cityId);
-  if (!city) {
-    return { ok: false, reason: "city-not-found" };
-  }
-
-  ensureCityEconomyFields(city);
-  if (!CITY_FOCUS_ORDER.includes(focus)) {
-    return { ok: false, reason: "invalid-focus" };
-  }
-
-  const workedHexes = computeWorkedHexesForFocus(city, focus, gameState);
-  const cityYield = computeCityYieldForWorkedHexes(city, workedHexes, gameState);
-  return {
-    ok: true,
-    focus,
-    workedHexes: workedHexes.map((hex) => ({ q: hex.q, r: hex.r })),
-    yield: cityYield,
-  };
 }
 
 /**
@@ -672,7 +595,7 @@ function findSpawnHex(city, gameState) {
   return null;
 }
 
-function computeWorkedHexesForFocus(city, focus, gameState) {
+function computeWorkedHexes(city, gameState) {
   const workable = getWorkableHexes(city.id, gameState);
   if (workable.length === 0) {
     return [];
@@ -680,7 +603,7 @@ function computeWorkedHexesForFocus(city, focus, gameState) {
 
   const cityHex = workable.find((hex) => hex.q === city.q && hex.r === city.r) ?? null;
   const nonCityHexes = workable.filter((hex) => !cityHex || hex.q !== cityHex.q || hex.r !== cityHex.r);
-  nonCityHexes.sort((a, b) => compareHexesForFocus(a, b, focus, gameState));
+  nonCityHexes.sort((a, b) => compareHexesForWorkedPriority(a, b, gameState));
 
   const maxWorked = Math.max(1, city.population);
   const selected = cityHex ? [cityHex] : [];
@@ -704,41 +627,30 @@ function computeCityYieldForWorkedHexes(city, workedHexes, gameState) {
   return total;
 }
 
-function compareHexesForFocus(a, b, focus, gameState) {
+function compareHexesForWorkedPriority(a, b, gameState) {
   const tileA = getTileAt(gameState.map, a.q, a.r);
   const tileB = getTileAt(gameState.map, b.q, b.r);
   const yieldsA = tileA?.yields ?? createEmptyYield();
   const yieldsB = tileB?.yields ?? createEmptyYield();
-  const valuesA = toFocusSortValues(yieldsA, focus);
-  const valuesB = toFocusSortValues(yieldsB, focus);
-
-  for (let i = 0; i < valuesA.length; i += 1) {
-    if (valuesA[i] !== valuesB[i]) {
-      return valuesB[i] - valuesA[i];
-    }
+  const totalA = yieldsA.food + yieldsA.production + yieldsA.science;
+  const totalB = yieldsB.food + yieldsB.production + yieldsB.science;
+  if (totalA !== totalB) {
+    return totalB - totalA;
+  }
+  if (yieldsA.food !== yieldsB.food) {
+    return yieldsB.food - yieldsA.food;
+  }
+  if (yieldsA.production !== yieldsB.production) {
+    return yieldsB.production - yieldsA.production;
+  }
+  if (yieldsA.science !== yieldsB.science) {
+    return yieldsB.science - yieldsA.science;
   }
 
   return a.q - b.q || a.r - b.r;
 }
 
-function toFocusSortValues(yields, focus) {
-  if (focus === "food") {
-    return [yields.food, yields.production, yields.science];
-  }
-  if (focus === "production") {
-    return [yields.production, yields.food, yields.science];
-  }
-  if (focus === "science") {
-    return [yields.science, yields.production, yields.food];
-  }
-  return [yields.food + yields.production + yields.science, yields.food, yields.production, yields.science];
-}
-
 function ensureCityEconomyFields(city) {
-  if (!CITY_FOCUS_ORDER.includes(city.focus)) {
-    city.focus = "balanced";
-  }
-
   if (!Array.isArray(city.workedHexes)) {
     city.workedHexes = [];
   }

@@ -10,7 +10,6 @@ import {
   moveCityQueueItem,
   processTurn,
   removeCityQueueAt,
-  setCityFocus,
 } from "../../src/systems/citySystem.js";
 
 describe("city economy and identity", () => {
@@ -27,7 +26,6 @@ describe("city economy and identity", () => {
     expect(gameState.cities.length).toBe(1);
 
     const city = gameState.cities[0];
-    expect(city.focus).toBe("balanced");
     expect(city.workedHexes.length).toBeGreaterThan(0);
     expect(city.yieldLastTurn).toEqual(expect.objectContaining({ food: expect.any(Number), production: expect.any(Number) }));
     expect(["agricultural", "industrial", "scholarly", "balanced"]).toContain(city.identity);
@@ -37,7 +35,7 @@ describe("city economy and identity", () => {
     expect("storedFood" in city).toBe(false);
   });
 
-  it("assigns worked tiles deterministically by focus weights", () => {
+  it("assigns worked tiles deterministically by balanced yield priority", () => {
     const gameState = createInitialGameState({ seed: 22 });
     const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
     expect(settler).toBeTruthy();
@@ -68,14 +66,10 @@ describe("city economy and identity", () => {
     setTerrain(gameState, productionHex.q, productionHex.r, "forest");
     setTerrain(gameState, scienceHex.q, scienceHex.r, "hill");
 
-    setCityFocus(city.id, "food", gameState);
+    processTurn(gameState, "player");
     expect(hasHex(city.workedHexes, foodHex)).toBe(true);
-
-    setCityFocus(city.id, "production", gameState);
-    expect(hasHex(city.workedHexes, productionHex)).toBe(true);
-
-    setCityFocus(city.id, "science", gameState);
-    expect(hasHex(city.workedHexes, scienceHex)).toBe(true);
+    expect(hasHex(city.workedHexes, productionHex)).toBe(false);
+    expect(hasHex(city.workedHexes, scienceHex)).toBe(false);
   });
 
   it("uses empire food stock for growth and records last-turn yields", () => {
@@ -92,8 +86,6 @@ describe("city economy and identity", () => {
     setTerrain(gameState, city.q, city.r, "plains");
     city.population = 1;
     city.growthProgress = 0;
-    city.focus = "food";
-
     gameState.economy.player.foodStock = 6;
     gameState.economy.player.productionStock = 0;
     gameState.economy.player.scienceStock = 0;
@@ -109,7 +101,7 @@ describe("city economy and identity", () => {
     expect(city.identity).toBe("agricultural");
   });
 
-  it("resolves growth order deterministically by city id (focus does not change priority)", () => {
+  it("resolves growth order deterministically by city id", () => {
     const gameState = createInitialGameState({ seed: 331 });
     gameState.units = [];
     gameState.cities = [
@@ -125,9 +117,6 @@ describe("city economy and identity", () => {
     cityB.population = 1;
     cityA.growthProgress = 0;
     cityB.growthProgress = 0;
-    cityA.focus = "science";
-    cityB.focus = "food";
-
     setTerrain(gameState, cityA.q, cityA.r, "plains");
     setTerrain(gameState, cityB.q, cityB.r, "plains");
 
@@ -380,7 +369,6 @@ function createCity(id, owner, q, r) {
     q,
     r,
     population: 1,
-    focus: "balanced",
     workedHexes: [{ q, r }],
     yieldLastTurn: { food: 0, production: 0, science: 0 },
     identity: "balanced",

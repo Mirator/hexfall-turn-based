@@ -7,17 +7,8 @@ import {
   getBuildingDefinition,
   getFoundCityReasonText,
   isBuildingUnlocked,
-  previewCityYieldForFocus,
 } from "./citySystem.js";
 import { canSkipUnit, getSkipUnitReasonText } from "./unitActionSystem.js";
-
-const FOCUS_ORDER = ["balanced", "food", "production", "science"];
-const FOCUS_DESCRIPTIONS = {
-  balanced: "Balanced picks the strongest combined yields.",
-  food: "Food prioritizes food-rich worked tiles.",
-  production: "Production prioritizes hammer-rich worked tiles.",
-  science: "Science prioritizes science-rich worked tiles.",
-};
 
 /**
  * @typedef {{ kind: "unit"|"building", id: string }} QueueItem
@@ -35,8 +26,6 @@ const FOCUS_DESCRIPTIONS = {
  *   uiActions: {
  *     canFoundCity: boolean,
  *     canSkipUnit: boolean,
- *     canCycleFocus: boolean,
- *     canSetCityFocus: boolean,
  *     canSetCityProductionTab: boolean,
  *     canQueueProduction: boolean,
  *     canQueueUnits: boolean,
@@ -51,7 +40,6 @@ const FOCUS_DESCRIPTIONS = {
  *     cityQueueItems: QueueItem[],
  *     cityProductionStock: number,
  *     cityLocalProduction: number,
- *     cityFocusChoices: Array<{ focus: "balanced"|"food"|"production"|"science", label: string, description: string, active: boolean, projectedYield: { food: number, production: number, science: number } }>,
  *     cityQueueSlots: Array<{
  *       index: number,
  *       empty: boolean,
@@ -78,7 +66,8 @@ const FOCUS_DESCRIPTIONS = {
  *       stateTag: string|null,
  *       unlockTechId: string|null,
  *       unlockTechName: string|null,
- *       etaTurns: number
+ *       etaTurns: number,
+ *       hoverText: string
  *     }>,
  *     cityBuildingChoices: Array<{
  *       id: string,
@@ -93,7 +82,8 @@ const FOCUS_DESCRIPTIONS = {
  *       stateTag: string|null,
  *       unlockTechId: string|null,
  *       unlockTechName: string|null,
- *       etaTurns: number
+ *       etaTurns: number,
+ *       hoverText: string
  *     }>,
  *     disabledActionHints: Record<string, string>
  *   }
@@ -132,6 +122,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
       unlocked,
       unlockTechId: definition.unlockedByTech ?? null,
     });
+    const etaTurns = computeEtaTurns(cost, productionStock, productionRate);
     return {
       type,
       cost,
@@ -143,7 +134,15 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
       stateTag: reason.tag,
       unlockTechId: definition.unlockedByTech ?? null,
       unlockTechName: definition.unlockedByTech ? getTechName(definition.unlockedByTech) : null,
-      etaTurns: computeEtaTurns(cost, productionStock, productionRate),
+      etaTurns,
+      hoverText: buildProductionChoiceHoverText({
+        label: capitalizeLabel(type),
+        cost,
+        etaTurns,
+        productionStock,
+        localProduction,
+        reasonText: reason.text,
+      }),
     };
   });
 
@@ -163,6 +162,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
       alreadyQueued,
       unlockTechId: definition?.unlockedByTech ?? null,
     });
+    const etaTurns = computeEtaTurns(cost, productionStock, productionRate);
     return {
       id,
       cost,
@@ -176,7 +176,15 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
       stateTag: reason.tag,
       unlockTechId: definition?.unlockedByTech ?? null,
       unlockTechName: definition?.unlockedByTech ? getTechName(definition.unlockedByTech) : null,
-      etaTurns: computeEtaTurns(cost, productionStock, productionRate),
+      etaTurns,
+      hoverText: buildProductionChoiceHoverText({
+        label: capitalizeLabel(id),
+        cost,
+        etaTurns,
+        productionStock,
+        localProduction,
+        reasonText: reason.text,
+      }),
     };
   });
 
@@ -197,34 +205,10 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
     cityQueueReason = "All unlocked buildings are already built or queued.";
   }
 
-  const canSetCityFocus = selectedPlayerCity;
   const canQueueUnits = selectedPlayerCity && !isQueueFull && hasUnlockedUnits;
   const canQueueBuildings = selectedPlayerCity && !isQueueFull && hasQueueableBuildings;
   const canQueueProduction = cityProductionTab === "units" ? canQueueUnits : canQueueBuildings;
   const contextMenuType = isPlayerTurn && selectedPlayerCity ? "city" : isPlayerTurn && selectedPlayerUnit ? "unit" : null;
-
-  const cityFocusChoices = selectedPlayerCity
-    ? FOCUS_ORDER.map((focus) => {
-        const preview = previewCityYieldForFocus(selectedCity.id, /** @type {"balanced"|"food"|"production"|"science"} */ (focus), gameState);
-        return {
-          focus: /** @type {"balanced"|"food"|"production"|"science"} */ (focus),
-          label: capitalizeLabel(focus),
-          description: FOCUS_DESCRIPTIONS[focus],
-          active: selectedCity.focus === focus,
-          projectedYield: preview.ok
-            ? {
-                food: preview.yield?.food ?? 0,
-                production: preview.yield?.production ?? 0,
-                science: preview.yield?.science ?? 0,
-              }
-            : {
-                food: selectedCity.yieldLastTurn?.food ?? 0,
-                production: selectedCity.yieldLastTurn?.production ?? 0,
-                science: selectedCity.yieldLastTurn?.science ?? 0,
-              },
-        };
-      })
-    : [];
 
   const cityQueueSlots = buildQueueSlots({
     queueItems,
@@ -265,17 +249,17 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
   } else if (selectedUnit?.type === "settler") {
     if (canFound) {
       uiHints.primary = "Found city now (Found City button or F).";
-      uiHints.secondary = "After founding, use the city panel to set focus and queue.";
+      uiHints.secondary = "After founding, use the city panel to manage production queue.";
       uiHints.level = "info";
     } else {
       uiHints.primary = foundCityReason;
       uiHints.level = "warning";
     }
   } else if (selectedCity) {
-    uiHints.primary = `City selected: focus ${selectedCity.focus}, identity ${selectedCity.identity}.`;
+    uiHints.primary = `City selected: identity ${selectedCity.identity}.`;
     uiHints.secondary = canQueueProduction
-      ? `Focus changes worked tile priorities (not flat bonuses).`
-      : (cityQueueReason ?? "Use the bottom city panel to manage this city.");
+      ? "Hover unit/building buttons to inspect production cost, estimated turns, and requirements."
+      : (cityQueueReason ?? "Use the city production panel and right-side city queue to manage this city.");
     uiHints.level = "info";
   } else if (selectedUnit && attackableCities.length > 0) {
     uiHints.primary = "Hostile city in range: click city to assault.";
@@ -290,8 +274,6 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
     uiActions: {
       canFoundCity: canFound,
       canSkipUnit: canSkip,
-      canCycleFocus: canSetCityFocus,
-      canSetCityFocus,
       canSetCityProductionTab: selectedPlayerCity,
       canQueueProduction,
       canQueueUnits,
@@ -306,7 +288,6 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
       cityQueueItems: queueItems,
       cityProductionStock: productionStock,
       cityLocalProduction: localProduction,
-      cityFocusChoices,
       cityQueueSlots,
       cityProductionChoices,
       cityBuildingChoices,
@@ -421,7 +402,7 @@ function buildQueueSlots({ queueItems, productionStock, productionRate, selected
         empty: true,
         kind: null,
         id: null,
-        label: `${index + 1}. Empty`,
+        label: "Empty",
         cost: 0,
         etaTurns: null,
         statusTag: "Empty",
@@ -444,7 +425,7 @@ function buildQueueSlots({ queueItems, productionStock, productionRate, selected
       runningStock = runningStock + requiredTurns * productionRate - cost;
     }
 
-    const label = `${index + 1}. ${formatQueueItemLabel(queueItem)} (${cost})`;
+    const label = formatQueueItemLabel(queueItem);
     slots.push({
       index,
       empty: false,
@@ -453,7 +434,7 @@ function buildQueueSlots({ queueItems, productionStock, productionRate, selected
       label,
       cost,
       etaTurns,
-      statusTag: etaTurns === 0 ? "Ready" : `${etaTurns}t`,
+      statusTag: etaTurns === 0 ? "Ready" : formatTurnsLabel(etaTurns),
       blocked: false,
       blockedReason: null,
       canMoveUp: selectedPlayerCity && index > 0,
@@ -504,10 +485,10 @@ function buildDisabledActionHints({
     const moveDownAction = `city-queue-move-down-${slot.index}`;
     const removeAction = `city-queue-remove-${slot.index}`;
     if (!slot.canMoveUp) {
-      hints[moveUpAction] = slot.empty ? "Queue slot is empty." : "This item is already at the top.";
+      hints[moveUpAction] = slot.empty ? "Queue slot is empty." : "This item is already in the left-most slot.";
     }
     if (!slot.canMoveDown) {
-      hints[moveDownAction] = slot.empty ? "Queue slot is empty." : "This item is already at the bottom.";
+      hints[moveDownAction] = slot.empty ? "Queue slot is empty." : "This item is already in the right-most slot.";
     }
     if (!slot.canRemove) {
       hints[removeAction] = slot.empty ? "Queue slot is empty." : (cityQueueReason ?? "Cannot edit queue right now.");
@@ -522,6 +503,23 @@ function buildDisabledActionHints({
 
 function computeEtaTurns(cost, stock, productionRate) {
   return Math.max(0, Math.ceil(Math.max(0, cost - stock) / Math.max(1, productionRate)));
+}
+
+function buildProductionChoiceHoverText({ label, cost, etaTurns, productionStock, localProduction, reasonText }) {
+  const lines = [
+    `${label}`,
+    `Production Cost: ${cost} | Estimated Turns: ${formatTurnsLabel(etaTurns)}`,
+    `Current Production Stock: ${productionStock} | Local Production Per Turn: +${localProduction}`,
+  ];
+  if (reasonText) {
+    lines.push(reasonText);
+  }
+  return lines.join("\n");
+}
+
+function formatTurnsLabel(turns) {
+  const normalized = Math.max(0, Number.isFinite(turns) ? Math.round(turns) : 0);
+  return normalized === 1 ? "1 turn" : `${normalized} turns`;
 }
 
 function getQueueItemCost(queueItem) {

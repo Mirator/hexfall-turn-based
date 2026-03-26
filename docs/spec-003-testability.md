@@ -41,6 +41,8 @@
   - `window.__hexfallTest.setContextPanelPinned(bool)`
   - `window.__hexfallTest.getCityResolutionModalState()`
   - `window.__hexfallTest.getCityPanelState()`
+  - `window.__hexfallTest.showCityActionTooltip(actionId)`
+  - `window.__hexfallTest.hideCityActionTooltip()`
   - `window.__hexfallTest.selectUnit(unitId)`
   - `window.__hexfallTest.selectCity(cityId)`
   - `window.__hexfallTest.moveSelected(q, r)`
@@ -49,8 +51,6 @@
   - `window.__hexfallTest.triggerUnitAction(actionId)`
   - `window.__hexfallTest.foundCity()`
   - `window.__hexfallTest.chooseCityOutcome(choice)`
-  - `window.__hexfallTest.cycleCityFocus()`
-  - `window.__hexfallTest.setCityFocus(focus)`
   - `window.__hexfallTest.setCityProductionTab(tab)`
   - `window.__hexfallTest.enqueueCityProduction(unitType)`
   - `window.__hexfallTest.enqueueCityBuilding(buildingId)`
@@ -97,6 +97,7 @@
   - `devVisionEnabled` payload for player debug reveal mode
   - `lastCombatEvent` breakdown payload
   - city production context details for units/buildings tabs, per-item disabled reasons, queue slot metadata, and typed queue items
+  - city panel runtime hook payload includes right-rail city queue card visibility/details/position for layout assertions
   - contextual `uiHints` + `uiActions`
 - `advanceTime` remains available for deterministic stepping.
 - `endTurnImmediate()` remains unchanged as deterministic fast-path bypass for smoke/integration flows that do not need playback assertions.
@@ -110,7 +111,9 @@
   - manual pan clears prior `cameraFocusHex`
   - real End Turn enters AI playback (`turnPlayback.active=true`), both AI actors (`enemy`,`purple`) produce summaries, and phase returns to player phase
   - fog-of-war payload assertions (`visible` subset of map, hostile concealment) and keyboard `V` dev-vision toggle behavior
-  - founding, queue/focus management (including queue reorder and unavailable-reason payload checks), research, combat, city resolution, restart/pause flows
+  - founding, queue management (including queue reorder and unavailable-reason payload checks), research, combat, city resolution, restart/pause flows
+  - city production hover text uses full-word labels (`Production Cost`, `Estimated Turns`)
+  - right-rail city queue card stays between notifications and `Attention needed` when city is selected
   - no unexpected defeat during validated scenario flow
   - zero console/page errors
 - Smoke runner closes Playwright/browser/server reliably on success/failure/interrupt; Windows cleanup handles orphaned headless browser processes.
