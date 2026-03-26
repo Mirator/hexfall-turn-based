@@ -13,8 +13,12 @@ const CITY_PANEL_QUEUE_REMOVE_WIDTH = 44;
 const CITY_PANEL_BUTTON_HEIGHT = 30;
 const UNIT_PANEL_ACTION_WIDTH = 160;
 const CONTEXT_PANEL_COLLAPSED_HEIGHT = 76;
-const CONTEXT_PANEL_EXPANDED_HEIGHT = 286;
-const CONTEXT_PANEL_EXPANDED_HEIGHT_COMPACT = 344;
+const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY = 286;
+const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY_COMPACT = 344;
+const CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT = 188;
+const CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT_COMPACT = 232;
+const CONTEXT_PANEL_MIN_WIDTH_CITY = 420;
+const CONTEXT_PANEL_MIN_WIDTH_UNIT = 340;
 const CONTEXT_PANEL_WIDTH_PADDING = 560;
 const FOCUS_MODES = ["balanced", "food", "production", "science"];
 const PRODUCTION_TABS = ["units", "buildings"];
@@ -655,6 +659,8 @@ export class UIScene extends Phaser.Scene {
     const isCompact = gameSize.width < COMPACT_BREAKPOINT;
     const edgePadding = isCompact ? 10 : 24;
     const menuType = this.latestState?.uiActions?.contextMenuType ?? null;
+    const isCityMenu = menuType === "city";
+    const isUnitMenu = menuType === "unit";
     const contextVisible = menuType !== null && this.latestState?.match?.status === "ongoing";
     const contextExpanded = contextVisible ? this.contextPanelExpanded : false;
 
@@ -700,24 +706,34 @@ export class UIScene extends Phaser.Scene {
 
     const contextHeight = contextExpanded
       ? isCompact
-        ? CONTEXT_PANEL_EXPANDED_HEIGHT_COMPACT
-        : CONTEXT_PANEL_EXPANDED_HEIGHT
+        ? isCityMenu
+          ? CONTEXT_PANEL_EXPANDED_HEIGHT_CITY_COMPACT
+          : CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT_COMPACT
+        : isCityMenu
+          ? CONTEXT_PANEL_EXPANDED_HEIGHT_CITY
+          : CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT
       : CONTEXT_PANEL_COLLAPSED_HEIGHT;
     const contextWidth = isCompact
       ? gameSize.width - edgePadding * 2
-      : Math.max(420, Math.min(780, gameSize.width - CONTEXT_PANEL_WIDTH_PADDING));
+      : Math.max(
+          isUnitMenu ? CONTEXT_PANEL_MIN_WIDTH_UNIT : CONTEXT_PANEL_MIN_WIDTH_CITY,
+          Math.min(780, gameSize.width - CONTEXT_PANEL_WIDTH_PADDING)
+        );
     const contextX = gameSize.width / 2;
     const contextY = gameSize.height - contextHeight / 2 - (isCompact ? 8 : 12);
     const contextTop = contextY - contextHeight / 2;
+    const titleOffset = contextExpanded ? (isCompact ? (isCityMenu ? 140 : 90) : isCityMenu ? 112 : 58) : 4;
+    const metaPrimaryOffset = isCompact ? (isCityMenu ? 114 : 62) : isCityMenu ? 88 : 34;
+    const metaSecondaryOffset = isCompact ? (isCityMenu ? 94 : 42) : isCityMenu ? 68 : 14;
     const activeCityProductionButtons =
       (this.latestState?.uiActions?.cityProductionTab ?? "units") === "buildings"
         ? this.cityBuildingButtons
         : this.cityProductionButtons;
     this.contextPanel.setPosition(contextX, contextY);
     this.contextPanel.setSize(contextWidth, contextHeight);
-    this.contextPanelTitle.setPosition(contextX, contextExpanded ? contextY - (isCompact ? 140 : 112) : contextY - 4);
-    this.contextPanelMetaPrimary.setPosition(contextX, contextY - (isCompact ? 114 : 88));
-    this.contextPanelMetaSecondary.setPosition(contextX, contextY - (isCompact ? 94 : 68));
+    this.contextPanelTitle.setPosition(contextX, contextY - titleOffset);
+    this.contextPanelMetaPrimary.setPosition(contextX, contextY - metaPrimaryOffset);
+    this.contextPanelMetaSecondary.setPosition(contextX, contextY - metaSecondaryOffset);
     this.contextPanelMetaPrimary.setWordWrapWidth(Math.max(120, contextWidth - 18), true);
     this.contextPanelMetaSecondary.setWordWrapWidth(Math.max(120, contextWidth - 18), true);
 
