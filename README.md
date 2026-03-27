@@ -48,11 +48,13 @@ npm run dev
 - Left click unit to select
 - Left click highlighted hex to move
 - Left click red-highlighted hostile unit/city to attack (when visible)
-- Left click `End Turn` in top-right UI
+- Left click `End Turn` in the bottom-right HUD
 - Select a settler and press `Found City` (or key `F`)
-- Use city context panel to set focus/production and manage queue
+- Use city context panel to set focus/production
+- Use the right-rail `City Queue` card (when a city is selected) to reorder/remove queue slots
 - Use `Research` controls in HUD to cycle/select active research
-- `Restart` is always available in HUD and asks for confirmation
+- Press `Esc` to open Pause menu (`Resume`, `Restart`) and confirm restart
+- After match end, use the result overlay `Restart Match` button
 - Press `V` to toggle `Dev Vision: ON/OFF`
 
 ## Loading + Bundling

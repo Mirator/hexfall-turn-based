@@ -357,12 +357,12 @@ async function run() {
       if (productionX.length !== visibleProductionButtons.length || productionY.length !== visibleProductionButtons.length) {
         return { ok: false, reason: "production-button-position-data-missing" };
       }
-      if (new Set(productionX.map((value) => Math.round(value))).size !== 1) {
-        return { ok: false, reason: "production-buttons-should-share-column-x" };
+      if (new Set(productionY.map((value) => Math.round(value))).size !== 1) {
+        return { ok: false, reason: "production-buttons-should-share-row-y" };
       }
-      for (let i = 1; i < productionY.length; i += 1) {
-        if (productionY[i] <= productionY[i - 1]) {
-          return { ok: false, reason: "production-buttons-should-be-vertical" };
+      for (let i = 1; i < productionX.length; i += 1) {
+        if (productionX[i] <= productionX[i - 1]) {
+          return { ok: false, reason: "production-buttons-should-be-horizontal" };
         }
       }
       const queueRail = cityPanelAfterQueue?.cityQueueRail;
@@ -381,9 +381,19 @@ async function run() {
       if (!String(queueRail.detailsPrimary ?? "").includes("Population")) {
         return { ok: false, reason: "right-rail-city-queue-missing-city-details" };
       }
-      const queueSlotY = cityPanelAfterQueue?.cityQueueButtons?.map((button) => button.y).filter(Number.isFinite) ?? [];
-      if (queueSlotY.length !== 3 || new Set(queueSlotY.map((value) => Math.round(value))).size !== 1) {
-        return { ok: false, reason: "queue-slots-should-be-horizontal" };
+      const queueSlotButtons = cityPanelAfterQueue?.cityQueueButtons ?? [];
+      const queueSlotX = queueSlotButtons.map((button) => button.x).filter(Number.isFinite);
+      const queueSlotY = queueSlotButtons.map((button) => button.y).filter(Number.isFinite);
+      if (queueSlotX.length !== 3 || queueSlotY.length !== 3) {
+        return { ok: false, reason: "queue-slot-position-data-missing" };
+      }
+      if (new Set(queueSlotX.map((value) => Math.round(value))).size !== 1) {
+        return { ok: false, reason: "queue-slots-should-share-column-x" };
+      }
+      for (let i = 1; i < queueSlotY.length; i += 1) {
+        if (queueSlotY[i] <= queueSlotY[i - 1]) {
+          return { ok: false, reason: "queue-slots-should-be-vertical" };
+        }
       }
       let queueFillState = queueAfterUnitAdd;
       let queueFillSafety = 0;

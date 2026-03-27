@@ -1,5 +1,7 @@
 Original prompt: I want to make civilization like easy game in JS. Let's init the base repository with Phaser. Create a plan
 
+Historical note (2026-03-27): this file is a chronological implementation log. Older entries may reference spec filenames/numbering that were correct at the time. The current authoritative spec list is `docs/README.md`.
+
 ## 2026-03-23
 - Initialized implementation session for Phaser Civ-like base repo.
 - Goals: bootstrap project, playable hex turn loop, tests, and docs specs under /docs.

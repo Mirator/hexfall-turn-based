@@ -8,8 +8,8 @@
 
 ## Decisions made (and alternatives rejected)
 
-- Chosen: both factions start settler-only; no starting warriors.
-- Chosen: only settlers can found cities; enemy auto-founds first valid city opportunity.
+- Chosen: all factions (`player`, `enemy`, `purple`) start settler-only; no starting warriors.
+- Chosen: only settlers can found cities; AI owners auto-found first valid city opportunities.
 - Chosen: successful city founding emits timeline presentation feedback (settlement pulse + city spawn pop) while game-state mutation remains authoritative.
 - Chosen: economy is empire-wide per owner (`food/production/science` stockpiles).
 - Chosen: city yields are terrain-driven with ring-1 workable area and deterministic assignment.
@@ -23,7 +23,7 @@
   - `monument` (`cost=8`, unlock `masonry`, `+1 science`)
 - Chosen: duplicate building construction per city is blocked (built or queued).
 - Chosen: city identity derives from worked yields; specialization derives from buildings with priority `scholarly > industrial > agricultural > balanced`.
-- Chosen: enemy queue refill strategy is personality-aware and defined by `spec-008`.
+- Chosen: AI queue refill strategy is personality-aware and defined by `spec-008`.
 - Rejected for now: manual citizen placement UI, gold/upkeep/happiness/trade-route systems.
 
 ## Interfaces/types added
@@ -31,7 +31,7 @@
 - Economy types/state:
   - `YieldBundle`
   - `EmpireEconomy`
-  - `GameState.economy.{player,enemy,researchIncomeThisTurn}`
+  - `GameState.economy.{player,enemy,purple,researchIncomeThisTurn}`
 - City fields:
   - `workedHexes`, `yieldLastTurn`, `identity`, `growthProgress`
   - `productionTab`, `queue` (typed items), `buildings`, `specialization`
@@ -57,6 +57,7 @@
   - settler-only, valid passable/empty tile required
   - founding consumes settler and creates/selects city
   - successful founding plays visible settlement animation clip at founded tile
+  - AI owners auto-found first valid city opportunities from settler-only starts
 - Terrain yields (locked defaults):
   - plains `2/1/0`
   - forest `1/2/0`
@@ -73,8 +74,9 @@
   - successful unit spawn/building completion pops front item
   - no pop on blocked spawn/insufficient stock
   - duplicate building enqueue/build per city blocked
-  - UI-facing queue payload supports right-rail 3-slot rendering with per-slot move/remove availability and estimated turns
+  - UI-facing queue payload supports right-rail vertical 3-slot stack rendering with per-slot up/down move + remove availability and estimated turns
   - UI-facing production hover payload uses full-word phrasing (`Production Cost`, `Estimated Turns`, `Current Production Stock`, `Local Production Per Turn`)
+  - UI notifications for city management follow high-level HUD policy from `spec-007` (major outcomes + warnings/failures; low-value city operation success spam suppressed)
 - Capture/raze interaction:
   - capture preserves city economy identity fields with owner flip
   - raze removes city

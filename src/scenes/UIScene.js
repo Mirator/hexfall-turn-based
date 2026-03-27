@@ -12,16 +12,19 @@ const CITY_PANEL_QUEUE_REMOVE_WIDTH = 12;
 const CITY_PANEL_BUTTON_HEIGHT = 30;
 const UNIT_PANEL_ACTION_WIDTH = 160;
 const CONTEXT_PANEL_COLLAPSED_HEIGHT = 76;
-const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY = 320;
-const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY_COMPACT = 360;
+const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY = 250;
+const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY_COMPACT = 300;
 const CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT = 188;
 const CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT_COMPACT = 232;
 const CONTEXT_PANEL_MIN_WIDTH_CITY = 420;
 const CONTEXT_PANEL_MIN_WIDTH_UNIT = 340;
 const CONTEXT_PANEL_WIDTH_PADDING = 560;
-const RIGHT_RAIL_QUEUE_PANEL_HEIGHT = 156;
-const RIGHT_RAIL_QUEUE_PANEL_HEIGHT_COMPACT = 124;
-const RIGHT_RAIL_QUEUE_PANEL_MIN_HEIGHT = 78;
+const RIGHT_RAIL_QUEUE_PANEL_HEIGHT = 236;
+const RIGHT_RAIL_QUEUE_PANEL_HEIGHT_COMPACT = 208;
+const RIGHT_RAIL_QUEUE_PANEL_MIN_HEIGHT = 140;
+const RIGHT_RAIL_QUEUE_SLOT_OUTER_PADDING = 14;
+const RIGHT_RAIL_QUEUE_SLOT_ROW_GAP = 6;
+const RIGHT_RAIL_QUEUE_SLOT_INNER_GAP = 3;
 const PRODUCTION_TABS = ["units", "buildings"];
 const UNIT_PRODUCTION_TYPES = ["warrior", "settler", "spearman", "archer"];
 const BUILDING_PRODUCTION_TYPES = ["granary", "workshop", "monument"];
@@ -765,25 +768,17 @@ export class UIScene extends Phaser.Scene {
 
     if (contextExpanded) {
       if (isCompact) {
-        if (isCityMenu) {
-          const tabY = contextY - 24;
-          this.layoutButtonRow(this.cityProductionTabButtons, contextX, tabY, 8);
-          this.layoutButtonColumn(activeCityProductionButtons, contextX, tabY + 38, 8);
-        } else {
-          this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 30, 10);
-        }
+        this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY - 10, 8);
+        this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 24, 6);
+        this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 30, 10);
       } else {
-        if (isCityMenu) {
-          const tabY = contextY - 8;
-          this.layoutButtonRow(this.cityProductionTabButtons, contextX, tabY, 8);
-          this.layoutButtonColumn(activeCityProductionButtons, contextX, tabY + 34, 8);
-        } else {
-          this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 24, 16);
-        }
+        this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY + 4, 8);
+        this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 36, 6);
+        this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 24, 16);
       }
     } else {
       this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY + 36, 8);
-      this.layoutButtonColumn(activeCityProductionButtons, contextX, contextY + 36, 8);
+      this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 36, 6);
       this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 36, 16);
     }
 
@@ -889,33 +884,45 @@ export class UIScene extends Phaser.Scene {
     }
   }
 
-  layoutButtonColumn(buttons, centerX, startY, gap) {
-    for (let i = 0; i < buttons.length; i += 1) {
-      const button = buttons[i];
-      const y = startY + i * (button.height + gap);
-      button.rectangle.setPosition(centerX, y);
-      button.label.setPosition(centerX, y);
-    }
-  }
-
-  layoutQueueHorizontalRow(centerX, y, innerGap, clusterGap) {
+  layoutQueueVerticalStack(centerX, startY, innerGap, rowGap) {
     const clusters = this.cityQueueButtons.map((_, index) => [
       this.cityQueueMoveUpButtons[index],
       this.cityQueueButtons[index],
       this.cityQueueMoveDownButtons[index],
       this.cityQueueRemoveButtons[index],
     ]);
-    const clusterWidths = clusters.map(
-      (cluster) => cluster.reduce((sum, button) => sum + button.width, 0) + Math.max(0, cluster.length - 1) * innerGap
-    );
-    const totalWidth = clusterWidths.reduce((sum, width) => sum + width, 0) + Math.max(0, clusters.length - 1) * clusterGap;
-    let cursor = centerX - totalWidth / 2;
     for (let i = 0; i < clusters.length; i += 1) {
-      const clusterWidth = clusterWidths[i];
-      const clusterCenterX = cursor + clusterWidth / 2;
-      this.layoutButtonRow(clusters[i], clusterCenterX, y, innerGap);
-      cursor += clusterWidth + clusterGap;
+      const y = startY + i * (CITY_PANEL_BUTTON_HEIGHT + rowGap);
+      this.layoutButtonRow(clusters[i], centerX, y, innerGap);
     }
+  }
+
+  resizeQueueRailControls(panelWidth, isCompact) {
+    const controlWidth = isCompact ? 16 : 18;
+    const clusterWidthTarget = Math.max(132, panelWidth - RIGHT_RAIL_QUEUE_SLOT_OUTER_PADDING * 2);
+    const slotWidth = Math.max(96, clusterWidthTarget - controlWidth * 3 - RIGHT_RAIL_QUEUE_SLOT_INNER_GAP * 3);
+    const controlHeight = CITY_PANEL_BUTTON_HEIGHT;
+    const slotHeight = CITY_PANEL_BUTTON_HEIGHT;
+
+    for (let i = 0; i < this.cityQueueButtons.length; i += 1) {
+      this.resizeButton(this.cityQueueButtons[i], slotWidth, slotHeight);
+      this.resizeButton(this.cityQueueMoveUpButtons[i], controlWidth, controlHeight);
+      this.resizeButton(this.cityQueueMoveDownButtons[i], controlWidth, controlHeight);
+      this.resizeButton(this.cityQueueRemoveButtons[i], controlWidth, controlHeight);
+      this.cityQueueButtons[i].label.setWordWrapWidth(Math.max(82, slotWidth - 8), true);
+    }
+
+    return {
+      innerGap: RIGHT_RAIL_QUEUE_SLOT_INNER_GAP,
+      rowGap: RIGHT_RAIL_QUEUE_SLOT_ROW_GAP,
+    };
+  }
+
+  resizeButton(button, width, height) {
+    button.width = width;
+    button.height = height;
+    button.rectangle.setSize(width, height);
+    button.rectangle.setDisplaySize(width, height);
   }
 
   shouldShowCityQueueRail(gameState, menuType, selectedCity) {
@@ -928,9 +935,11 @@ export class UIScene extends Phaser.Scene {
   setCityQueueRailVisible(visible) {
     this.cityQueueRailPanel.setVisible(visible);
     this.cityQueueRailTitle.setVisible(visible);
-    this.cityQueueRailDetailsPrimary.setVisible(visible);
-    this.cityQueueRailDetailsSecondary.setVisible(visible);
-    this.cityQueueRailDetailsTertiary.setVisible(visible);
+    if (!visible) {
+      this.cityQueueRailDetailsPrimary.setVisible(false);
+      this.cityQueueRailDetailsSecondary.setVisible(false);
+      this.cityQueueRailDetailsTertiary.setVisible(false);
+    }
   }
 
   layoutCityQueueRail({ isCompact, edgePadding, notificationLeft, notificationWidth, statusY, statusHeight, selectedCity, visible }) {
@@ -956,6 +965,8 @@ export class UIScene extends Phaser.Scene {
     this.cityQueueRailPanel.setSize(notificationWidth, panelHeight);
     this.cityQueueRailPanel.setDisplaySize(notificationWidth, panelHeight);
     this.cityQueueRailTitle.setPosition(notificationLeft + 12, queueTop + 10);
+    this.setCityQueueRailVisible(true);
+    const queueControlLayout = this.resizeQueueRailControls(notificationWidth, isCompact);
 
     const lineWrap = Math.max(120, notificationWidth - 22);
     this.cityQueueRailDetailsPrimary.setWordWrapWidth(lineWrap, true);
@@ -966,18 +977,47 @@ export class UIScene extends Phaser.Scene {
     this.cityQueueRailDetailsPrimary.setText(details.primary);
     this.cityQueueRailDetailsSecondary.setText(details.secondary);
     this.cityQueueRailDetailsTertiary.setText(details.tertiary);
-    this.cityQueueRailDetailsPrimary.setPosition(notificationLeft + 12, queueTop + 34);
-    this.cityQueueRailDetailsSecondary.setPosition(notificationLeft + 12, queueTop + 52);
-    this.cityQueueRailDetailsTertiary.setPosition(notificationLeft + 12, queueTop + 70);
-    this.layoutQueueHorizontalRow(panelCenterX, queueTop + panelHeight - 18, 2, 4);
-    this.setCityQueueRailVisible(true);
 
-    if (isCompact) {
-      this.cityQueueRailDetailsSecondary.setVisible(false);
-      this.cityQueueRailDetailsTertiary.setVisible(false);
-      this.cityQueueRailDetailsPrimary.setPosition(notificationLeft + 12, queueTop + 38);
-      this.layoutQueueHorizontalRow(panelCenterX, queueTop + panelHeight - 16, 2, 4);
+    let visibleDetailCount = isCompact
+      ? panelHeight >= 154
+        ? 1
+        : 0
+      : panelHeight >= 190
+        ? 3
+        : panelHeight >= 172
+          ? 2
+          : panelHeight >= 154
+            ? 1
+            : 0;
+    const detailLabels = [this.cityQueueRailDetailsPrimary, this.cityQueueRailDetailsSecondary, this.cityQueueRailDetailsTertiary];
+
+    let queueStackStartY = queueTop + 44;
+    const queueContentBottomLimit = queueTop + panelHeight - 10;
+    const queueSlotCount = this.cityQueueButtons.length;
+    while (visibleDetailCount >= 0) {
+      for (let i = 0; i < detailLabels.length; i += 1) {
+        const label = detailLabels[i];
+        const show = i < visibleDetailCount;
+        label.setVisible(show);
+        if (show) {
+          label.setPosition(notificationLeft + 12, queueTop + 34 + i * 18);
+        }
+      }
+      const visibleDetails = detailLabels.filter((label) => label.visible);
+      const detailBottom =
+        visibleDetails.length > 0 ? Math.max(...visibleDetails.map((label) => label.getBounds().bottom)) : queueTop + 24;
+      queueStackStartY = detailBottom + CITY_PANEL_BUTTON_HEIGHT / 2 + 8;
+      const queueBottomY =
+        queueStackStartY +
+        (queueSlotCount - 1) * (CITY_PANEL_BUTTON_HEIGHT + queueControlLayout.rowGap) +
+        CITY_PANEL_BUTTON_HEIGHT / 2;
+      if (queueBottomY <= queueContentBottomLimit || visibleDetailCount === 0) {
+        break;
+      }
+      visibleDetailCount -= 1;
     }
+
+    this.layoutQueueVerticalStack(panelCenterX, queueStackStartY, queueControlLayout.innerGap, queueControlLayout.rowGap);
 
     if (panelCenterX + notificationWidth / 2 > this.scale.width - edgePadding) {
       const correctedX = this.scale.width - edgePadding - notificationWidth / 2;
@@ -986,7 +1026,7 @@ export class UIScene extends Phaser.Scene {
       this.cityQueueRailDetailsPrimary.setPosition(correctedX - notificationWidth / 2 + 12, this.cityQueueRailDetailsPrimary.y);
       this.cityQueueRailDetailsSecondary.setPosition(correctedX - notificationWidth / 2 + 12, this.cityQueueRailDetailsSecondary.y);
       this.cityQueueRailDetailsTertiary.setPosition(correctedX - notificationWidth / 2 + 12, this.cityQueueRailDetailsTertiary.y);
-      this.layoutQueueHorizontalRow(correctedX, this.cityQueueRailDetailsPrimary.visible ? this.cityQueueRailPanel.getBounds().bottom - 18 : this.cityQueueRailPanel.getBounds().bottom - 16, 2, 4);
+      this.layoutQueueVerticalStack(correctedX, queueStackStartY, queueControlLayout.innerGap, queueControlLayout.rowGap);
     }
   }
 
@@ -2052,7 +2092,7 @@ function formatQueueSlotLabel(slot, index) {
   if (!slot || slot.empty) {
     return `${index + 1}: Empty`;
   }
-  const itemLabel = truncateText(slot.label ?? "--", 8);
+  const itemLabel = slot.label ?? "--";
   const eta = Number.isFinite(slot.etaTurns) ? slot.etaTurns : 0;
   return `${index + 1} ${itemLabel}\nCost ${slot.cost}, ${formatTurns(eta)}`;
 }

@@ -113,9 +113,9 @@
   - fog-of-war payload assertions (`visible` subset of map, hostile concealment) and keyboard `V` dev-vision toggle behavior
   - founding, queue management (including queue reorder and unavailable-reason payload checks), research, combat, city resolution, restart/pause flows
   - city production hover text uses full-word labels (`Production Cost`, `Estimated Turns`)
-  - city production list renders as a vertical single-column stack
+  - city production list renders as a horizontal row in the bottom contextual panel
   - right-rail city queue card stays between notifications and `Attention needed` when city is selected
-  - low-value city production success notifications are suppressed (`Production tab`, queue add/move/remove success)
+  - notification policy stays high-level: retain major outcomes + warnings/failures, suppress low-value city production success notifications (`Production tab`, queue add/move/remove success)
   - no unexpected defeat during validated scenario flow
   - zero console/page errors
 - Smoke runner closes Playwright/browser/server reliably on success/failure/interrupt; Windows cleanup handles orphaned headless browser processes.
