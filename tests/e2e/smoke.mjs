@@ -348,6 +348,23 @@ async function run() {
       if (!String(firstProductionLabel).includes("Cost")) {
         return { ok: false, reason: "production-cost-eta-label-not-visible" };
       }
+      const visibleProductionButtons = (cityPanelAfterQueue?.cityProductionButtons ?? []).filter((button) => button.visible);
+      if (visibleProductionButtons.length !== 4) {
+        return { ok: false, reason: "expected-four-visible-unit-production-buttons" };
+      }
+      const productionX = visibleProductionButtons.map((button) => button.x).filter(Number.isFinite);
+      const productionY = visibleProductionButtons.map((button) => button.y).filter(Number.isFinite);
+      if (productionX.length !== visibleProductionButtons.length || productionY.length !== visibleProductionButtons.length) {
+        return { ok: false, reason: "production-button-position-data-missing" };
+      }
+      if (new Set(productionX.map((value) => Math.round(value))).size !== 1) {
+        return { ok: false, reason: "production-buttons-should-share-column-x" };
+      }
+      for (let i = 1; i < productionY.length; i += 1) {
+        if (productionY[i] <= productionY[i - 1]) {
+          return { ok: false, reason: "production-buttons-should-be-vertical" };
+        }
+      }
       const queueRail = cityPanelAfterQueue?.cityQueueRail;
       if (!queueRail?.visible) {
         return { ok: false, reason: "right-rail-city-queue-not-visible" };
@@ -398,6 +415,19 @@ async function run() {
       const queueAfterRemove = window.__hexfallTest.removeCityQueueAt(1);
       if (!Array.isArray(queueAfterRemove) || queueAfterRemove.length < 1 || queueAfterRemove.length > 2) {
         return { ok: false, reason: "queue-remove-failed" };
+      }
+      const notificationsAfterCityOps = window.__hexfallTest.getNotificationCenterState();
+      const noisyCityProductionMessageFound = (notificationsAfterCityOps?.entries ?? []).some((entry) => {
+        const text = String(entry?.message ?? "").toLowerCase();
+        return (
+          text.includes("production tab:") ||
+          text.includes("added to queue") ||
+          text.includes("queue item moved") ||
+          text.includes("queue item removed")
+        );
+      });
+      if (noisyCityProductionMessageFound) {
+        return { ok: false, reason: "city-production-notifications-should-be-high-level" };
       }
 
       // Research path to archery unlock.

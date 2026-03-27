@@ -17,7 +17,7 @@
   - bottom-right: End Turn + turn readiness assistant
 - Chosen: bottom contextual panel is shared for city and unit actions.
 - Chosen: panel has visible expand/collapse and pin controls; auto-expands on valid selection; pin persists expanded mode across selection changes.
-- Chosen: city mode supports `Units|Buildings` tabbed production with always-available production-cost/estimated-turn hover tooltip details.
+- Chosen: city mode supports `Units|Buildings` tabs with a vertical single-column production list and always-available production-cost/estimated-turn hover tooltip details.
 - Chosen: city production choices expose explicit cost context and per-item unavailable-state tags (`Locked`, `Built`, `Queued`, `Queue Full`).
 - Chosen: disabled city actions show exact unavailable reasons on hover via pointer-following tooltip and hint text paths.
 - Chosen: queue supports deterministic per-slot left/right reorder controls plus explicit remove controls in a horizontal single-row layout in the right-side city queue card.
@@ -29,6 +29,7 @@
 - Chosen: gameplay commands (End Turn + context actions) are disabled while animation timeline is busy, with explicit disabled reason text.
 - Chosen: restart lives in Esc pause menu (`Resume`, `Restart`, confirm step) and blocks underlying interactions while modal is open.
 - Chosen: notification center v2 supports categories (`All/Combat/City/Research/System`), filtering, and click-to-jump focus.
+- Chosen: city notifications are high-signal; low-value city production success logs (tab switch, queue add/move/remove success) are suppressed while warnings/failures remain visible.
 - Chosen: notification rows with no map `focus` are rendered as non-clickable text and never emit "no target" warning on click.
 - Chosen: camera recentering recovery supports keyboard pan (`Arrow`/`WASD`) and right-mouse drag panning while no modal is open.
 - Rejected for now: persistent tutorial text, separate sidebars for unit actions, and full notification search.
@@ -77,7 +78,7 @@
 - HUD layout remains readable on desktop and compact/mobile viewports.
 - City/unit contextual controls appear only when relevant selection is active.
 - Disabled actions expose contextual reason feedback through hint/notification paths and disabled-button hover tooltips.
-- City production buttons show clear production cost labels and always expose hover tooltip details (`production cost`, `estimated turns`, `current production stock`, `local production per turn`, unavailable reason when blocked).
+- City production buttons show clear production cost labels in a vertical single-column list and always expose hover tooltip details (`production cost`, `estimated turns`, `current production stock`, `local production per turn`, unavailable reason when blocked).
 - City queue renders in the right-side city queue card as a horizontal 3-slot row with per-slot status and left/right reorder + remove affordances.
 - Right-side city queue card appears only for city selection and remains vertically between notifications and `Attention needed`.
 - Hover preview lifecycle:
@@ -99,6 +100,7 @@
 - Notification center:
   - newest-first feed
   - filter chips by category
+  - city feed keeps high-level outcomes plus warnings/failures, and omits tab-switch/queue-edit success spam
   - rows without `focus` are non-clickable and do not emit warnings when clicked
   - jump-to-map focus when payload has valid target
   - safe warning when focus target no longer exists

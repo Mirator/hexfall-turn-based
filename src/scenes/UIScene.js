@@ -12,8 +12,8 @@ const CITY_PANEL_QUEUE_REMOVE_WIDTH = 12;
 const CITY_PANEL_BUTTON_HEIGHT = 30;
 const UNIT_PANEL_ACTION_WIDTH = 160;
 const CONTEXT_PANEL_COLLAPSED_HEIGHT = 76;
-const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY = 250;
-const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY_COMPACT = 300;
+const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY = 320;
+const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY_COMPACT = 360;
 const CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT = 188;
 const CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT_COMPACT = 232;
 const CONTEXT_PANEL_MIN_WIDTH_CITY = 420;
@@ -765,17 +765,25 @@ export class UIScene extends Phaser.Scene {
 
     if (contextExpanded) {
       if (isCompact) {
-        this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY - 10, 8);
-        this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 24, 6);
-        this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 30, 10);
+        if (isCityMenu) {
+          const tabY = contextY - 24;
+          this.layoutButtonRow(this.cityProductionTabButtons, contextX, tabY, 8);
+          this.layoutButtonColumn(activeCityProductionButtons, contextX, tabY + 38, 8);
+        } else {
+          this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 30, 10);
+        }
       } else {
-        this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY + 4, 8);
-        this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 36, 6);
-        this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 24, 16);
+        if (isCityMenu) {
+          const tabY = contextY - 8;
+          this.layoutButtonRow(this.cityProductionTabButtons, contextX, tabY, 8);
+          this.layoutButtonColumn(activeCityProductionButtons, contextX, tabY + 34, 8);
+        } else {
+          this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 24, 16);
+        }
       }
     } else {
       this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY + 36, 8);
-      this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 36, 6);
+      this.layoutButtonColumn(activeCityProductionButtons, contextX, contextY + 36, 8);
       this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 36, 16);
     }
 
@@ -878,6 +886,15 @@ export class UIScene extends Phaser.Scene {
       button.rectangle.setPosition(x, y);
       button.label.setPosition(x, y);
       cursor += button.width + gap;
+    }
+  }
+
+  layoutButtonColumn(buttons, centerX, startY, gap) {
+    for (let i = 0; i < buttons.length; i += 1) {
+      const button = buttons[i];
+      const y = startY + i * (button.height + gap);
+      button.rectangle.setPosition(centerX, y);
+      button.label.setPosition(centerX, y);
     }
   }
 
@@ -1888,12 +1905,16 @@ export class UIScene extends Phaser.Scene {
         label: button.label.text,
         visible: button.rectangle.visible && button.label.visible,
         enabled: button.enabled,
+        x: button.rectangle.x,
+        y: button.rectangle.y,
       })),
       cityBuildingButtons: this.cityBuildingButtons.map((button) => ({
         actionId: button.actionId,
         label: button.label.text,
         visible: button.rectangle.visible && button.label.visible,
         enabled: button.enabled,
+        x: button.rectangle.x,
+        y: button.rectangle.y,
       })),
       cityQueueButtons: this.cityQueueButtons.map((button) => ({
         actionId: button.actionId,

@@ -510,11 +510,6 @@ export class WorldScene extends Phaser.Scene {
     const result = setCityProductionTab(this.gameState.selectedCityId, tab, this.gameState);
     if (result.ok) {
       this.evaluateAndPublish();
-      this.emitNotification(`Production tab: ${tab}.`, {
-        level: "info",
-        category: "City",
-        focus: this.buildSelectionFocusPayload(),
-      });
       return;
     }
 
@@ -547,13 +542,6 @@ export class WorldScene extends Phaser.Scene {
     }
 
     this.evaluateAndPublish();
-    const queuedLabel =
-      queueItem.kind === "building" ? `${capitalizeLabel(queueItem.id)} building` : `${capitalizeLabel(queueItem.id)} unit`;
-    this.emitNotification(`${queuedLabel} added to queue (${result.queue?.length ?? 0}/${CITY_QUEUE_MAX}).`, {
-      level: "info",
-      category: "City",
-      focus: this.buildSelectionFocusPayload(),
-    });
   };
 
   handleCityQueueMoveRequested = (payload) => {
@@ -578,11 +566,6 @@ export class WorldScene extends Phaser.Scene {
     }
 
     this.evaluateAndPublish();
-    this.emitNotification(`Queue item moved ${direction}.`, {
-      level: "info",
-      category: "City",
-      focus: this.buildSelectionFocusPayload(),
-    });
   };
 
   handleCityQueueRemoveRequested = (payload) => {
@@ -601,11 +584,6 @@ export class WorldScene extends Phaser.Scene {
     }
 
     this.evaluateAndPublish();
-    this.emitNotification("Queue item removed.", {
-      level: "info",
-      category: "City",
-      focus: this.buildSelectionFocusPayload(),
-    });
   };
 
   handleCityOutcomeRequested = (payload) => {
