@@ -22,6 +22,12 @@ npm install
 npm run dev
 ```
 
+## Supported Devices
+
+- Desktop browsers (`>= 900px` width) are fully supported.
+- Tablet browsers (`768px - 899px` width) are supported with the condensed HUD layout.
+- Phone-sized viewports (`< 768px` width) are not supported and show an in-app blocker message.
+
 ## Commands
 
 - `npm run dev` - start development server.

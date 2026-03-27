@@ -11,6 +11,7 @@
 - Chosen: keep automation hooks on `window` for low-friction e2e and local debugging.
 - Chosen: keep one self-contained smoke runner (`tests/e2e/smoke.mjs`) that starts Vite, drives gameplay, asserts, and captures artifacts.
 - Chosen: expose UI/runtime surfaces in `render_game_to_text` so tests do not depend on pixel scraping.
+- Chosen: enforce viewport support policy in runtime bootstrap (`>= 768px`) with explicit unsupported-screen contract for phone-sized widths.
 - Chosen: harden e2e cleanup with signal-aware close and force-kill fallback for `chrome-headless-shell` on Windows.
 - Chosen: centralize testability as cross-spec authority for payload/hook contract, with gameplay authority remaining in domain specs (`spec-002`, `spec-004`, `spec-005`, `spec-006`, `spec-007`, `spec-008`, `spec-009`).
 - Rejected for now: replacing hooks with a heavier bespoke automation protocol.
@@ -71,12 +72,15 @@
   - `window.__hexfallTest.clearAiCityQueue(owner, cityId?)`
   - `window.__hexfallTest.toggleDevVision()`
   - `window.__hexfallTest.setDevVision(enabled)`
+- Runtime DOM contract:
+  - `#unsupported-viewport-banner` is visible for unsupported viewports (`< 768px`) and hidden otherwise.
 - E2E command:
   - `npm run test:e2e`
 
 ## Behavior and acceptance criteria
 
 - `render_game_to_text` includes:
+  - unsupported bootstrap payload when runtime is blocked by viewport policy (`mode="unsupported"`, `viewportWidth`, `minSupportedViewportWidth`)
   - seed/hash/spawn metadata
   - units/cities/combat/research/economy snapshots
   - `uiPreview`, `uiTurnAssistant`, `uiContextPanel`, `uiNotificationFilter`
@@ -102,6 +106,8 @@
 - `advanceTime` remains available for deterministic stepping.
 - `endTurnImmediate()` remains unchanged as deterministic fast-path bypass for smoke/integration flows that do not need playback assertions.
 - Smoke scenario validates:
+  - phone viewport bootstrap block (`390x844`) shows unsupported banner and does not initialize gameplay canvas
+  - tablet viewport bootstrap path (`768x1024`) initializes gameplay and proceeds through full smoke scenario
   - hover move and city-attack previews
   - turn readiness assistant and deterministic attention-cycle path (ready units + cities with empty queues)
   - context panel expanded/pinned behavior
@@ -130,5 +136,4 @@
 ## Known gaps and next steps
 
 - Add a dedicated deterministic e2e branch for guaranteed full-domination finish.
-- Add touch-driven notification scrolling coverage.
-- Add more compact/mobile screenshot assertions in automated checks.
+- Add additional tablet + desktop screenshot assertions for key HUD states.

@@ -27,6 +27,7 @@
 - Chosen: bottom-right readiness assistant uses clickable `Attention needed (X)` status, where `X = ready units + player cities with empty queues`; click cycles the next attention target (unit or city), and End Turn keeps warning tint while any attention remains.
 - Chosen: AI playback banner is displayed while sequential AI actions resolve (`Enemy action ...` / `Purple action ...`), centered above the map/HUD action layers.
 - Chosen: gameplay commands (End Turn + context actions) are disabled while animation timeline is busy, with explicit disabled reason text.
+- Chosen: support matrix is desktop + tablet only; phone-sized viewports are blocked by runtime bootstrap and do not participate in HUD acceptance.
 - Chosen: restart lives in Esc pause menu (`Resume`, `Restart`, confirm step) and blocks underlying interactions while modal is open.
 - Chosen: notification center v2 supports categories (`All/Combat/City/Research/System`), filtering, and click-to-jump focus.
 - Chosen: city notifications are high-signal; keep high-level outcomes (city founded/captured/razed, research completed, combat outcomes) plus warnings/failures, and suppress low-value city production success logs (tab switch, queue add/move/remove success).
@@ -75,7 +76,7 @@
 
 ## Behavior and acceptance criteria
 
-- HUD layout remains readable on desktop and compact/mobile viewports.
+- HUD layout remains readable on desktop and tablet viewports (`>= 768px`).
 - City/unit contextual controls appear only when relevant selection is active.
 - Disabled actions expose contextual reason feedback through hint/notification paths and disabled-button hover tooltips.
 - City production buttons show clear production cost labels in a horizontal list and always expose hover tooltip details (`production cost`, `estimated turns`, `current production stock`, `local production per turn`, unavailable reason when blocked).
@@ -120,17 +121,14 @@
 - Manual artifact checks:
   - `tests/e2e/artifacts/smoke.png`
   - `tests/e2e/artifacts/ui-city-panel.png`
-  - `tests/e2e/artifacts/ui-city-panel-mobile.png`
 
 ## Known gaps and next steps
 
 - Notification center currently prioritizes compact single-line rows over expanded per-entry detail.
-- Touch-first scrolling/interaction tuning in notification center can be improved further.
-- Additional panel section collapsing for very small viewports may still improve readability.
+- Additional layout polish for dense tablet viewports (for example `768x1024`) can still improve readability.
 - No user-facing playback speed/skip controls yet.
 - Prioritized UI/UX polish backlog for next iteration:
   - Add persistent "why blocked" microcopy near disabled context actions (not hover-only).
   - Add unread notification treatment (badge + "new since last turn" grouping).
-  - Add mobile-first collapse of the right-rail city queue card into a bottom sheet on narrow viewports.
   - Expand `Attention needed` into a drill-down summary (`Units ready: X`, `Empty queues: Y`).
   - Add playback controls (`1x`, `2x`, `Skip visuals`) while preserving deterministic state ordering.

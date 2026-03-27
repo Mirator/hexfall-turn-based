@@ -3,7 +3,7 @@ import { gameEvents } from "../core/eventBus.js";
 
 const BUTTON_WIDTH = 180;
 const BUTTON_HEIGHT = 40;
-const COMPACT_BREAKPOINT = 900;
+const TABLET_LAYOUT_BREAKPOINT = 900;
 const CITY_PANEL_TAB_WIDTH = 102;
 const CITY_PANEL_ACTION_WIDTH = 100;
 const CITY_PANEL_QUEUE_ITEM_WIDTH = 76;
@@ -13,14 +13,14 @@ const CITY_PANEL_BUTTON_HEIGHT = 30;
 const UNIT_PANEL_ACTION_WIDTH = 160;
 const CONTEXT_PANEL_COLLAPSED_HEIGHT = 76;
 const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY = 250;
-const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY_COMPACT = 300;
+const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY_TABLET = 300;
 const CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT = 188;
-const CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT_COMPACT = 232;
+const CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT_TABLET = 232;
 const CONTEXT_PANEL_MIN_WIDTH_CITY = 420;
 const CONTEXT_PANEL_MIN_WIDTH_UNIT = 340;
 const CONTEXT_PANEL_WIDTH_PADDING = 560;
 const RIGHT_RAIL_QUEUE_PANEL_HEIGHT = 236;
-const RIGHT_RAIL_QUEUE_PANEL_HEIGHT_COMPACT = 208;
+const RIGHT_RAIL_QUEUE_PANEL_HEIGHT_TABLET = 208;
 const RIGHT_RAIL_QUEUE_PANEL_MIN_HEIGHT = 140;
 const RIGHT_RAIL_QUEUE_SLOT_OUTER_PADDING = 14;
 const RIGHT_RAIL_QUEUE_SLOT_ROW_GAP = 6;
@@ -672,8 +672,8 @@ export class UIScene extends Phaser.Scene {
   }
 
   layout(gameSize) {
-    const isCompact = gameSize.width < COMPACT_BREAKPOINT;
-    const edgePadding = isCompact ? 10 : 24;
+    const isTabletLayout = gameSize.width < TABLET_LAYOUT_BREAKPOINT;
+    const edgePadding = isTabletLayout ? 10 : 24;
     const menuType = this.latestState?.uiActions?.contextMenuType ?? null;
     const selectedCity = this.latestState?.cities?.find((city) => city.id === this.latestState?.selectedCityId) ?? null;
     const isCityMenu = menuType === "city";
@@ -688,19 +688,19 @@ export class UIScene extends Phaser.Scene {
     this.scienceLabel.setPosition(edgePadding, 100);
     this.devVisionLabel.setPosition(edgePadding, 126);
     this.layoutResourceDeltas();
-    const playbackWidth = isCompact ? Math.max(220, Math.floor(gameSize.width * 0.58)) : 520;
+    const playbackWidth = isTabletLayout ? Math.max(220, Math.floor(gameSize.width * 0.58)) : 520;
     const playbackX = gameSize.width / 2;
-    const playbackY = isCompact ? 24 : 26;
+    const playbackY = isTabletLayout ? 24 : 26;
     this.playbackPanel.setPosition(playbackX, playbackY);
     this.playbackPanel.setSize(playbackWidth, 30);
     this.playbackPanel.setDisplaySize(playbackWidth, 30);
     this.playbackLabel.setPosition(playbackX, playbackY - 1);
     this.playbackLabel.setWordWrapWidth(Math.max(160, playbackWidth - 20), true);
 
-    this.notificationVisibleRows = isCompact ? 5 : this.notificationRows.length;
-    const notificationWidth = isCompact ? Math.max(250, Math.floor(gameSize.width * 0.62)) : 380;
+    this.notificationVisibleRows = isTabletLayout ? 5 : this.notificationRows.length;
+    const notificationWidth = isTabletLayout ? Math.max(250, Math.floor(gameSize.width * 0.62)) : 380;
     const visibleNotificationCount = Math.min(this.notificationVisibleRows, this.getFilteredNotifications().length);
-    const notificationFilterHeight = isCompact ? 60 : 34;
+    const notificationFilterHeight = isTabletLayout ? 60 : 34;
     const notificationContentHeight = visibleNotificationCount > 0 ? visibleNotificationCount * 20 + 14 : 0;
     const notificationHeight = 34 + notificationFilterHeight + notificationContentHeight;
     const notificationLeft = gameSize.width - edgePadding - notificationWidth;
@@ -709,14 +709,14 @@ export class UIScene extends Phaser.Scene {
     this.notificationPanel.setDisplaySize(notificationWidth, notificationHeight);
     this.notificationTitle.setPosition(notificationLeft + 12, edgePadding + 10);
 
-    if (isCompact) {
+    if (isTabletLayout) {
       this.layoutButtonRow(this.notificationFilterButtons.slice(0, 3), notificationLeft + notificationWidth / 2, edgePadding + 38, 4);
       this.layoutButtonRow(this.notificationFilterButtons.slice(3), notificationLeft + notificationWidth / 2, edgePadding + 64, 6);
     } else {
       this.layoutButtonRow(this.notificationFilterButtons, notificationLeft + notificationWidth / 2, edgePadding + 40, 6);
     }
 
-    const rowStartY = edgePadding + (isCompact ? 94 : 68);
+    const rowStartY = edgePadding + (isTabletLayout ? 94 : 68);
     for (let i = 0; i < this.notificationRows.length; i += 1) {
       const row = this.notificationRows[i];
       row.setPosition(notificationLeft + 12, rowStartY + i * 20);
@@ -726,26 +726,26 @@ export class UIScene extends Phaser.Scene {
     }
 
     const contextHeight = contextExpanded
-      ? isCompact
+      ? isTabletLayout
         ? isCityMenu
-          ? CONTEXT_PANEL_EXPANDED_HEIGHT_CITY_COMPACT
-          : CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT_COMPACT
+          ? CONTEXT_PANEL_EXPANDED_HEIGHT_CITY_TABLET
+          : CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT_TABLET
         : isCityMenu
           ? CONTEXT_PANEL_EXPANDED_HEIGHT_CITY
           : CONTEXT_PANEL_EXPANDED_HEIGHT_UNIT
       : CONTEXT_PANEL_COLLAPSED_HEIGHT;
-    const contextWidth = isCompact
+    const contextWidth = isTabletLayout
       ? gameSize.width - edgePadding * 2
       : Math.max(
           isUnitMenu ? CONTEXT_PANEL_MIN_WIDTH_UNIT : CONTEXT_PANEL_MIN_WIDTH_CITY,
           Math.min(780, gameSize.width - CONTEXT_PANEL_WIDTH_PADDING)
         );
     const contextX = gameSize.width / 2;
-    const contextY = gameSize.height - contextHeight / 2 - (isCompact ? 8 : 12);
+    const contextY = gameSize.height - contextHeight / 2 - (isTabletLayout ? 8 : 12);
     const contextTop = contextY - contextHeight / 2;
-    const titleOffset = contextExpanded ? (isCompact ? (isCityMenu ? 124 : 90) : isCityMenu ? 96 : 58) : 4;
-    const metaPrimaryOffset = isCompact ? (isCityMenu ? 96 : 62) : isCityMenu ? 70 : 34;
-    const metaSecondaryOffset = isCompact ? (isCityMenu ? 78 : 42) : isCityMenu ? 52 : 14;
+    const titleOffset = contextExpanded ? (isTabletLayout ? (isCityMenu ? 124 : 90) : isCityMenu ? 96 : 58) : 4;
+    const metaPrimaryOffset = isTabletLayout ? (isCityMenu ? 96 : 62) : isCityMenu ? 70 : 34;
+    const metaSecondaryOffset = isTabletLayout ? (isCityMenu ? 78 : 42) : isCityMenu ? 52 : 14;
     const activeCityProductionButtons =
       (this.latestState?.uiActions?.cityProductionTab ?? "units") === "buildings"
         ? this.cityBuildingButtons
@@ -767,7 +767,7 @@ export class UIScene extends Phaser.Scene {
     this.contextPanelPinButton.label.setPosition(contextPinX, contextButtonY);
 
     if (contextExpanded) {
-      if (isCompact) {
+      if (isTabletLayout) {
         this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY - 10, 8);
         this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 24, 6);
         this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 30, 10);
@@ -782,17 +782,17 @@ export class UIScene extends Phaser.Scene {
       this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 36, 16);
     }
 
-    const selectedPanelWidth = isCompact ? Math.max(150, Math.min(230, Math.floor(gameSize.width * 0.5))) : 460;
-    const selectedPanelHeight = isCompact ? 88 : 92;
+    const selectedPanelWidth = isTabletLayout ? Math.max(150, Math.min(230, Math.floor(gameSize.width * 0.5))) : 460;
+    const selectedPanelHeight = isTabletLayout ? 88 : 92;
     const selectedPanelY =
-      isCompact && contextVisible ? contextTop - selectedPanelHeight - 8 : gameSize.height - selectedPanelHeight - 14;
+      isTabletLayout && contextVisible ? contextTop - selectedPanelHeight - 8 : gameSize.height - selectedPanelHeight - 14;
     this.selectedPanel.setPosition(edgePadding, selectedPanelY);
     this.selectedPanel.setSize(selectedPanelWidth, selectedPanelHeight);
     this.selectedTitle.setPosition(edgePadding + 14, selectedPanelY + 12);
     this.selectedDetails.setPosition(edgePadding + 14, selectedPanelY + 38);
     this.selectedDetails.setWordWrapWidth(Math.max(120, selectedPanelWidth - 24), true);
 
-    const endTurnWidth = isCompact ? 146 : BUTTON_WIDTH;
+    const endTurnWidth = isTabletLayout ? 146 : BUTTON_WIDTH;
     this.endTurnButton.width = endTurnWidth;
     this.endTurnButton.rectangle.setSize(endTurnWidth, BUTTON_HEIGHT);
     const endTurnX = gameSize.width - edgePadding - endTurnWidth / 2;
@@ -801,8 +801,8 @@ export class UIScene extends Phaser.Scene {
     this.endTurnButton.label.setPosition(endTurnX, endTurnY);
 
     const statusWidth = endTurnWidth;
-    const statusHeight = isCompact ? 34 : 36;
-    const statusY = endTurnY - BUTTON_HEIGHT / 2 - statusHeight / 2 - (isCompact ? 8 : 10);
+    const statusHeight = isTabletLayout ? 34 : 36;
+    const statusY = endTurnY - BUTTON_HEIGHT / 2 - statusHeight / 2 - (isTabletLayout ? 8 : 10);
 
     this.turnAssistantPanel.setPosition(endTurnX, statusY);
     this.turnAssistantPanel.setSize(statusWidth, statusHeight);
@@ -810,7 +810,7 @@ export class UIScene extends Phaser.Scene {
     this.turnAssistantLabel.setPosition(endTurnX, statusY);
 
     this.layoutCityQueueRail({
-      isCompact,
+      isTabletLayout,
       edgePadding,
       notificationLeft,
       notificationWidth,
@@ -820,9 +820,9 @@ export class UIScene extends Phaser.Scene {
       visible: showCityQueueRail,
     });
 
-    const hintWidth = isCompact ? gameSize.width - edgePadding * 2 : 440;
-    const hintHeight = isCompact ? 82 : 74;
-    const hintY = isCompact ? Math.max(178, notificationHeight + edgePadding + hintHeight / 2 + 16) : 56;
+    const hintWidth = isTabletLayout ? gameSize.width - edgePadding * 2 : 440;
+    const hintHeight = isTabletLayout ? 82 : 74;
+    const hintY = isTabletLayout ? Math.max(178, notificationHeight + edgePadding + hintHeight / 2 + 16) : 56;
     this.hintPanel.setPosition(gameSize.width / 2, hintY);
     this.hintPanel.setSize(hintWidth, hintHeight);
     this.hintPrimary.setPosition(gameSize.width / 2, hintY - 12);
@@ -830,9 +830,9 @@ export class UIScene extends Phaser.Scene {
     this.hintPrimary.setWordWrapWidth(Math.max(140, hintWidth - 20), true);
     this.hintSecondary.setWordWrapWidth(Math.max(120, hintWidth - 20), true);
 
-    const previewWidth = isCompact ? Math.max(190, gameSize.width - edgePadding * 2) : 360;
+    const previewWidth = isTabletLayout ? Math.max(190, gameSize.width - edgePadding * 2) : 360;
     const previewHeight = 66;
-    const previewY = hintY + (isCompact ? 82 : 74);
+    const previewY = hintY + (isTabletLayout ? 82 : 74);
     this.previewPanel.setPosition(gameSize.width / 2, previewY);
     this.previewPanel.setSize(previewWidth, previewHeight);
     this.previewTitle.setPosition(gameSize.width / 2, previewY - 12);
@@ -897,8 +897,8 @@ export class UIScene extends Phaser.Scene {
     }
   }
 
-  resizeQueueRailControls(panelWidth, isCompact) {
-    const controlWidth = isCompact ? 16 : 18;
+  resizeQueueRailControls(panelWidth, isTabletLayout) {
+    const controlWidth = isTabletLayout ? 16 : 18;
     const clusterWidthTarget = Math.max(132, panelWidth - RIGHT_RAIL_QUEUE_SLOT_OUTER_PADDING * 2);
     const slotWidth = Math.max(96, clusterWidthTarget - controlWidth * 3 - RIGHT_RAIL_QUEUE_SLOT_INNER_GAP * 3);
     const controlHeight = CITY_PANEL_BUTTON_HEIGHT;
@@ -942,22 +942,22 @@ export class UIScene extends Phaser.Scene {
     }
   }
 
-  layoutCityQueueRail({ isCompact, edgePadding, notificationLeft, notificationWidth, statusY, statusHeight, selectedCity, visible }) {
+  layoutCityQueueRail({ isTabletLayout, edgePadding, notificationLeft, notificationWidth, statusY, statusHeight, selectedCity, visible }) {
     if (!visible || !selectedCity || !this.latestState) {
       this.setCityQueueRailVisible(false);
       return;
     }
 
     const notificationBottom = this.notificationPanel.getBounds().bottom;
-    const queueTop = notificationBottom + (isCompact ? 8 : 10);
-    const queueBottomLimit = statusY - statusHeight / 2 - (isCompact ? 8 : 10);
+    const queueTop = notificationBottom + (isTabletLayout ? 8 : 10);
+    const queueBottomLimit = statusY - statusHeight / 2 - (isTabletLayout ? 8 : 10);
     const availableHeight = queueBottomLimit - queueTop;
     if (availableHeight < RIGHT_RAIL_QUEUE_PANEL_MIN_HEIGHT) {
       this.setCityQueueRailVisible(false);
       return;
     }
 
-    const preferredHeight = isCompact ? RIGHT_RAIL_QUEUE_PANEL_HEIGHT_COMPACT : RIGHT_RAIL_QUEUE_PANEL_HEIGHT;
+    const preferredHeight = isTabletLayout ? RIGHT_RAIL_QUEUE_PANEL_HEIGHT_TABLET : RIGHT_RAIL_QUEUE_PANEL_HEIGHT;
     const panelHeight = Math.min(preferredHeight, availableHeight);
     const panelCenterX = notificationLeft + notificationWidth / 2;
     const panelCenterY = queueTop + panelHeight / 2;
@@ -966,7 +966,7 @@ export class UIScene extends Phaser.Scene {
     this.cityQueueRailPanel.setDisplaySize(notificationWidth, panelHeight);
     this.cityQueueRailTitle.setPosition(notificationLeft + 12, queueTop + 10);
     this.setCityQueueRailVisible(true);
-    const queueControlLayout = this.resizeQueueRailControls(notificationWidth, isCompact);
+    const queueControlLayout = this.resizeQueueRailControls(notificationWidth, isTabletLayout);
 
     const lineWrap = Math.max(120, notificationWidth - 22);
     this.cityQueueRailDetailsPrimary.setWordWrapWidth(lineWrap, true);
@@ -978,7 +978,7 @@ export class UIScene extends Phaser.Scene {
     this.cityQueueRailDetailsSecondary.setText(details.secondary);
     this.cityQueueRailDetailsTertiary.setText(details.tertiary);
 
-    let visibleDetailCount = isCompact
+    let visibleDetailCount = isTabletLayout
       ? panelHeight >= 154
         ? 1
         : 0
@@ -1520,7 +1520,7 @@ export class UIScene extends Phaser.Scene {
     const slice = filtered.slice(this.notificationScroll, this.notificationScroll + visibleCount);
     this.notificationVisibleSlice = slice;
     const shownRows = slice.length;
-    const filterHeight = this.scale.width < COMPACT_BREAKPOINT ? 60 : 34;
+    const filterHeight = this.scale.width < TABLET_LAYOUT_BREAKPOINT ? 60 : 34;
     const contentHeight = shownRows > 0 ? shownRows * 20 + 14 : 0;
     const panelHeight = 34 + filterHeight + contentHeight;
     const bounds = this.notificationPanel.getBounds();

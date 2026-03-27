@@ -55,3 +55,41 @@ canvas {
   letter-spacing: 0.2px;
   z-index: 30;
 }
+
+#unsupported-viewport-banner {
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-content: center;
+  gap: 10px;
+  padding: 28px;
+  text-align: center;
+  background: rgba(34, 24, 14, 0.78);
+  color: #f7eedb;
+  z-index: 40;
+}
+
+#game-root.viewport-unsupported #unsupported-viewport-banner {
+  display: grid;
+}
+
+#unsupported-viewport-banner h2 {
+  margin: 0;
+  font-size: 30px;
+  letter-spacing: 0.3px;
+}
+
+#unsupported-viewport-banner p {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+#game-root.viewport-unsupported canvas {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+#game-root.viewport-unsupported #loading-banner {
+  display: none;
+}

@@ -2,6 +2,8 @@ Original prompt: I want to make civilization like easy game in JS. Let's init th
 
 Historical note (2026-03-27): this file is a chronological implementation log. Older entries may reference spec filenames/numbering that were correct at the time. The current authoritative spec list is `docs/README.md`.
 
+Viewport support note (2026-03-27): legacy mentions of mobile checks/artifacts in older entries (for example `mobile-smoke.png`, `390x844`, and mobile responsive fixes) are historical only. Current support policy is desktop + tablet (`>= 768px` width), with phone-sized viewports intentionally blocked.
+
 ## 2026-03-23
 - Initialized implementation session for Phaser Civ-like base repo.
 - Goals: bootstrap project, playable hex turn loop, tests, and docs specs under /docs.

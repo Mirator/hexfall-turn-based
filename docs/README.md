@@ -4,6 +4,8 @@ Every meaningful work item in this repository must be captured in a spec file un
 
 Consolidated domain specs; older milestone specs removed.
 
+Support policy (authoritative): desktop + tablet only. Runtime support requires viewport width `>= 768px`; phone-sized viewports are intentionally blocked.
+
 ## Current Specs
 
 - [spec-001-bootstrap-and-runtime-foundation.md](./spec-001-bootstrap-and-runtime-foundation.md) - Repository/tooling bootstrap, lazy runtime loading, and build/chunk foundations.

@@ -124,9 +124,36 @@ async function run() {
       consoleErrors.push(String(error));
     });
 
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(URL, { waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => typeof window.render_game_to_text === "function");
+    await page.waitForSelector("#unsupported-viewport-banner", { state: "visible" });
+    const unsupportedBannerText = await page.locator("#unsupported-viewport-banner").innerText();
+    assert.ok(unsupportedBannerText.includes("768"), "unsupported banner should include minimum supported width");
+
+    const unsupportedSnapshot = await page.evaluate(() => ({
+      mode: window.__hexfallTest.getState().mode,
+      canvasCount: document.querySelectorAll("canvas").length,
+      bannerVisible: !document.getElementById("unsupported-viewport-banner")?.hidden,
+    }));
+    assert.equal(unsupportedSnapshot.mode, "unsupported", "phone viewport should remain unsupported");
+    assert.equal(unsupportedSnapshot.canvasCount, 0, "phone viewport should not initialize gameplay canvas");
+    assert.equal(unsupportedSnapshot.bannerVisible, true, "unsupported banner should be visible on phone viewport");
+
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForFunction(() => document.getElementById("unsupported-viewport-banner")?.hidden === true);
+    await page.waitForSelector("canvas", { state: "visible" });
+    await page.waitForFunction(() => {
+      const state = window.__hexfallTest.getState();
+      return state?.mode !== "loading" && state?.mode !== "unsupported";
+    });
     await page.waitForTimeout(700);
+    const tabletBootstrapState = await page.evaluate(() => window.__hexfallTest.getState());
+    assert.equal(tabletBootstrapState.turn, 1, "tablet viewport should load active gameplay state");
+    assert.equal(tabletBootstrapState.match?.status, "ongoing", "tablet viewport should enter normal match flow");
+
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.waitForTimeout(220);
 
     const initialState = await page.evaluate(() => window.__hexfallTest.getState());
     assert.equal(initialState.turn, 1, "initial turn should be 1");

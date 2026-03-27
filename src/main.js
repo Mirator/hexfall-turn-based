@@ -1,7 +1,12 @@
 import "./style.css";
+
+const MIN_SUPPORTED_VIEWPORT_WIDTH = 768;
+
 const gameRoot = document.getElementById("game-root");
 const loadingBanner = createLoadingBanner();
+const unsupportedViewportBanner = createUnsupportedViewportBanner();
 gameRoot?.appendChild(loadingBanner);
+gameRoot?.appendChild(unsupportedViewportBanner);
 
 let game = null;
 let sceneGetters = {
@@ -9,11 +14,19 @@ let sceneGetters = {
   getUIScene: () => null,
 };
 let gameLoadPromise = null;
+let viewportSupported = false;
 
 window.__hexfallGame = null;
 window.render_game_to_text = () => {
   const worldScene = game ? sceneGetters.getWorldScene(game) : null;
   if (!worldScene) {
+    if (!isViewportSupported()) {
+      return JSON.stringify({
+        mode: "unsupported",
+        viewportWidth: getViewportWidth(),
+        minSupportedViewportWidth: MIN_SUPPORTED_VIEWPORT_WIDTH,
+      });
+    }
     return JSON.stringify({ mode: "loading" });
   }
   return worldScene.renderGameToText();
@@ -233,14 +246,65 @@ window.__hexfallTest = {
   },
 };
 
-void startGame();
+window.addEventListener("resize", refreshViewportSupportState);
+window.addEventListener("orientationchange", refreshViewportSupportState);
+void refreshViewportSupportState();
+
+function getViewportWidth() {
+  const documentWidth = document.documentElement?.clientWidth ?? 0;
+  return Math.max(window.innerWidth ?? 0, documentWidth);
+}
+
+function isViewportSupported() {
+  return getViewportWidth() >= MIN_SUPPORTED_VIEWPORT_WIDTH;
+}
+
+function setUnsupportedViewportVisible(visible) {
+  if (!gameRoot) {
+    return;
+  }
+  gameRoot.classList.toggle("viewport-unsupported", visible);
+  unsupportedViewportBanner.hidden = !visible;
+  unsupportedViewportBanner.setAttribute("aria-hidden", String(!visible));
+}
+
+function showLoadingBanner(message) {
+  loadingBanner.textContent = message;
+  loadingBanner.hidden = false;
+  loadingBanner.setAttribute("aria-hidden", "false");
+}
+
+function hideLoadingBanner() {
+  loadingBanner.hidden = true;
+  loadingBanner.setAttribute("aria-hidden", "true");
+}
+
+function refreshViewportSupportState() {
+  viewportSupported = isViewportSupported();
+  setUnsupportedViewportVisible(!viewportSupported);
+
+  if (!viewportSupported) {
+    hideLoadingBanner();
+    return;
+  }
+
+  if (game) {
+    hideLoadingBanner();
+    return;
+  }
+
+  void startGame();
+}
 
 async function startGame() {
+  if (!isViewportSupported()) {
+    return null;
+  }
   if (gameLoadPromise) {
     return gameLoadPromise;
   }
 
-  loadingBanner.textContent = "Loading Phaser engine...";
+  showLoadingBanner("Loading Phaser engine...");
   gameLoadPromise = import("./game/createGame.js")
     .then((module) => {
       sceneGetters = {
@@ -253,11 +317,11 @@ async function startGame() {
     })
     .then(async (createdGame) => {
       await waitForCanvas();
-      loadingBanner.remove();
+      hideLoadingBanner();
       return createdGame;
     })
     .catch((error) => {
-      loadingBanner.textContent = `Failed to load game: ${error instanceof Error ? error.message : "unknown error"}`;
+      showLoadingBanner(`Failed to load game: ${error instanceof Error ? error.message : "unknown error"}`);
       throw error;
     });
 
@@ -277,5 +341,28 @@ function createLoadingBanner() {
   const element = document.createElement("div");
   element.id = "loading-banner";
   element.textContent = "Preparing Hexfall...";
+  element.setAttribute("aria-hidden", "true");
+  element.hidden = true;
+  return element;
+}
+
+function createUnsupportedViewportBanner() {
+  const element = document.createElement("section");
+  element.id = "unsupported-viewport-banner";
+  element.setAttribute("aria-hidden", "true");
+  element.hidden = true;
+
+  const title = document.createElement("h2");
+  title.textContent = "Desktop + Tablet Only";
+
+  const lineOne = document.createElement("p");
+  lineOne.textContent = `Hexfall currently supports screens at least ${MIN_SUPPORTED_VIEWPORT_WIDTH}px wide.`;
+
+  const lineTwo = document.createElement("p");
+  lineTwo.textContent = "Resize your browser window or use a larger device to play.";
+
+  element.appendChild(title);
+  element.appendChild(lineOne);
+  element.appendChild(lineTwo);
   return element;
 }
