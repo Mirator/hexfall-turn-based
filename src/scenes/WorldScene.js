@@ -869,8 +869,11 @@ export class WorldScene extends Phaser.Scene {
         }
 
         const step = plan.steps[index];
+        const stepVisibleToPlayer = this.isEnemyStepVisibleToPlayer(owner, step);
         this.turnPlayback.stepIndex = index + 1;
-        this.turnPlayback.message = this.describeEnemyStep(step, index + 1, plan.steps.length, owner);
+        this.turnPlayback.message = stepVisibleToPlayer
+          ? this.describeEnemyStep(step, index + 1, plan.steps.length, owner)
+          : `${getOwnerLabel(owner, this.gameState)} action ${index + 1}/${Math.max(1, plan.steps.length)}`;
         this.publishState();
 
         const execution = executeEnemyTurnStep(this.gameState, step);
@@ -1117,6 +1120,9 @@ export class WorldScene extends Phaser.Scene {
     if (!execution?.ok || !execution.result) {
       return;
     }
+    if (!this.isEnemyStepVisibleToPlayer(owner, step, execution)) {
+      return;
+    }
 
     if (step.action === "foundCity") {
       const foundedCityId = execution.result.cityId ?? null;
@@ -1198,6 +1204,9 @@ export class WorldScene extends Phaser.Scene {
     if (!execution?.ok || !step) {
       return;
     }
+    if (!this.isEnemyStepVisibleToPlayer(this.turnPlayback.actor, step, execution)) {
+      return;
+    }
 
     const speedScale = this.getEnemyPlaybackSpeedScale(this.turnPlayback.totalSteps);
     if (step.action === "move") {
@@ -1262,6 +1271,65 @@ export class WorldScene extends Phaser.Scene {
         });
       }
     }
+  }
+
+  isEnemyStepVisibleToPlayer(owner, step, execution = null) {
+    if (!step || !isAiOwner(owner, this.gameState)) {
+      return true;
+    }
+    if (isPlayerDevVisionEnabled(this.gameState)) {
+      return true;
+    }
+
+    const visibleHexesToCheck = [];
+    const addVisibleHexCandidate = (hex) => {
+      if (!hex || typeof hex !== "object") {
+        return;
+      }
+      if (Number.isFinite(hex.q) && Number.isFinite(hex.r)) {
+        visibleHexesToCheck.push({ q: hex.q, r: hex.r });
+      }
+    };
+
+    addVisibleHexCandidate(step);
+    addVisibleHexCandidate(step.presentation?.from);
+    addVisibleHexCandidate(step.presentation?.to);
+    addVisibleHexCandidate(step.presentation?.target);
+    addVisibleHexCandidate(execution?.actionSummary?.presentation?.from);
+    addVisibleHexCandidate(execution?.actionSummary?.presentation?.to);
+    addVisibleHexCandidate(execution?.actionSummary?.presentation?.target);
+
+    for (const hex of visibleHexesToCheck) {
+      if (this.isHexVisibleToPlayer(hex.q, hex.r)) {
+        return true;
+      }
+    }
+
+    const actorUnit = typeof step.unitId === "string" ? getUnitById(this.gameState, step.unitId) : null;
+    if (actorUnit && this.isUnitVisibleToPlayer(actorUnit)) {
+      return true;
+    }
+
+    if (typeof step.targetId === "string") {
+      const targetUnit = getUnitById(this.gameState, step.targetId);
+      if (targetUnit && this.isUnitVisibleToPlayer(targetUnit)) {
+        return true;
+      }
+      const targetCity = this.gameState.cities.find((city) => city.id === step.targetId) ?? null;
+      if (targetCity && this.isCityVisibleToPlayer(targetCity)) {
+        return true;
+      }
+    }
+
+    const foundedCityId = execution?.result?.cityId ?? null;
+    if (typeof foundedCityId === "string") {
+      const foundedCity = this.gameState.cities.find((city) => city.id === foundedCityId) ?? null;
+      if (foundedCity && this.isCityVisibleToPlayer(foundedCity)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   getEnemyPlaybackSpeedScale(totalSteps) {

@@ -605,6 +605,13 @@ async function run() {
       }
 
       // Real enemy playback path: request end-turn and verify timeline state transitions.
+      const beforeEnemyPlaybackState = getState();
+      const aiOwnersBeforePlayback = new Set(beforeEnemyPlaybackState.factions?.aiOwners ?? []);
+      const aiCityIdsBeforePlayback = new Set(
+        (beforeEnemyPlaybackState.cities ?? [])
+          .filter((city) => aiOwnersBeforePlayback.has(city.owner))
+          .map((city) => city.id)
+      );
       const requestedAnimatedTurn = window.__hexfallTest.requestEndTurn();
       if (!requestedAnimatedTurn) {
         return { ok: false, reason: "end-turn-request-failed-after-found" };
@@ -613,7 +620,9 @@ async function run() {
       let playbackObserved = false;
       let stepAdvanced = false;
       let maxObservedStep = 0;
+      let maxObservedFx = 0;
       const observedPlaybackActors = new Set();
+      const observedPlaybackMessages = new Set();
       for (let i = 0; i < 60; i += 1) {
         await pause(70);
         const frameState = getState();
@@ -628,6 +637,14 @@ async function run() {
             if (stepIndex > 0) {
               stepAdvanced = true;
             }
+          }
+          const playbackMessage = String(frameState.turnPlayback?.message ?? "");
+          if (playbackMessage) {
+            observedPlaybackMessages.add(playbackMessage);
+          }
+          const frameFx = Number(frameState.spriteLayers?.fx ?? 0);
+          if (Number.isFinite(frameFx) && frameFx > maxObservedFx) {
+            maxObservedFx = frameFx;
           }
         }
         if (playbackObserved && frameState.phase === "player" && !frameState.turnPlayback?.active) {
@@ -670,6 +687,38 @@ async function run() {
       }
       if (afterEnemyOpen.units.some((unit) => unit.owner === "purple" && unit.type === "settler")) {
         return { ok: false, reason: "purple-settler-should-be-consumed" };
+      }
+      const aiOwnersAfterPlayback = new Set(afterEnemyOpen.factions?.aiOwners ?? []);
+      const aiFoundedCitiesThisPlayback = (afterEnemyOpen.cities ?? []).filter(
+        (city) => aiOwnersAfterPlayback.has(city.owner) && !aiCityIdsBeforePlayback.has(city.id)
+      );
+      const playerVisibleHexesAfterPlayback = new Set(afterEnemyOpen.visibility?.byOwner?.player?.visibleHexes ?? []);
+      const hiddenFoundedAiCities = aiFoundedCitiesThisPlayback.filter(
+        (city) => !playerVisibleHexesAfterPlayback.has(`${city.q},${city.r}`)
+      );
+      const hiddenFoundedAiOwners = [...new Set(hiddenFoundedAiCities.map((city) => city.owner))];
+      const notificationsAfterEnemyPlayback = window.__hexfallTest.getNotificationCenterState();
+      const notificationMessagesAfterEnemyPlayback = (notificationsAfterEnemyPlayback?.entries ?? []).map((entry) =>
+        String(entry?.message ?? "")
+      );
+      const playbackMessagesSeen = [...observedPlaybackMessages];
+      for (const hiddenOwner of hiddenFoundedAiOwners) {
+        const ownerLabel = hiddenOwner.charAt(0).toUpperCase() + hiddenOwner.slice(1);
+        const hiddenFoundingNotificationLeaked = notificationMessagesAfterEnemyPlayback.some(
+          (message) => message === `${ownerLabel} founded a city.`
+        );
+        if (hiddenFoundingNotificationLeaked) {
+          return { ok: false, reason: `hidden-${hiddenOwner}-city-founding-notification-leaked` };
+        }
+        const hiddenFoundingPlaybackDetailLeaked = playbackMessagesSeen.some(
+          (message) => message.includes(`${ownerLabel} action`) && message.includes("founds a city")
+        );
+        if (hiddenFoundingPlaybackDetailLeaked) {
+          return { ok: false, reason: `hidden-${hiddenOwner}-city-founding-playback-message-leaked` };
+        }
+      }
+      if (hiddenFoundedAiCities.length === 2 && maxObservedFx > 0) {
+        return { ok: false, reason: "hidden-ai-founding-should-not-produce-fx" };
       }
 
       // AI personality payload + forced override hook.
