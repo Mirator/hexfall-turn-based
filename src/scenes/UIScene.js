@@ -6,9 +6,9 @@ const BUTTON_HEIGHT = 40;
 const TABLET_LAYOUT_BREAKPOINT = 900;
 const CITY_PANEL_TAB_WIDTH = 102;
 const CITY_PANEL_ACTION_WIDTH = 100;
-const CITY_PANEL_QUEUE_ITEM_WIDTH = 96;
-const CITY_PANEL_QUEUE_MOVE_WIDTH = 26;
-const CITY_PANEL_QUEUE_REMOVE_WIDTH = 26;
+const CITY_PANEL_QUEUE_ITEM_WIDTH = 126;
+const CITY_PANEL_QUEUE_MOVE_WIDTH = 32;
+const CITY_PANEL_QUEUE_REMOVE_WIDTH = 32;
 const CITY_PANEL_BUTTON_HEIGHT = 32;
 const UNIT_PANEL_ACTION_WIDTH = 160;
 const NEW_GAME_MODAL_WIDTH = 460;
@@ -29,12 +29,25 @@ const RIGHT_RAIL_QUEUE_PANEL_HEIGHT_TABLET = 208;
 const RIGHT_RAIL_QUEUE_PANEL_MIN_HEIGHT = 140;
 const RIGHT_RAIL_QUEUE_SLOT_OUTER_PADDING = 14;
 const RIGHT_RAIL_QUEUE_SLOT_ROW_GAP = 6;
-const RIGHT_RAIL_QUEUE_SLOT_INNER_GAP = 3;
-const NOTIFICATION_ROW_HEIGHT = 22;
+const RIGHT_RAIL_QUEUE_SLOT_INNER_GAP = 6;
+const NOTIFICATION_ROW_HEIGHT = 46;
 const PRODUCTION_TABS = ["units", "buildings"];
 const UNIT_PRODUCTION_TYPES = ["warrior", "settler", "spearman", "archer"];
 const BUILDING_PRODUCTION_TYPES = ["granary", "workshop", "monument"];
 const NOTIFICATION_FILTERS = ["All", "Combat", "City", "Research", "System"];
+const UI_SFX_ACTIONS = new Set(["endTurn", "pause-resume", "pause-restart", "restart-confirm", "restart-cancel", "resultRestart"]);
+
+const SEMANTIC_COLORS = {
+  textStrong: "#2f2213",
+  textMuted: "#655239",
+  textInfo: "#2d5f8f",
+  textPositive: "#2f7a41",
+  textWarning: "#8f3a2a",
+  panelBg: 0xefe2c7,
+  panelBorder: 0x7d5a2f,
+  panelActiveBg: 0xf3e9d4,
+  panelSoftBg: 0xe8dbc2,
+};
 
 const UNIT_LABELS = {
   warrior: "Warrior",
@@ -82,9 +95,16 @@ export class UIScene extends Phaser.Scene {
     this.contextPanelPinned = false;
     this.lastContextSelectionKey = null;
     this.disabledTooltipVisible = false;
+    this.notificationRows = [];
+    this.uiSfxMuted = false;
+    this.uiSfxContext = null;
+    this.uiSfxMasterGain = null;
+    this.uiSfxUnlocked = false;
   }
 
   create() {
+    this.topHudPanel = this.add.rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelBg, 0.94).setOrigin(0, 0).setDepth(9);
+    this.topHudPanel.setStrokeStyle(2, SEMANTIC_COLORS.panelBorder, 0.88);
     this.turnLabel = this.createLabel("", 24, 16, "26px", "#1f1810", 10, "#f5ecdc", 3);
     this.foodLabel = this.createLabel("", 24, 48, "19px", "#1f1810", 10);
     this.foodDeltaLabel = this.createLabel("", 24, 50, "16px", "#2f7a41", 10);
@@ -93,22 +113,55 @@ export class UIScene extends Phaser.Scene {
     this.scienceLabel = this.createLabel("", 24, 104, "19px", "#1f1810", 10);
     this.scienceDeltaLabel = this.createLabel("", 24, 106, "16px", "#2f7a41", 10);
     this.devVisionLabel = this.createLabel("", 24, 132, "16px", "#4a361f", 10);
+    this.sfxToggleButton = this.createButton("SFX ON", "toggle-sfx", () => this.toggleSfxMuted(), {
+      width: 96,
+      height: 24,
+      fontSize: "11px",
+      enabledFill: 0x5a6654,
+      hoverFill: 0x6b795f,
+      activeFill: 0x355e94,
+      stroke: 0xe8dcc4,
+    });
+    this.sfxToggleButton.rectangle.setDepth(10);
+    this.sfxToggleButton.label.setDepth(11);
     this.playbackPanel = this.add.rectangle(0, 0, 10, 10, 0xe9dcc1, 0.96).setDepth(11).setVisible(false);
     this.playbackPanel.setStrokeStyle(2, 0x7d5a2f, 0.86);
     this.playbackLabel = this.createLabel("", 0, 0, "15px", "#3f2d18", 12).setOrigin(0.5).setVisible(false);
 
-    this.selectedPanel = this.add.rectangle(24, 0, 460, 92, 0xeadcc0, 0.95).setOrigin(0, 0).setDepth(10);
-    this.selectedPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
+    this.selectedPanel = this.add.rectangle(24, 0, 460, 92, SEMANTIC_COLORS.panelBg, 0.96).setOrigin(0, 0).setDepth(10);
+    this.selectedPanel.setStrokeStyle(2, SEMANTIC_COLORS.panelBorder, 0.86);
     this.selectedTitle = this.createLabel("Selected", 38, 0, "16px", "#4a3318", 11);
     this.selectedDetails = this.createLabel("No selection", 38, 0, "15px", "#3f2d18", 11);
 
     this.endTurnButton = this.createButton("End Turn", "endTurn", () => gameEvents.emit("end-turn-requested"));
-    this.turnAssistantPanel = this.add.rectangle(0, 0, 220, 64, 0xf0e4cb, 0.95).setDepth(12);
-    this.turnAssistantPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
-    this.turnAssistantPanel.setInteractive({ useHandCursor: true });
-    this.turnAssistantPanel.on("pointerdown", () => gameEvents.emit("next-ready-unit-requested"));
-    this.turnAssistantLabel = this.createLabel("Units ready 0", 0, 0, "15px", "#312314", 13).setOrigin(0.5);
-    this.turnAssistantSecondaryLabel = this.createLabel("Empty queues 0", 0, 0, "14px", "#5a4224", 13).setOrigin(0.5);
+    this.turnAssistantPanel = this.add.rectangle(0, 0, 220, 72, SEMANTIC_COLORS.panelBg, 0.95).setDepth(12);
+    this.turnAssistantPanel.setStrokeStyle(2, SEMANTIC_COLORS.panelBorder, 0.86);
+    this.turnAssistantLabel = this.createLabel("Attention", 0, 0, "14px", SEMANTIC_COLORS.textStrong, 13).setOrigin(0.5);
+    this.turnAssistantSecondaryLabel = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textMuted, 13).setOrigin(0.5);
+    this.attentionReadyButton = this.createButton("Units 0", "attention-ready", () => gameEvents.emit("attention-ready-unit-requested"), {
+      width: 94,
+      height: 24,
+      fontSize: "12px",
+      enabledFill: 0x4f6b4a,
+      hoverFill: 0x5d8156,
+      activeFill: 0x3a7f4e,
+      disabledFill: 0x6f776d,
+      stroke: 0xe6dbbf,
+    });
+    this.attentionQueueButton = this.createButton("Queues 0", "attention-queue", () => gameEvents.emit("attention-empty-queue-requested"), {
+      width: 94,
+      height: 24,
+      fontSize: "12px",
+      enabledFill: 0x6a5c3e,
+      hoverFill: 0x7a6d4d,
+      activeFill: 0x8a5b2f,
+      disabledFill: 0x6f6b62,
+      stroke: 0xe6dbbf,
+    });
+    this.attentionReadyButton.rectangle.setDepth(14);
+    this.attentionReadyButton.label.setDepth(15);
+    this.attentionQueueButton.rectangle.setDepth(14);
+    this.attentionQueueButton.label.setDepth(15);
     this.nextUnitButton = this.createButton("Next Unit", "nextUnit", () => gameEvents.emit("next-ready-unit-requested"), {
       width: 130,
       height: 30,
@@ -229,7 +282,7 @@ export class UIScene extends Phaser.Scene {
     );
     this.cityQueueMoveUpButtons = [0, 1, 2].map((index) =>
       this.createButton(
-        "U",
+        "^",
         `city-queue-move-up-${index}`,
         () => gameEvents.emit("city-queue-move-requested", { index, direction: "up" }),
         {
@@ -245,7 +298,7 @@ export class UIScene extends Phaser.Scene {
     );
     this.cityQueueMoveDownButtons = [0, 1, 2].map((index) =>
       this.createButton(
-        "D",
+        "v",
         `city-queue-move-down-${index}`,
         () => gameEvents.emit("city-queue-move-requested", { index, direction: "down" }),
         {
@@ -261,7 +314,7 @@ export class UIScene extends Phaser.Scene {
     );
     this.cityQueueRemoveButtons = [0, 1, 2].map((index) =>
       this.createButton(
-        "X",
+        "x",
         `city-queue-remove-${index}`,
         () => gameEvents.emit("city-queue-remove-requested", { index }),
         {
@@ -304,6 +357,9 @@ export class UIScene extends Phaser.Scene {
     this.setCityControlsVisible(false);
     this.setUnitControlsVisible(false);
     this.turnAssistantSecondaryLabel.setVisible(false);
+    this.setCompositeVisible(this.attentionReadyButton, true);
+    this.setCompositeVisible(this.attentionQueueButton, true);
+    this.setSfxMuted(false);
     this.setCompositeVisible(this.contextPanelExpandButton, false);
     this.setCompositeVisible(this.contextPanelPinButton, false);
     this.contextPanelMetaPrimary.setVisible(false);
@@ -326,7 +382,7 @@ export class UIScene extends Phaser.Scene {
     this.disabledTooltipPanel.setStrokeStyle(1, 0xd7c8a4, 0.95);
     this.disabledTooltipLabel = this.createLabel("", 0, 0, "12px", "#f5e8ca", 32).setVisible(false);
 
-    this.notificationPanel = this.add.rectangle(0, 0, 360, 236, 0xe5d8bc, 0.97).setDepth(16);
+    this.notificationPanel = this.add.rectangle(0, 0, 360, 236, SEMANTIC_COLORS.panelSoftBg, 0.97).setDepth(16);
     this.notificationPanel.setStrokeStyle(2, 0x6d502a, 0.92);
     this.notificationTitle = this.createLabel("Notifications", 0, 0, "18px", "#2f2010", 17);
     this.notificationFilterButtons = NOTIFICATION_FILTERS.map((filterName) =>
@@ -345,11 +401,7 @@ export class UIScene extends Phaser.Scene {
       filterButton.rectangle.setDepth(18);
       filterButton.label.setDepth(19);
     }
-    this.notificationRows = Array.from({ length: 8 }, (_unused, index) => {
-      const row = this.createLabel("", 0, 0, "15px", "#3f2d18", 17).setVisible(false);
-      row.on("pointerdown", () => this.focusNotificationByRow(index));
-      return row;
-    });
+    this.notificationRows = Array.from({ length: 8 }, (_unused, index) => this.createNotificationRow(index));
 
     this.cityQueueRailPanel = this.add.rectangle(0, 0, 10, 10, 0xeadcc0, 0.95).setDepth(16).setVisible(false);
     this.cityQueueRailPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
@@ -513,6 +565,7 @@ export class UIScene extends Phaser.Scene {
     gameEvents.on("state-changed", this.updateFromState, this);
     gameEvents.on("ui-toast-requested", this.handleNotificationRequested, this);
     gameEvents.on("ui-notifications-reset-requested", this.handleNotificationsReset, this);
+    gameEvents.on("ui-sfx-requested", this.handleUiSfxRequested, this);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.scale.off("resize", this.layout, this);
@@ -522,6 +575,7 @@ export class UIScene extends Phaser.Scene {
       gameEvents.off("state-changed", this.updateFromState, this);
       gameEvents.off("ui-toast-requested", this.handleNotificationRequested, this);
       gameEvents.off("ui-notifications-reset-requested", this.handleNotificationsReset, this);
+      gameEvents.off("ui-sfx-requested", this.handleUiSfxRequested, this);
       gameEvents.emit("ui-modal-state-changed", false);
     });
 
@@ -590,6 +644,81 @@ export class UIScene extends Phaser.Scene {
     return button;
   }
 
+  createNotificationRow(index) {
+    const panel = this.add
+      .rectangle(0, 0, 10, 10, 0xf3e8d1, 0.78)
+      .setOrigin(0, 0)
+      .setDepth(17)
+      .setVisible(false)
+      .setInteractive({ useHandCursor: true });
+    panel.setStrokeStyle(1, 0x7d5a2f, 0.64);
+    const badge = this.add.rectangle(0, 0, 10, 10, 0x6f6d63, 0.9).setOrigin(0, 0).setDepth(18).setVisible(false);
+    const badgeLabel = this.createLabel("", 0, 0, "10px", "#f8f0dd", 19).setVisible(false);
+    const header = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textMuted, 19).setVisible(false);
+    const message = this.createLabel("", 0, 0, "14px", SEMANTIC_COLORS.textStrong, 19).setVisible(false);
+    const jump = this.createLabel("Jump", 0, 0, "11px", SEMANTIC_COLORS.textInfo, 19).setVisible(false);
+    const entry = { panel, badge, badgeLabel, header, message, jump };
+    const clickHandler = () => this.focusNotificationByRow(index);
+    panel.on("pointerdown", clickHandler);
+    header.on("pointerdown", clickHandler);
+    message.on("pointerdown", clickHandler);
+    jump.on("pointerdown", clickHandler);
+    return entry;
+  }
+
+  setNotificationRowVisible(row, visible) {
+    row.panel.setVisible(visible);
+    row.badge.setVisible(visible);
+    row.badgeLabel.setVisible(visible);
+    row.header.setVisible(visible);
+    row.message.setVisible(visible);
+    row.jump.setVisible(false);
+  }
+
+  animatePanelVisibility(panel, labels, visible) {
+    const targets = [panel, ...labels];
+    const currentlyVisible = panel.visible;
+    if (visible && currentlyVisible && panel.alpha >= 0.98) {
+      for (const label of labels) {
+        label.setVisible(true);
+      }
+      return;
+    }
+    if (!visible && !currentlyVisible) {
+      return;
+    }
+    if (visible) {
+      panel.setVisible(true);
+      for (const label of labels) {
+        label.setVisible(true);
+      }
+      this.tweens.killTweensOf(targets);
+      for (const target of targets) {
+        target.setAlpha(0);
+      }
+      this.tweens.add({
+        targets,
+        alpha: 1,
+        duration: 120,
+        ease: "Quad.Out",
+      });
+      return;
+    }
+    this.tweens.killTweensOf(targets);
+    this.tweens.add({
+      targets,
+      alpha: 0,
+      duration: 90,
+      ease: "Quad.Out",
+      onComplete: () => {
+        panel.setVisible(false);
+        for (const label of labels) {
+          label.setVisible(false);
+        }
+      },
+    });
+  }
+
   handleButtonHover(button, isEntering) {
     if (this.isAnyModalOpen() && !this.isModalButton(button.actionId)) {
       return;
@@ -598,6 +727,7 @@ export class UIScene extends Phaser.Scene {
     if (button.enabled) {
       if (isEntering) {
         button.rectangle.setFillStyle(button.palette.hoverFill, button.palette.hoverAlpha);
+        this.animateButtonHover(button, true);
         if (productionHoverText) {
           this.hoverHint = {
             primary: truncateText(productionHoverText.replace(/\n/g, " | "), 160),
@@ -610,6 +740,7 @@ export class UIScene extends Phaser.Scene {
         }
       } else {
         this.applyButtonVisualState(button);
+        this.animateButtonHover(button, false);
         this.hoverHint = null;
         this.updateContextualHint();
       }
@@ -648,14 +779,119 @@ export class UIScene extends Phaser.Scene {
     if (this.isAnyModalOpen() && !this.isModalButton(button.actionId)) {
       return;
     }
+    this.animateButtonPress(button);
     if (button.enabled) {
       button.onClick();
+      this.playUiSfx(UI_SFX_ACTIONS.has(button.actionId) ? "confirm" : "select");
       return;
     }
     const hint = this.getDisabledActionHint(button.actionId);
     if (hint) {
       this.handleNotificationRequested({ message: hint, level: "warning" });
     }
+    this.playUiSfx("warning");
+  }
+
+  animateButtonHover(button, isEntering) {
+    const scale = isEntering ? 1.015 : 1;
+    this.tweens.killTweensOf(button.rectangle);
+    this.tweens.killTweensOf(button.label);
+    this.tweens.add({
+      targets: button.rectangle,
+      scaleX: scale,
+      scaleY: scale,
+      duration: 80,
+      ease: "Quad.Out",
+    });
+    this.tweens.add({
+      targets: button.label,
+      scaleX: scale,
+      scaleY: scale,
+      duration: 80,
+      ease: "Quad.Out",
+    });
+  }
+
+  animateButtonPress(button) {
+    this.tweens.killTweensOf(button.rectangle);
+    this.tweens.killTweensOf(button.label);
+    this.tweens.add({
+      targets: [button.rectangle, button.label],
+      scaleX: 0.96,
+      scaleY: 0.96,
+      yoyo: true,
+      duration: 55,
+      ease: "Quad.Out",
+    });
+  }
+
+  handleUiSfxRequested = (payload) => {
+    const kind = typeof payload === "string" ? payload : payload?.kind;
+    this.playUiSfx(kind);
+  };
+
+  ensureUiSfxContext() {
+    if (this.uiSfxContext && this.uiSfxMasterGain) {
+      return true;
+    }
+    const Context = window.AudioContext || window.webkitAudioContext;
+    if (!Context) {
+      return false;
+    }
+    try {
+      this.uiSfxContext = new Context();
+      this.uiSfxMasterGain = this.uiSfxContext.createGain();
+      this.uiSfxMasterGain.gain.value = 0.06;
+      this.uiSfxMasterGain.connect(this.uiSfxContext.destination);
+      return true;
+    } catch {
+      this.uiSfxContext = null;
+      this.uiSfxMasterGain = null;
+      return false;
+    }
+  }
+
+  playUiSfx(kind) {
+    if (!kind || this.uiSfxMuted) {
+      return;
+    }
+    if (!this.ensureUiSfxContext() || !this.uiSfxContext || !this.uiSfxMasterGain) {
+      return;
+    }
+    const context = this.uiSfxContext;
+    if (context.state === "suspended") {
+      void context.resume();
+    }
+    const profile = resolveUiSfxProfile(kind);
+    if (!profile) {
+      return;
+    }
+    const now = context.currentTime;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = profile.wave;
+    oscillator.frequency.setValueAtTime(profile.frequency, now);
+    oscillator.frequency.exponentialRampToValueAtTime(Math.max(50, profile.frequency * profile.frequencyDrop), now + profile.duration);
+    gain.gain.setValueAtTime(profile.gain, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + profile.duration);
+    oscillator.connect(gain);
+    gain.connect(this.uiSfxMasterGain);
+    oscillator.start(now);
+    oscillator.stop(now + profile.duration);
+  }
+
+  setSfxMuted(muted) {
+    this.uiSfxMuted = !!muted;
+    this.setButtonActive(this.sfxToggleButton, !this.uiSfxMuted);
+    this.setButtonLabel(this.sfxToggleButton, this.uiSfxMuted ? "SFX OFF" : "SFX ON");
+    return this.uiSfxMuted;
+  }
+
+  toggleSfxMuted() {
+    const nextMuted = !this.uiSfxMuted;
+    this.setSfxMuted(nextMuted);
+    this.playUiSfx(nextMuted ? "warning" : "confirm");
+    return this.uiSfxMuted;
   }
 
   getDisabledActionHint(actionId) {
@@ -670,6 +906,8 @@ export class UIScene extends Phaser.Scene {
     const isGameplayAction =
       actionId === "endTurn" ||
       actionId === "nextUnit" ||
+      actionId === "attention-ready" ||
+      actionId === "attention-queue" ||
       actionId.startsWith("unit-") ||
       actionId.startsWith("city-") ||
       actionId === "context-expand-toggle" ||
@@ -683,6 +921,15 @@ export class UIScene extends Phaser.Scene {
     if (actionId === "nextUnit") {
       const readyCount = this.latestState.uiTurnAssistant?.readyCount ?? 0;
       return readyCount > 0 ? null : "No ready units to cycle.";
+    }
+    if (actionId === "attention-ready") {
+      const readyUnits = this.latestState.uiTurnAssistant?.readyUnits ?? this.latestState.uiTurnAssistant?.readyCount ?? 0;
+      return readyUnits > 0 ? null : "No ready units right now.";
+    }
+    if (actionId === "attention-queue") {
+      const emptyQueues =
+        this.latestState.uiTurnAssistant?.emptyQueues ?? this.latestState.uiTurnAssistant?.emptyQueueCityCount ?? 0;
+      return emptyQueues > 0 ? null : "No empty city queues right now.";
     }
     if (actionId === "unit-found-city") {
       return this.latestState.uiActions?.foundCityReason ?? "Cannot found a city right now.";
@@ -745,11 +992,31 @@ export class UIScene extends Phaser.Scene {
     const contextExpanded = contextVisible ? this.contextPanelExpanded : false;
     const showCityQueueRail = this.shouldShowCityQueueRail(this.latestState, menuType, selectedCity);
 
-    this.turnLabel.setPosition(edgePadding, 16);
-    this.foodLabel.setPosition(edgePadding, 48);
-    this.productionLabel.setPosition(edgePadding, 76);
-    this.scienceLabel.setPosition(edgePadding, 104);
-    this.devVisionLabel.setPosition(edgePadding, 132);
+    const hudTop = isTabletLayout ? 10 : 14;
+    const hudLeft = edgePadding + 12;
+    const hudLineGap = isTabletLayout ? 24 : 28;
+    this.turnLabel.setFontSize(isTabletLayout ? 21 : 25);
+    this.foodLabel.setFontSize(isTabletLayout ? 17 : 19);
+    this.productionLabel.setFontSize(isTabletLayout ? 17 : 19);
+    this.scienceLabel.setFontSize(isTabletLayout ? 17 : 19);
+    this.devVisionLabel.setFontSize(isTabletLayout ? 15 : 16);
+    this.foodDeltaLabel.setFontSize(isTabletLayout ? 14 : 16);
+    this.productionDeltaLabel.setFontSize(isTabletLayout ? 14 : 16);
+    this.scienceDeltaLabel.setFontSize(isTabletLayout ? 14 : 16);
+    this.turnLabel.setPosition(hudLeft, hudTop + 6);
+    this.foodLabel.setPosition(hudLeft, hudTop + 8 + hudLineGap);
+    this.productionLabel.setPosition(hudLeft, hudTop + 8 + hudLineGap * 2);
+    this.scienceLabel.setPosition(hudLeft, hudTop + 8 + hudLineGap * 3);
+    this.devVisionLabel.setPosition(hudLeft, hudTop + 8 + hudLineGap * 4);
+    const hudPanelWidth = isTabletLayout ? 230 : 260;
+    const hudPanelHeight = isTabletLayout ? 138 : 156;
+    this.topHudPanel.setPosition(edgePadding, hudTop);
+    this.topHudPanel.setSize(hudPanelWidth, hudPanelHeight);
+    this.sfxToggleButton.rectangle.setPosition(
+      edgePadding + hudPanelWidth - this.sfxToggleButton.width / 2 - 8,
+      hudTop + hudPanelHeight - this.sfxToggleButton.height / 2 - 8
+    );
+    this.sfxToggleButton.label.setPosition(this.sfxToggleButton.rectangle.x, this.sfxToggleButton.rectangle.y);
     this.layoutResourceDeltas();
     const playbackWidth = isTabletLayout ? Math.max(220, Math.floor(gameSize.width * 0.58)) : 520;
     const playbackX = gameSize.width / 2;
@@ -760,7 +1027,7 @@ export class UIScene extends Phaser.Scene {
     this.playbackLabel.setPosition(playbackX, playbackY - 1);
     this.playbackLabel.setWordWrapWidth(Math.max(160, playbackWidth - 20), true);
 
-    this.notificationVisibleRows = isTabletLayout ? 5 : this.notificationRows.length;
+    this.notificationVisibleRows = isTabletLayout ? 4 : 5;
     const notificationWidth = isTabletLayout ? Math.max(250, Math.floor(gameSize.width * 0.62)) : 380;
     const visibleNotificationCount = Math.min(this.notificationVisibleRows, this.getDisplayNotifications().length);
     const notificationFilterHeight = isTabletLayout ? 60 : 34;
@@ -782,9 +1049,16 @@ export class UIScene extends Phaser.Scene {
     const rowStartY = edgePadding + (isTabletLayout ? 94 : 68);
     for (let i = 0; i < this.notificationRows.length; i += 1) {
       const row = this.notificationRows[i];
-      row.setPosition(notificationLeft + 12, rowStartY + i * NOTIFICATION_ROW_HEIGHT);
+      const rowTop = rowStartY + i * NOTIFICATION_ROW_HEIGHT;
+      row.panel.setPosition(notificationLeft + 8, rowTop);
+      row.panel.setSize(notificationWidth - 16, NOTIFICATION_ROW_HEIGHT - 4);
+      row.badge.setPosition(notificationLeft + 14, rowTop + 8);
+      row.header.setPosition(notificationLeft + 72, rowTop + 7);
+      row.message.setPosition(notificationLeft + 16, rowTop + 24);
+      row.jump.setPosition(notificationLeft + notificationWidth - 48, rowTop + 7);
+      row.badgeLabel.setPosition(row.badge.x + 5, row.badge.y + 2);
       if (i >= this.notificationVisibleRows) {
-        row.setVisible(false);
+        this.setNotificationRowVisible(row, false);
       }
     }
 
@@ -861,20 +1135,32 @@ export class UIScene extends Phaser.Scene {
     const endTurnWidth = isTabletLayout ? 146 : BUTTON_WIDTH;
     this.endTurnButton.width = endTurnWidth;
     this.endTurnButton.rectangle.setSize(endTurnWidth, BUTTON_HEIGHT);
+    this.endTurnButton.rectangle.setDisplaySize(endTurnWidth, BUTTON_HEIGHT);
+    const bottomSafePadding = isTabletLayout ? 18 : 24;
     const endTurnX = gameSize.width - edgePadding - endTurnWidth / 2;
-    const endTurnY = gameSize.height - 34;
+    const endTurnY = gameSize.height - bottomSafePadding - BUTTON_HEIGHT / 2;
     this.endTurnButton.rectangle.setPosition(endTurnX, endTurnY);
     this.endTurnButton.label.setPosition(endTurnX, endTurnY);
 
     const statusWidth = endTurnWidth;
-    const statusHeight = isTabletLayout ? 46 : 50;
-    const statusY = endTurnY - BUTTON_HEIGHT / 2 - statusHeight / 2 - (isTabletLayout ? 8 : 10);
+    const statusHeight = isTabletLayout ? 72 : 76;
+    const statusY = endTurnY - BUTTON_HEIGHT / 2 - statusHeight / 2 - (isTabletLayout ? 10 : 12);
 
     this.turnAssistantPanel.setPosition(endTurnX, statusY);
     this.turnAssistantPanel.setSize(statusWidth, statusHeight);
     this.turnAssistantPanel.setDisplaySize(statusWidth, statusHeight);
-    this.turnAssistantLabel.setPosition(endTurnX, statusY - 9);
-    this.turnAssistantSecondaryLabel.setPosition(endTurnX, statusY + 10);
+    this.turnAssistantLabel.setPosition(endTurnX, statusY - statusHeight / 2 + 11);
+    this.turnAssistantSecondaryLabel.setPosition(endTurnX, statusY + statusHeight / 2 - 12);
+    const chipY = statusY + 6;
+    const chipGap = 6;
+    const chipTotal = this.attentionReadyButton.width + this.attentionQueueButton.width + chipGap;
+    const chipLeft = endTurnX - chipTotal / 2;
+    const readyX = chipLeft + this.attentionReadyButton.width / 2;
+    const queueX = readyX + this.attentionReadyButton.width / 2 + chipGap + this.attentionQueueButton.width / 2;
+    this.attentionReadyButton.rectangle.setPosition(readyX, chipY);
+    this.attentionReadyButton.label.setPosition(readyX, chipY);
+    this.attentionQueueButton.rectangle.setPosition(queueX, chipY);
+    this.attentionQueueButton.label.setPosition(queueX, chipY);
 
     this.layoutCityQueueRail({
       isTabletLayout,
@@ -974,9 +1260,9 @@ export class UIScene extends Phaser.Scene {
   }
 
   resizeQueueRailControls(panelWidth, isTabletLayout) {
-    const controlWidth = isTabletLayout ? 16 : 18;
+    const controlWidth = isTabletLayout ? 22 : 24;
     const clusterWidthTarget = Math.max(132, panelWidth - RIGHT_RAIL_QUEUE_SLOT_OUTER_PADDING * 2);
-    const slotWidth = Math.max(96, clusterWidthTarget - controlWidth * 3 - RIGHT_RAIL_QUEUE_SLOT_INNER_GAP * 3);
+    const slotWidth = Math.max(108, clusterWidthTarget - controlWidth * 3 - RIGHT_RAIL_QUEUE_SLOT_INNER_GAP * 3);
     const controlHeight = CITY_PANEL_BUTTON_HEIGHT;
     const slotHeight = CITY_PANEL_BUTTON_HEIGHT;
 
@@ -1159,6 +1445,7 @@ export class UIScene extends Phaser.Scene {
     this.scienceDeltaLabel.setColor(getDeltaColor(projected.science));
     this.devVisionLabel.setText(`Dev Vision: ${gameState.devVisionEnabled ? "ON (V)" : "OFF (V)"}`);
     this.devVisionLabel.setColor(gameState.devVisionEnabled ? "#2f7a41" : "#5a4224");
+    this.setSfxMuted(this.uiSfxMuted);
     this.layoutResourceDeltas();
 
     this.playbackPanel.setVisible(!!turnPlayback.active);
@@ -1194,21 +1481,29 @@ export class UIScene extends Phaser.Scene {
     this.turnAssistantPanel.setVisible(gameState.match.status === "ongoing");
     this.turnAssistantLabel.setVisible(gameState.match.status === "ongoing");
     this.turnAssistantSecondaryLabel.setVisible(gameState.match.status === "ongoing");
-    this.turnAssistantLabel.setText(`Units ready ${readyUnits}`);
-    this.turnAssistantSecondaryLabel.setText(`Empty queues ${pendingQueues}`);
+    this.turnAssistantLabel.setText("Attention");
+    this.turnAssistantSecondaryLabel.setText(
+      pendingOrders > 0 ? `${pendingOrders} actions waiting` : canIssueOrders ? "All clear" : "Waiting..."
+    );
+    this.setButtonLabel(this.attentionReadyButton, `Units ${readyUnits}`);
+    this.setButtonLabel(this.attentionQueueButton, `Queues ${pendingQueues}`);
+    this.setCompositeVisible(this.attentionReadyButton, gameState.match.status === "ongoing");
+    this.setCompositeVisible(this.attentionQueueButton, gameState.match.status === "ongoing");
+    this.setButtonEnabled(this.attentionReadyButton, gameState.match.status === "ongoing" && canIssueOrders && readyUnits > 0);
+    this.setButtonEnabled(this.attentionQueueButton, gameState.match.status === "ongoing" && canIssueOrders && pendingQueues > 0);
+    this.setButtonWarning(this.attentionReadyButton, canIssueOrders && readyUnits > 0);
+    this.setButtonWarning(this.attentionQueueButton, canIssueOrders && pendingQueues > 0);
     this.setCompositeVisible(this.nextUnitButton, false);
     this.setButtonEnabled(this.nextUnitButton, false);
     if (gameState.match.status === "ongoing" && canIssueOrders && pendingOrders > 0) {
-      this.turnAssistantPanel.setInteractive({ useHandCursor: true });
-      this.turnAssistantPanel.setFillStyle(0xeddfc2, 0.98);
-      this.turnAssistantPanel.setStrokeStyle(2, 0x6e4e26, 0.95);
-      this.turnAssistantLabel.setColor("#2f2114");
-      this.turnAssistantSecondaryLabel.setColor("#5a4224");
+      this.turnAssistantPanel.setFillStyle(SEMANTIC_COLORS.panelActiveBg, 0.98);
+      this.turnAssistantPanel.setStrokeStyle(2, SEMANTIC_COLORS.panelBorder, 0.95);
+      this.turnAssistantLabel.setColor(SEMANTIC_COLORS.textStrong);
+      this.turnAssistantSecondaryLabel.setColor(SEMANTIC_COLORS.textMuted);
     } else {
-      this.turnAssistantPanel.disableInteractive();
-      this.turnAssistantPanel.setFillStyle(0xe6dcc9, 0.95);
+      this.turnAssistantPanel.setFillStyle(SEMANTIC_COLORS.panelSoftBg, 0.95);
       this.turnAssistantPanel.setStrokeStyle(2, 0x8b7a5e, 0.85);
-      this.turnAssistantLabel.setColor("#6a5b43");
+      this.turnAssistantLabel.setColor("#64533d");
       this.turnAssistantSecondaryLabel.setColor("#786650");
     }
 
@@ -1468,9 +1763,7 @@ export class UIScene extends Phaser.Scene {
   updatePreviewCard(uiPreview) {
     const mode = uiPreview?.mode ?? "none";
     const isVisible = mode !== "none" && this.latestState?.match?.status === "ongoing";
-    this.previewPanel.setVisible(isVisible);
-    this.previewTitle.setVisible(isVisible);
-    this.previewDetails.setVisible(isVisible);
+    this.animatePanelVisibility(this.previewPanel, [this.previewTitle, this.previewDetails], isVisible);
     if (!isVisible) {
       return;
     }
@@ -1539,12 +1832,12 @@ export class UIScene extends Phaser.Scene {
       this.hintPanel.setFillStyle(0xf5dfd8, 0.95);
       this.hintPanel.setStrokeStyle(2, 0x9a3a2b, 0.9);
       this.hintPrimary.setColor("#6f241a");
-      this.hintSecondary.setColor("#7b3024");
+      this.hintSecondary.setColor(SEMANTIC_COLORS.textWarning);
     } else {
-      this.hintPanel.setFillStyle(0xf0e4cb, 0.95);
-      this.hintPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
-      this.hintPrimary.setColor("#3f2d18");
-      this.hintSecondary.setColor("#5a4224");
+      this.hintPanel.setFillStyle(SEMANTIC_COLORS.panelActiveBg, 0.95);
+      this.hintPanel.setStrokeStyle(2, SEMANTIC_COLORS.panelBorder, 0.8);
+      this.hintPrimary.setColor(SEMANTIC_COLORS.textStrong);
+      this.hintSecondary.setColor(SEMANTIC_COLORS.textMuted);
     }
   }
 
@@ -1647,6 +1940,7 @@ export class UIScene extends Phaser.Scene {
     entry.unread = false;
     gameEvents.emit("notification-focus-requested", { focus: entry.focus, id: entry.id });
     this.updateNotificationCenter();
+    this.playUiSfx("select");
     return true;
   }
 
@@ -1672,6 +1966,7 @@ export class UIScene extends Phaser.Scene {
     });
     this.notificationNextId += 1;
     this.updateNotificationCenter();
+    this.playUiSfx(level === "warning" ? "warning" : "notify");
   }
 
   handleNotificationsReset = () => {
@@ -1710,37 +2005,70 @@ export class UIScene extends Phaser.Scene {
     for (let i = 0; i < this.notificationRows.length; i += 1) {
       const row = this.notificationRows[i];
       if (i >= visibleCount) {
-        row.setVisible(false);
-        row.disableInteractive();
+        this.setNotificationRowVisible(row, false);
+        row.panel.disableInteractive();
         continue;
       }
       const entry = slice[i];
       if (!entry) {
-        row.setVisible(false);
-        row.disableInteractive();
+        this.setNotificationRowVisible(row, false);
+        row.panel.disableInteractive();
         continue;
       }
-      row.setPosition(bounds.left + 12, bounds.top + 34 + filterHeight + i * NOTIFICATION_ROW_HEIGHT);
-      row.setVisible(true);
+      const rowTop = bounds.top + 34 + filterHeight + i * NOTIFICATION_ROW_HEIGHT;
+      this.setNotificationRowVisible(row, true);
+      row.panel.setPosition(bounds.left + 8, rowTop);
+      row.panel.setSize(this.notificationPanel.displayWidth - 16, NOTIFICATION_ROW_HEIGHT - 4);
+      row.badge.setPosition(bounds.left + 14, rowTop + 8);
+      row.header.setPosition(bounds.left + 72, rowTop + 7);
+      row.message.setPosition(bounds.left + 16, rowTop + 24);
+      row.jump.setPosition(bounds.left + this.notificationPanel.displayWidth - 50, rowTop + 8);
+      row.badgeLabel.setPosition(row.badge.x + 5, row.badge.y + 2);
       if (entry.kind === "group") {
-        row.setText(entry.label);
-        row.setColor("#6b5a41");
-        row.setAlpha(1);
-        row.disableInteractive();
+        row.badge.setVisible(false);
+        row.badgeLabel.setVisible(false);
+        row.header.setText(entry.label);
+        row.header.setColor("#6b5a41");
+        row.header.setAlpha(1);
+        row.message.setText("");
+        row.message.setVisible(false);
+        row.jump.setVisible(false);
+        row.panel.setFillStyle(0xe6d8bb, 0.42);
+        row.panel.setStrokeStyle(0);
+        row.panel.disableInteractive();
         continue;
       }
-      const line = `${entry.entry.unread ? "[New] " : ""}${entry.entry.focus ? "[Jump] " : ""}[${entry.entry.category}] ${entry.entry.message}`;
-      row.setText(truncateText(line, Math.max(34, Math.floor((this.notificationPanel.displayWidth - 24) / 7))));
-      if (entry.entry.focus) {
-        row.setColor(entry.entry.level === "warning" ? "#8f3a2a" : "#2e5f95");
-      } else {
-        row.setColor(entry.entry.level === "warning" ? "#7b3024" : "#3f2d18");
+      const card = entry.entry;
+      const categoryStyle = getNotificationCategoryStyle(card.category);
+      const messageLine = truncateText(card.message, Math.max(36, Math.floor((this.notificationPanel.displayWidth - 22) / 7.4)));
+      const headerParts = [];
+      if (card.unread) {
+        headerParts.push("New");
       }
-      row.setAlpha(entry.entry.unread ? 1 : 0.92);
-      if (entry.entry.focus) {
-        row.setInteractive({ useHandCursor: true });
+      headerParts.push(card.focus ? "Action" : "Update");
+      if (card.level === "warning") {
+        headerParts.push("Warning");
+      }
+      row.badge.setVisible(true);
+      row.badgeLabel.setVisible(true);
+      row.badge.setFillStyle(categoryStyle.fill, 0.94);
+      row.badge.setSize(52, 15);
+      row.badgeLabel.setText(categoryStyle.label);
+      row.badgeLabel.setColor("#f8f0dd");
+      row.header.setText(headerParts.join(" | "));
+      row.header.setColor(card.focus ? SEMANTIC_COLORS.textInfo : SEMANTIC_COLORS.textMuted);
+      row.message.setVisible(true);
+      row.message.setText(messageLine);
+      row.message.setColor(card.level === "warning" ? SEMANTIC_COLORS.textWarning : SEMANTIC_COLORS.textStrong);
+      row.message.setAlpha(card.unread ? 1 : 0.92);
+      row.panel.setFillStyle(card.unread ? 0xf5ead2 : 0xefe2c7, card.focus ? 0.95 : 0.84);
+      row.panel.setStrokeStyle(card.focus ? 2 : 1, card.focus ? 0x355e94 : 0x7d5a2f, card.focus ? 0.9 : 0.56);
+      row.jump.setVisible(!!card.focus);
+      row.jump.setColor(card.level === "warning" ? SEMANTIC_COLORS.textWarning : SEMANTIC_COLORS.textInfo);
+      if (card.focus) {
+        row.panel.setInteractive({ useHandCursor: true });
       } else {
-        row.disableInteractive();
+        row.panel.disableInteractive();
       }
     }
     this.notificationUnreadCount = this.notifications.filter((entry) => entry.unread).length;
@@ -2092,6 +2420,7 @@ export class UIScene extends Phaser.Scene {
       currentTurn: this.currentTurn,
       contextPanelExpanded: this.contextPanelExpanded,
       contextPanelPinned: this.contextPanelPinned,
+      sfxMuted: this.uiSfxMuted,
     };
   }
 
@@ -2194,6 +2523,10 @@ export class UIScene extends Phaser.Scene {
         y: this.turnAssistantPanel.y,
         width: this.turnAssistantPanel.displayWidth,
         height: this.turnAssistantPanel.displayHeight,
+        readyLabel: this.attentionReadyButton.label.text,
+        readyEnabled: this.attentionReadyButton.enabled,
+        queueLabel: this.attentionQueueButton.label.text,
+        queueEnabled: this.attentionQueueButton.enabled,
       },
       cityQueueRail: {
         visible: this.cityQueueRailPanel.visible && this.cityQueueRailTitle.visible,
@@ -2236,6 +2569,8 @@ export class UIScene extends Phaser.Scene {
         enabled: button.enabled,
         x: button.rectangle.x,
         y: button.rectangle.y,
+        width: button.width,
+        height: button.height,
       })),
       cityQueueMoveUpButtons: this.cityQueueMoveUpButtons.map((button) => ({
         actionId: button.actionId,
@@ -2244,6 +2579,8 @@ export class UIScene extends Phaser.Scene {
         enabled: button.enabled,
         x: button.rectangle.x,
         y: button.rectangle.y,
+        width: button.width,
+        height: button.height,
       })),
       cityQueueMoveDownButtons: this.cityQueueMoveDownButtons.map((button) => ({
         actionId: button.actionId,
@@ -2252,6 +2589,8 @@ export class UIScene extends Phaser.Scene {
         enabled: button.enabled,
         x: button.rectangle.x,
         y: button.rectangle.y,
+        width: button.width,
+        height: button.height,
       })),
       cityQueueRemoveButtons: this.cityQueueRemoveButtons.map((button) => ({
         actionId: button.actionId,
@@ -2260,6 +2599,8 @@ export class UIScene extends Phaser.Scene {
         enabled: button.enabled,
         x: button.rectangle.x,
         y: button.rectangle.y,
+        width: button.width,
+        height: button.height,
       })),
       disabledTooltip: {
         visible: this.disabledTooltipPanel.visible && this.disabledTooltipLabel.visible,
@@ -2300,6 +2641,17 @@ export class UIScene extends Phaser.Scene {
       displayRowCount: this.getDisplayNotifications().length,
       unreadCount: this.notificationUnreadCount,
       entries: this.notifications.slice(0, 20).map((entry) => ({ ...entry })),
+      visibleRows: this.notificationVisibleDisplaySlice.map((row) =>
+        row.kind === "entry"
+          ? {
+              kind: "entry",
+              category: row.entry.category,
+              unread: row.entry.unread,
+              level: row.entry.level,
+              focusable: !!row.entry.focus,
+            }
+          : { kind: "group", label: row.label }
+      ),
     };
   }
 
@@ -2324,6 +2676,35 @@ export class UIScene extends Phaser.Scene {
     return true;
   }
 
+  testFocusAttention(kind) {
+    if (kind === "ready") {
+      if (!this.attentionReadyButton.enabled) {
+        return false;
+      }
+      gameEvents.emit("attention-ready-unit-requested");
+      return true;
+    }
+    if (kind === "queue") {
+      if (!this.attentionQueueButton.enabled) {
+        return false;
+      }
+      gameEvents.emit("attention-empty-queue-requested");
+      return true;
+    }
+    return false;
+  }
+
+  testToggleSfxMute() {
+    return this.toggleSfxMuted();
+  }
+
+  testGetSfxState() {
+    return {
+      muted: this.uiSfxMuted,
+      label: this.sfxToggleButton.label.text,
+    };
+  }
+
   testGetContextPanelState() {
     return {
       expanded: this.contextPanelExpanded,
@@ -2339,12 +2720,12 @@ function formatSigned(value) {
 
 function getDeltaColor(value) {
   if (value > 0) {
-    return "#2f7a41";
+    return SEMANTIC_COLORS.textPositive;
   }
   if (value < 0) {
-    return "#9a3a2b";
+    return SEMANTIC_COLORS.textWarning;
   }
-  return "#5a4224";
+  return SEMANTIC_COLORS.textMuted;
 }
 
 function formatUnitLabel(type) {
@@ -2365,11 +2746,11 @@ function formatProductionChoiceLabel(baseLabel, choice) {
 
 function formatQueueSlotLabel(slot, index) {
   if (!slot || slot.empty) {
-    return `${index + 1}: Empty`;
+    return `${index + 1}. Empty\nAdd an item`;
   }
   const itemLabel = slot.label ?? "--";
   const eta = Number.isFinite(slot.etaTurns) ? slot.etaTurns : 0;
-  return `${index + 1} ${itemLabel}\nCost ${slot.cost}, ${formatTurns(eta)}`;
+  return `${index + 1}. ${itemLabel}\nCost ${slot.cost} | ETA ${formatTurnsShort(eta)}`;
 }
 
 function capitalizeLabel(value) {
@@ -2392,6 +2773,11 @@ function formatCityName(cityId) {
 function formatTurns(turns) {
   const normalized = Math.max(0, Number.isFinite(turns) ? Math.round(turns) : 0);
   return normalized === 1 ? "1 turn" : `${normalized} turns`;
+}
+
+function formatTurnsShort(turns) {
+  const normalized = Math.max(0, Number.isFinite(turns) ? Math.round(turns) : 0);
+  return `${normalized}t`;
 }
 
 function normalizeNotificationCategory(input, message = "") {
@@ -2420,6 +2806,22 @@ function normalizeNotificationCategory(input, message = "") {
     return "Combat";
   }
   return "System";
+}
+
+function getNotificationCategoryStyle(category) {
+  if (category === "Combat") {
+    return { fill: 0x8a4734, label: "Combat" };
+  }
+  if (category === "City") {
+    return { fill: 0x3f6f59, label: "City" };
+  }
+  if (category === "Research") {
+    return { fill: 0x355e94, label: "Research" };
+  }
+  if (category === "System") {
+    return { fill: 0x6f6d63, label: "System" };
+  }
+  return { fill: 0x6f6d63, label: "All" };
 }
 
 function normalizeNotificationFocus(focus) {
@@ -2482,4 +2884,20 @@ function normalizeFontSize(size, minPx = 13) {
   const parsed = Number(matched[1]);
   const clamped = Math.max(minPx, parsed);
   return `${clamped}px`;
+}
+
+function resolveUiSfxProfile(kind) {
+  if (kind === "select") {
+    return { frequency: 560, frequencyDrop: 0.92, duration: 0.08, gain: 0.22, wave: "triangle" };
+  }
+  if (kind === "confirm") {
+    return { frequency: 700, frequencyDrop: 1.06, duration: 0.1, gain: 0.24, wave: "triangle" };
+  }
+  if (kind === "warning") {
+    return { frequency: 300, frequencyDrop: 0.74, duration: 0.13, gain: 0.28, wave: "sawtooth" };
+  }
+  if (kind === "notify") {
+    return { frequency: 480, frequencyDrop: 1.01, duration: 0.09, gain: 0.16, wave: "sine" };
+  }
+  return null;
 }

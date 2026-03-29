@@ -188,6 +188,8 @@ export class WorldScene extends Phaser.Scene {
     this.scale.on("resize", this.handleResize, this);
     gameEvents.on("end-turn-requested", this.handleEndTurnRequested, this);
     gameEvents.on("next-ready-unit-requested", this.handleNextReadyUnitRequested, this);
+    gameEvents.on("attention-ready-unit-requested", this.handleAttentionReadyRequested, this);
+    gameEvents.on("attention-empty-queue-requested", this.handleAttentionEmptyQueueRequested, this);
     gameEvents.on("found-city-requested", this.handleFoundCityRequested, this);
     gameEvents.on("research-cycle-requested", this.handleResearchCycleRequested, this);
     gameEvents.on("unit-action-requested", this.handleUnitActionRequested, this);
@@ -211,6 +213,8 @@ export class WorldScene extends Phaser.Scene {
       this.scale.off("resize", this.handleResize, this);
       gameEvents.off("end-turn-requested", this.handleEndTurnRequested, this);
       gameEvents.off("next-ready-unit-requested", this.handleNextReadyUnitRequested, this);
+      gameEvents.off("attention-ready-unit-requested", this.handleAttentionReadyRequested, this);
+      gameEvents.off("attention-empty-queue-requested", this.handleAttentionEmptyQueueRequested, this);
       gameEvents.off("found-city-requested", this.handleFoundCityRequested, this);
       gameEvents.off("research-cycle-requested", this.handleResearchCycleRequested, this);
       gameEvents.off("unit-action-requested", this.handleUnitActionRequested, this);
@@ -391,23 +395,17 @@ export class WorldScene extends Phaser.Scene {
 
   handleNextReadyUnitRequested = (event) => {
     event?.preventDefault?.();
-    if (!this.canAcceptPlayerCommands()) {
-      return false;
-    }
-    const nextAttentionTarget = this.getNextAttentionTarget();
-    if (!nextAttentionTarget) {
-      this.emitNotification("No units or city queues need attention.", {
-        level: "warning",
-        category: "System",
-      });
-      return false;
-    }
-    if (nextAttentionTarget.kind === "unit") {
-      this.selectUnit(nextAttentionTarget.id);
-    } else {
-      this.selectCity(nextAttentionTarget.id);
-    }
-    return true;
+    return this.focusAttentionTarget("any");
+  };
+
+  handleAttentionReadyRequested = (event) => {
+    event?.preventDefault?.();
+    return this.focusAttentionTarget("unit", { withPulse: true });
+  };
+
+  handleAttentionEmptyQueueRequested = (event) => {
+    event?.preventDefault?.();
+    return this.focusAttentionTarget("city", { withPulse: true });
   };
 
   handleNotificationFocusRequested = (payload) => {
@@ -1972,6 +1970,7 @@ export class WorldScene extends Phaser.Scene {
     this.gameState.selectedCityId = null;
     this.setUiPreview(null);
     this.evaluateAndPublish();
+    gameEvents.emit("ui-sfx-requested", { kind: "select" });
   }
 
   selectCity(cityId) {
@@ -1979,6 +1978,7 @@ export class WorldScene extends Phaser.Scene {
     this.gameState.selectedUnitId = null;
     this.setUiPreview(null);
     this.evaluateAndPublish();
+    gameEvents.emit("ui-sfx-requested", { kind: "select" });
   }
 
   clearSelection() {
@@ -2085,6 +2085,7 @@ export class WorldScene extends Phaser.Scene {
       uiContextPanel,
       uiNotificationFilter: uiRuntime.notificationFilter ?? "All",
       uiNotificationUnreadCount: uiRuntime.notificationUnreadCount ?? 0,
+      uiSfxMuted: !!uiRuntime.sfxMuted,
       uiHints: uiSurface.uiHints,
       uiActions: uiSurface.uiActions,
       uiModalOpen: this.uiModalOpen,
@@ -2514,6 +2515,7 @@ export class WorldScene extends Phaser.Scene {
       },
       uiNotificationFilter: uiRuntime.notificationFilter ?? "All",
       uiNotificationUnreadCount: uiRuntime.notificationUnreadCount ?? 0,
+      uiSfxMuted: !!uiRuntime.sfxMuted,
       units: this.gameState.units.map((unit) => ({
         id: unit.id,
         owner: unit.owner,
@@ -2604,6 +2606,7 @@ export class WorldScene extends Phaser.Scene {
         restartConfirmOpen: uiRuntime.restartConfirmOpen,
       },
       uiNotifications: uiRuntime.notifications,
+      uiSfxMuted: !!uiRuntime.sfxMuted,
       cameraScroll: this.getCameraScrollPayload(),
       cameraFocusHex: this.cameraFocusHex,
       unlocks: {
@@ -2744,6 +2747,7 @@ export class WorldScene extends Phaser.Scene {
       notificationFilter: "All",
       notificationUnreadCount: 0,
       currentTurn: 0,
+      sfxMuted: false,
     };
     if (!this.scene.isActive("UIScene")) {
       return defaults;
@@ -2961,8 +2965,13 @@ export class WorldScene extends Phaser.Scene {
     return targets;
   }
 
-  getNextAttentionTarget() {
-    const targets = this.getAttentionTargets();
+  getNextAttentionTarget(kind = "any") {
+    const targets =
+      kind === "unit"
+        ? this.getReadyPlayerUnits().map((unit) => ({ kind: "unit", id: unit.id }))
+        : kind === "city"
+          ? this.getPlayerCitiesWithEmptyQueue().map((city) => ({ kind: "city", id: city.id }))
+          : this.getAttentionTargets();
     if (targets.length === 0) {
       return null;
     }
@@ -2979,6 +2988,52 @@ export class WorldScene extends Phaser.Scene {
       return targets[0];
     }
     return targets[(currentIndex + 1) % targets.length];
+  }
+
+  focusAttentionTarget(kind = "any", options = {}) {
+    if (!this.canAcceptPlayerCommands()) {
+      return false;
+    }
+    const target = this.getNextAttentionTarget(kind);
+    if (!target) {
+      const message =
+        kind === "unit"
+          ? "No ready units need attention."
+          : kind === "city"
+            ? "No cities with empty queues need attention."
+            : "No units or city queues need attention.";
+      this.emitNotification(message, {
+        level: "warning",
+        category: "System",
+      });
+      return false;
+    }
+    if (target.kind === "unit") {
+      this.selectUnit(target.id);
+    } else {
+      this.selectCity(target.id);
+    }
+    const focus = this.buildSelectionFocusPayload();
+    if (focus?.q !== undefined && focus?.r !== undefined) {
+      this.focusCameraOnHex(focus.q, focus.r);
+      this.cameraFocusHex = { q: focus.q, r: focus.r };
+      if (options.withPulse) {
+        this.pulseAttentionFocus(focus.q, focus.r, target.kind);
+      }
+      this.renderAll();
+      this.publishState();
+    }
+    return true;
+  }
+
+  pulseAttentionFocus(q, r, kind) {
+    const color = kind === "city" ? 0xe0a35f : 0x6ca9ef;
+    this.spawnFxBurst(q, r, {
+      color,
+      maxRadius: kind === "city" ? 30 : 26,
+      duration: 240,
+      textureKey: FX_TEXTURE_KEYS.found,
+    });
   }
 
   getTurnAssistantState() {

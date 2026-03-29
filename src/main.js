@@ -148,6 +148,18 @@ window.__hexfallTest = {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testFocusNotification(index) : false;
   },
+  focusAttention(kind) {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testFocusAttention(kind) : false;
+  },
+  toggleSfxMute() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testToggleSfxMute() : false;
+  },
+  getSfxState() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testGetSfxState() : null;
+  },
   selectUnit(unitId) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testSelectUnit(unitId) : false;

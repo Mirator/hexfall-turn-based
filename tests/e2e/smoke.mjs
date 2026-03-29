@@ -354,6 +354,18 @@ async function run() {
       if (window.__hexfallTest.getPauseMenuState()?.open) {
         return { ok: false, reason: "pause-menu-did-not-close" };
       }
+      const initialSfxState = window.__hexfallTest.getSfxState();
+      if (!initialSfxState || initialSfxState.muted !== false || !String(initialSfxState.label ?? "").includes("SFX")) {
+        return { ok: false, reason: "initial-sfx-state-invalid" };
+      }
+      const mutedSfx = window.__hexfallTest.toggleSfxMute();
+      if (mutedSfx !== true) {
+        return { ok: false, reason: "failed-to-mute-sfx" };
+      }
+      const unmutedSfx = window.__hexfallTest.toggleSfxMute();
+      if (unmutedSfx !== false) {
+        return { ok: false, reason: "failed-to-unmute-sfx" };
+      }
 
       // Found player city.
       window.__hexfallTest.selectUnit(playerSettler.id);
@@ -381,6 +393,13 @@ async function run() {
       if (!Number.isFinite(turnAssistantBeforeFound.readyUnits) || !Number.isFinite(turnAssistantBeforeFound.emptyQueues)) {
         return { ok: false, reason: "turn-assistant-breakdown-fields-missing" };
       }
+      if (!window.__hexfallTest.focusAttention("ready")) {
+        return { ok: false, reason: "focus-attention-ready-failed" };
+      }
+      const focusedReadyState = getState();
+      if (!focusedReadyState.selectedUnitId) {
+        return { ok: false, reason: "focus-attention-ready-did-not-select-unit" };
+      }
       if (!window.__hexfallTest.nextReadyUnit()) {
         return { ok: false, reason: "next-ready-unit-action-failed" };
       }
@@ -399,6 +418,19 @@ async function run() {
       if (!cityPanel.expanded) {
         return { ok: false, reason: "city-panel-should-auto-expand-on-selection" };
       }
+      for (let i = 0; i < 40; i += 1) {
+        if (!getState().animationState?.busy) {
+          break;
+        }
+        await pause(40);
+      }
+      if (!window.__hexfallTest.focusAttention("queue")) {
+        return { ok: false, reason: "focus-attention-queue-failed" };
+      }
+      const focusedQueueState = getState();
+      if (!focusedQueueState.selectedCityId) {
+        return { ok: false, reason: "focus-attention-queue-did-not-select-city" };
+      }
       const pinned = window.__hexfallTest.setContextPanelPinned(true);
       const pinnedState = window.__hexfallTest.getCityPanelState();
       if (!pinned || !pinnedState?.pinned) {
@@ -414,6 +446,12 @@ async function run() {
       }
       if (!(cityFeed?.entries ?? []).every((entry) => Object.prototype.hasOwnProperty.call(entry, "unread"))) {
         return { ok: false, reason: "notification-unread-metadata-missing" };
+      }
+      const hasNotificationCardMetadata = (cityFeed?.visibleRows ?? []).some(
+        (row) => row.kind === "entry" && typeof row.category === "string" && typeof row.focusable === "boolean"
+      );
+      if (!hasNotificationCardMetadata) {
+        return { ok: false, reason: "notification-card-metadata-missing" };
       }
       if (!window.__hexfallTest.focusNotification(0)) {
         return { ok: false, reason: "notification-focus-failed" };
@@ -536,6 +574,20 @@ async function run() {
       }
       if (new Set(queueSlotX.map((value) => Math.round(value))).size !== 1) {
         return { ok: false, reason: "queue-slots-should-share-column-x" };
+      }
+      const moveUpLabels = (cityPanelAfterQueue?.cityQueueMoveUpButtons ?? []).map((button) => String(button.label ?? "").trim());
+      const moveDownLabels = (cityPanelAfterQueue?.cityQueueMoveDownButtons ?? []).map((button) => String(button.label ?? "").trim());
+      const removeLabels = (cityPanelAfterQueue?.cityQueueRemoveButtons ?? []).map((button) => String(button.label ?? "").trim());
+      if (moveUpLabels.some((label) => label !== "^") || moveDownLabels.some((label) => label !== "v") || removeLabels.some((label) => label !== "x")) {
+        return { ok: false, reason: "queue-control-icons-invalid" };
+      }
+      const controlWidths = [
+        ...(cityPanelAfterQueue?.cityQueueMoveUpButtons ?? []).map((button) => button.width),
+        ...(cityPanelAfterQueue?.cityQueueMoveDownButtons ?? []).map((button) => button.width),
+        ...(cityPanelAfterQueue?.cityQueueRemoveButtons ?? []).map((button) => button.width),
+      ].filter(Number.isFinite);
+      if (controlWidths.some((width) => width < 22)) {
+        return { ok: false, reason: "queue-controls-too-small" };
       }
       for (let i = 1; i < queueSlotY.length; i += 1) {
         if (queueSlotY[i] <= queueSlotY[i - 1]) {
