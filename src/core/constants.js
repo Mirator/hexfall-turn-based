@@ -7,7 +7,7 @@ export const BASE_GAME_HEIGHT = 720;
 
 export const COLORS = {
   worldBackground: 0xf5ebd7,
-  tileStroke: 0x7a6641,
+  tileStroke: 0x5e4b32,
   fogShroudFill: 0x3f3c37,
   fogShroudStroke: 0x2f2c27,
   fogMemoryFill: 0x786d5d,

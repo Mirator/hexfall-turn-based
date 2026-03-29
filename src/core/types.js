@@ -5,11 +5,23 @@
  */
 
 /**
- * @typedef {"player"|"enemy"|"purple"} Owner
+ * @typedef {string} Owner
  */
 
 /**
- * @typedef {"enemy"|"purple"} AiOwner
+ * @typedef {string} AiOwner
+ */
+
+/**
+ * @typedef {{ mapWidth: 16|20|24, mapHeight: 16|20|24, aiFactionCount: number }} MatchConfig
+ */
+
+/**
+ * @typedef {Object} FactionMetadata
+ * @property {Owner} playerOwner
+ * @property {AiOwner[]} aiOwners
+ * @property {Owner[]} allOwners
+ * @property {Record<Owner, string>} labels
  */
 
 /**
@@ -35,8 +47,10 @@
  * @property {boolean} fallbackUsed
  * @property {number} minFactionDistance
  * @property {number} nearestFactionDistance
- * @property {{ player: Hex, enemy: Hex, purple: Hex }} anchors
- * @property {{ playerSettler: Hex, enemySettler: Hex, purpleSettler: Hex }} spawns
+ * @property {Record<Owner, Hex>} anchorsByOwner
+ * @property {Record<Owner, Hex>} spawnByOwner
+ * @property {{ player?: Hex, enemy?: Hex, purple?: Hex }} anchors
+ * @property {{ playerSettler?: Hex, enemySettler?: Hex, purpleSettler?: Hex }} spawns
  */
 
 /**
@@ -166,12 +180,14 @@
 
 /**
  * @typedef {Object} VisibilityState
- * @property {{ player: VisibilityOwnerState, enemy: VisibilityOwnerState, purple: VisibilityOwnerState }} byOwner
+ * @property {Record<Owner, VisibilityOwnerState>} byOwner
  * @property {boolean} devRevealPlayer
  */
 
 /**
  * @typedef {Object} GameState
+ * @property {MatchConfig} matchConfig
+ * @property {FactionMetadata} factions
  * @property {TurnState} turnState
  * @property {{ width: number, height: number, seed: number, tiles: Tile[], spawnMetadata: SpawnMetadata }} map
  * @property {Unit[]} units
@@ -181,8 +197,8 @@
  * @property {ResearchState} research
  * @property {{ units: string[] }} unlocks
  * @property {MatchState} match
- * @property {{ enemy: EnemyAiState, purple: EnemyAiState, byOwner: Record<AiOwner, EnemyAiState> }} ai
- * @property {{ player: EmpireEconomy, enemy: EmpireEconomy, purple: EmpireEconomy, researchIncomeThisTurn: number }} economy
+ * @property {{ enemy?: EnemyAiState|null, purple?: EnemyAiState|null, byOwner: Record<AiOwner, EnemyAiState> }} ai
+ * @property {Record<Owner, EmpireEconomy> & { researchIncomeThisTurn: number }} economy
  * @property {VisibilityState} visibility
  * @property {PendingCityResolution|null} pendingCityResolution
  * @property {{ unit: number, city: number }} nextIds

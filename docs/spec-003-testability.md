@@ -38,6 +38,7 @@
   - `window.__hexfallTest.getActionPreviewState()`
   - `window.__hexfallTest.hoverHex(q, r)`
   - `window.__hexfallTest.getTurnAssistantState()`
+  - `window.__hexfallTest.getSpriteLayerCounts()`
   - `window.__hexfallTest.nextReadyUnit()`
   - `window.__hexfallTest.setContextPanelPinned(bool)`
   - `window.__hexfallTest.getCityResolutionModalState()`
@@ -84,16 +85,18 @@
   - seed/hash/spawn metadata
   - units/cities/combat/research/economy snapshots
   - `uiPreview`, `uiTurnAssistant`, `uiContextPanel`, `uiNotificationFilter`
+  - `uiNotificationUnreadCount`
+  - `spriteLayers` (`terrain`, `units`, `cities`, `fx`)
   - `animationState` (`busy`, `kind`, `queueLength`)
   - `turnPlayback` (`active`, `actor`, `stepIndex`, `totalSteps`, `message`)
-  - `uiTurnAssistant.emptyQueueCityCount` (player cities with empty queues)
+  - `uiTurnAssistant.emptyQueueCityCount` plus split assistant fields (`readyUnits`, `emptyQueues`)
   - `threatHexes`
   - `cities[].health` + `cities[].maxHealth`
   - `pendingCityResolution`
   - top-left HUD resource payload (`current` + net `delta` + `grossDelta`)
   - selected info payload and context menu payload
   - pause/restart modal state
-  - `uiNotifications` feed payload with `category` and optional `focus`
+  - `uiNotifications` feed payload with `category`, optional `focus`, and unread metadata (`turn`, `unread`)
   - `cameraScroll` payload (`{ x, y }`) for deterministic camera movement assertions
   - `cameraFocusHex` for notification jump verification
   - `ai.enemy`, `ai.purple`, and `ai.byOwner` runtime payloads (`personality`, `lastGoal`, `lastTurnSummary`)
@@ -109,7 +112,9 @@
   - phone viewport bootstrap block (`390x844`) shows unsupported banner and does not initialize gameplay canvas
   - tablet viewport bootstrap path (`768x1024`) initializes gameplay and proceeds through full smoke scenario
   - hover move and city-attack previews
+  - sprite layer payload reports populated terrain/unit visual layers
   - turn readiness assistant and deterministic attention-cycle path (ready units + cities with empty queues)
+  - split readiness breakdown payload (`readyUnits`, `emptyQueues`)
   - context panel expanded/pinned behavior
   - notification filtering and notification-focus camera jump
   - non-focus notification row click returns `false` without adding warning notification
@@ -128,7 +133,7 @@
 
 ## Validation performed (tests/manual checks)
 
-- `npm run test:e2e` passes and captures `tests/e2e/artifacts/smoke.png`.
+  - `npm run test:e2e` passes and captures `tests/e2e/artifacts/smoke.png` and `tests/e2e/artifacts/smoke-tablet.png`.
 - `npm test` validates hook-consumed systems via unit/integration suites.
 - Post-run process checks confirm no lingering `chrome-headless-shell` process.
 - Manual artifact review confirms HUD/context panel/notification interaction surfaces are visible and aligned.
@@ -136,4 +141,3 @@
 ## Known gaps and next steps
 
 - Add a dedicated deterministic e2e branch for guaranteed full-domination finish.
-- Add additional tablet + desktop screenshot assertions for key HUD states.

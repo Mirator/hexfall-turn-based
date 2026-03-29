@@ -106,6 +106,32 @@ describe("visibility and fog of war", () => {
     expect(getSeenHostileOwners(gameState, "enemy")).toContain("purple");
   });
 
+  it("tracks seen hostiles for expanded AI roster and keeps dynamic byOwner buckets", () => {
+    const gameState = createInitialGameState({ seed: 1903, aiFactionCount: 4, mapWidth: 24, mapHeight: 24 });
+    const enemySettler = gameState.units.find((unit) => unit.owner === "enemy" && unit.type === "settler");
+    const amberSettler = gameState.units.find((unit) => unit.owner === "amber" && unit.type === "settler");
+    expect(enemySettler && amberSettler).toBeTruthy();
+    if (!enemySettler || !amberSettler) {
+      return;
+    }
+
+    for (const owner of gameState.factions.allOwners) {
+      expect(gameState.visibility.byOwner[owner]).toBeTruthy();
+    }
+    recomputeVisibility(gameState);
+    expect(getSeenHostileOwners(gameState, "enemy")).not.toContain("amber");
+
+    const adjacentVisibleHex = pickAdjacentPassableHex(gameState, enemySettler, amberSettler.id);
+    expect(adjacentVisibleHex).toBeTruthy();
+    if (!adjacentVisibleHex) {
+      return;
+    }
+    amberSettler.q = adjacentVisibleHex.q;
+    amberSettler.r = adjacentVisibleHex.r;
+    recomputeVisibility(gameState);
+    expect(getSeenHostileOwners(gameState, "enemy")).toContain("amber");
+  });
+
   it("toggles player dev reveal without changing AI fog data", () => {
     const gameState = createInitialGameState({ seed: 904 });
     recomputeVisibility(gameState);

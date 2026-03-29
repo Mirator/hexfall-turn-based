@@ -321,8 +321,19 @@ describe("combat system", () => {
     }
 
     applyUnitType(attacker, "warrior");
-    attacker.q = city.q - 1;
-    attacker.r = city.r;
+    const adjacentHex =
+      [
+        { q: city.q - 1, r: city.r },
+        { q: city.q + 1, r: city.r },
+        { q: city.q, r: city.r - 1 },
+        { q: city.q, r: city.r + 1 },
+      ].find((hex) => gameState.map.tiles.some((tile) => tile.q === hex.q && tile.r === hex.r)) ?? null;
+    expect(adjacentHex).toBeTruthy();
+    if (!adjacentHex) {
+      return;
+    }
+    attacker.q = adjacentHex.q;
+    attacker.r = adjacentHex.r;
     setTerrain(gameState, attacker.q, attacker.r, "hill");
     setTerrain(gameState, city.q, city.r, "forest");
 

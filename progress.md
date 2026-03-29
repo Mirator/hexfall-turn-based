@@ -449,3 +449,43 @@ Viewport support note (2026-03-27): legacy mentions of mobile checks/artifacts i
     - `tests/e2e/artifacts/ui-city-queue-right-rail-state.json`
 - Note:
   - skill client screenshots (`tests/e2e/artifacts/web-game-client/shot-*.png`) were black in this environment, but state snapshots were valid and project e2e artifacts rendered correctly.
+## 2026-03-27 (Polish pass: UX readability + sprite rendering foundation)
+- Implemented no-mechanics polish pass focused on UX clarity and presentation quality.
+- Added sprite asset foundation and preload manifest:
+  - new visual assets under `src/assets/sprites/` (terrain variants, owner/unit sprites, owner/city sprites, and basic FX sprites),
+  - new manifest `src/core/visualAssets.js`,
+  - `BootScene` now preloads all visual assets before launching world/UI scenes.
+- Upgraded world rendering from flat unit/city Graphics tokens to sprite containers keyed by entity id:
+  - deterministic terrain sprite variants per hex (`seed + axial`), while preserving fog/memory overlays and tactical line art,
+  - unit/city sprite layers with subtle idle animation and existing health-bar overlays retained,
+  - FX bursts now use sprite layer entries (with existing timing/order semantics preserved),
+  - runtime payload now includes `spriteLayers` counts.
+- HUD and interaction readability improvements in `UIScene`:
+  - increased queue control hit targets and labels (`U`, `D`, `X`) and widened queue row controls,
+  - raised minimum readable UI text size and improved contrast hierarchy for top-left stats, right rail, and command panel surfaces,
+  - readiness assistant now shows split breakdown (`Units ready`, `Empty queues`) while keeping one-click cycle behavior unchanged,
+  - added inline blocked microcopy in expanded context panel (`Blocked: ...`) while retaining hover tooltips for detail.
+- Notification center polish:
+  - added unread metadata (`turn`, `unread`) and unread title badge count,
+  - grouped feed rows into `New this turn` and `Earlier`,
+  - explicit jump affordance for focus-capable rows (`[Jump]`) with clearer styling.
+- Extended testability surface:
+  - new hook `window.__hexfallTest.getSpriteLayerCounts()`,
+  - runtime payload includes `uiNotificationUnreadCount`,
+  - `uiTurnAssistant` now exposes split fields (`readyUnits`, `emptyQueues`) in addition to legacy counts.
+- Added deterministic parity verification:
+  - new integration suite `tests/integration/determinismVisualParity.test.js` validates unchanged deterministic outcomes for fixed seeds.
+- Updated e2e smoke coverage:
+  - validates sprite-layer payload presence,
+  - validates split readiness payload fields,
+  - validates notification unread metadata presence,
+  - captures both desktop and tablet artifacts (`smoke.png`, `smoke-tablet.png`).
+- Docs aligned:
+  - `docs/spec-003-testability.md`
+  - `docs/spec-007-hud-context-panels-and-notifications.md`
+  - `docs/spec-009-action-timeline-and-turn-playback.md`
+- Validation:
+  - `npm run lint` passed
+  - `npm test` passed (14 files, 74 tests)
+  - `npm run test:e2e` passed
+  - `npm run build` passed

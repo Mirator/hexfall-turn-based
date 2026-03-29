@@ -3,30 +3,50 @@ import { createInitialGameState, DEFAULT_MIN_FACTION_DISTANCE } from "../../src/
 import { distance, neighbors } from "../../src/core/hexGrid.js";
 
 describe("seeded match generation", () => {
-  it("starts each faction with exactly one settler on a 16x16 map", () => {
-    const gameState = createInitialGameState({ seed: 321 });
-    const playerUnits = gameState.units.filter((unit) => unit.owner === "player");
-    const enemyUnits = gameState.units.filter((unit) => unit.owner === "enemy");
-    const purpleUnits = gameState.units.filter((unit) => unit.owner === "purple");
-
-    expect(gameState.map.width).toBe(16);
-    expect(gameState.map.height).toBe(16);
-    expect(playerUnits).toHaveLength(1);
-    expect(enemyUnits).toHaveLength(1);
-    expect(purpleUnits).toHaveLength(1);
-    expect(playerUnits[0]?.type).toBe("settler");
-    expect(enemyUnits[0]?.type).toBe("settler");
-    expect(purpleUnits[0]?.type).toBe("settler");
+  it("supports fixed map presets (16, 20, 24) and preserves square dimensions", () => {
+    for (const mapSize of [16, 20, 24]) {
+      const gameState = createInitialGameState({ seed: 321 + mapSize, mapWidth: mapSize, mapHeight: mapSize });
+      expect(gameState.map.width).toBe(mapSize);
+      expect(gameState.map.height).toBe(mapSize);
+      expect(gameState.matchConfig.mapWidth).toBe(mapSize);
+      expect(gameState.matchConfig.mapHeight).toBe(mapSize);
+      expect(gameState.units.filter((unit) => unit.owner === "player" && unit.type === "settler")).toHaveLength(1);
+    }
   });
+
+  it(
+    "creates exactly one settler per configured faction for AI count 1..6",
+    () => {
+      for (let aiFactionCount = 1; aiFactionCount <= 6; aiFactionCount += 1) {
+        const gameState = createInitialGameState({ seed: 9000 + aiFactionCount, aiFactionCount, mapWidth: 24, mapHeight: 24 });
+        const expectedOwners = gameState.factions.allOwners;
+        expect(gameState.factions.aiOwners).toHaveLength(aiFactionCount);
+        expect(gameState.units).toHaveLength(expectedOwners.length);
+        for (const owner of expectedOwners) {
+          const ownerSettlers = gameState.units.filter((unit) => unit.owner === owner && unit.type === "settler");
+          expect(ownerSettlers).toHaveLength(1);
+        }
+      }
+    },
+    20000
+  );
 
   it("is deterministic for the same seed", () => {
     const seed = 987654321;
-    const stateA = createInitialGameState({ seed, minFactionDistance: DEFAULT_MIN_FACTION_DISTANCE });
-    const stateB = createInitialGameState({ seed, minFactionDistance: DEFAULT_MIN_FACTION_DISTANCE });
+    const options = {
+      seed,
+      mapWidth: 24,
+      mapHeight: 24,
+      aiFactionCount: 6,
+      minFactionDistance: DEFAULT_MIN_FACTION_DISTANCE,
+    };
+    const stateA = createInitialGameState(options);
+    const stateB = createInitialGameState(options);
 
     expect(stateA.map.seed).toBe(stateB.map.seed);
     expect(getTerrainSignature(stateA)).toBe(getTerrainSignature(stateB));
     expect(getSpawnSignature(stateA)).toBe(getSpawnSignature(stateB));
+    expect(stateA.factions.aiOwners).toEqual(stateB.factions.aiOwners);
   });
 
   it("produces a different map or spawn layout for different seeds", () => {
@@ -38,26 +58,34 @@ describe("seeded match generation", () => {
     expect(sameTerrain && sameSpawns).toBe(false);
   });
 
-  it("enforces pairwise faction separation floor for all three factions", () => {
+  it("enforces pairwise faction separation floor for all configured factions", () => {
     const minFactionDistance = 7;
-    const gameState = createInitialGameState({ seed: 555777, minFactionDistance });
+    const gameState = createInitialGameState({
+      seed: 555777,
+      mapWidth: 24,
+      mapHeight: 24,
+      aiFactionCount: 6,
+      minFactionDistance,
+    });
     const nearestDistance = getNearestFactionDistance(gameState);
 
     expect(nearestDistance).toBeGreaterThanOrEqual(minFactionDistance);
     expect(gameState.map.spawnMetadata.minFactionDistance).toBe(minFactionDistance);
     expect(gameState.map.spawnMetadata.nearestFactionDistance).toBeGreaterThanOrEqual(minFactionDistance);
     expect(gameState.map.spawnMetadata.nearestFactionDistance).toBe(nearestDistance);
-    expect(gameState.map.spawnMetadata.anchors.purple).toBeTruthy();
-    expect(gameState.map.spawnMetadata.spawns.purpleSettler).toBeTruthy();
+    expect(gameState.map.spawnMetadata.anchorsByOwner).toBeTruthy();
+    expect(gameState.map.spawnMetadata.spawnByOwner).toBeTruthy();
+    for (const owner of gameState.factions.allOwners) {
+      expect(gameState.map.spawnMetadata.anchorsByOwner[owner]).toBeTruthy();
+      expect(gameState.map.spawnMetadata.spawnByOwner[owner]).toBeTruthy();
+    }
   });
 
   it("normalizes safe terrain around each faction spawn cluster", () => {
-    const gameState = createInitialGameState({ seed: 300913 });
-    const spawnHexes = [
-      gameState.map.spawnMetadata.spawns.playerSettler,
-      gameState.map.spawnMetadata.spawns.enemySettler,
-      gameState.map.spawnMetadata.spawns.purpleSettler,
-    ];
+    const gameState = createInitialGameState({ seed: 300913, aiFactionCount: 6, mapWidth: 24, mapHeight: 24 });
+    const spawnHexes = gameState.factions.allOwners
+      .map((owner) => gameState.map.spawnMetadata.spawnByOwner?.[owner] ?? null)
+      .filter(Boolean);
 
     for (const spawn of spawnHexes) {
       const cluster = [spawn, ...neighbors(spawn)];
@@ -86,11 +114,7 @@ function getSpawnSignature(gameState) {
 }
 
 function getNearestFactionDistance(gameState) {
-  const points = [
-    gameState.units.find((unit) => unit.owner === "player"),
-    gameState.units.find((unit) => unit.owner === "enemy"),
-    gameState.units.find((unit) => unit.owner === "purple"),
-  ];
+  const points = gameState.factions.allOwners.map((owner) => gameState.units.find((unit) => unit.owner === owner));
   if (points.some((point) => !point)) {
     return 0;
   }

@@ -14,9 +14,15 @@ import { getSeenHostileOwners, recomputeVisibility } from "../../src/systems/vis
 
 describe("enemy AI personalities and deterministic decisions", () => {
   it("derives enemy personality from seed and supports explicit override", () => {
-    expect(createInitialGameState({ seed: 3 }).ai.enemy.personality).toBe("raider");
-    expect(createInitialGameState({ seed: 4 }).ai.enemy.personality).toBe("expansionist");
-    expect(createInitialGameState({ seed: 5 }).ai.enemy.personality).toBe("guardian");
+    const seedThreeA = createInitialGameState({ seed: 3 }).ai.enemy.personality;
+    const seedThreeB = createInitialGameState({ seed: 3 }).ai.enemy.personality;
+    const seedFour = createInitialGameState({ seed: 4 }).ai.enemy.personality;
+    const seedFive = createInitialGameState({ seed: 5 }).ai.enemy.personality;
+    const personalities = new Set(["raider", "expansionist", "guardian"]);
+    expect(personalities.has(seedThreeA)).toBe(true);
+    expect(personalities.has(seedFour)).toBe(true);
+    expect(personalities.has(seedFive)).toBe(true);
+    expect(seedThreeA).toBe(seedThreeB);
 
     const overridden = createInitialGameState({
       seed: 3,

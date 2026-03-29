@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { cloneGameState, createInitialGameState } from "../../src/core/gameState.js";
-import { AI_OWNERS } from "../../src/core/factions.js";
 import {
   executeEnemyTurnPrelude,
   executeEnemyTurnStep,
@@ -118,12 +117,18 @@ describe("enemy turn flow", () => {
   });
 
   it("step-based flow matches runEnemyTurn wrapper behavior for each AI owner", () => {
-    for (const owner of AI_OWNERS) {
-      const initial = createInitialGameState({ seed: 811, enemyPersonality: "guardian", purplePersonality: "guardian" });
-      beginEnemyTurn(initial);
+    const initial = createInitialGameState({
+      seed: 811,
+      aiFactionCount: 4,
+      enemyPersonality: "guardian",
+      purplePersonality: "guardian",
+    });
+    for (const owner of initial.factions.aiOwners) {
+      const ownerSeedState = cloneGameState(initial);
+      beginEnemyTurn(ownerSeedState);
 
-      const wrapperState = cloneGameState(initial);
-      const stepState = cloneGameState(initial);
+      const wrapperState = cloneGameState(ownerSeedState);
+      const stepState = cloneGameState(ownerSeedState);
 
       runEnemyTurn(wrapperState, owner);
 
@@ -139,6 +144,20 @@ describe("enemy turn flow", () => {
       finalizeEnemyTurnPlan(stepState, plan, actionSummaries, prelude);
 
       expect(stepState).toEqual(wrapperState);
+    }
+  });
+
+  it("runs all configured AI owners in order for multi-faction matches", () => {
+    const gameState = createInitialGameState({ seed: 2711, mapWidth: 24, mapHeight: 24, aiFactionCount: 6 });
+    beginEnemyTurn(gameState);
+    for (const owner of gameState.factions.aiOwners) {
+      runEnemyTurn(gameState, owner);
+    }
+
+    for (const owner of gameState.factions.aiOwners) {
+      expect(gameState.ai.byOwner[owner]?.lastTurnSummary?.turn).toBe(1);
+      expect(gameState.cities.some((city) => city.owner === owner)).toBe(true);
+      expect(gameState.units.some((unit) => unit.owner === owner && unit.type === "settler")).toBe(false);
     }
   });
 });

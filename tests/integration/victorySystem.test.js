@@ -24,6 +24,23 @@ describe("victory conditions", () => {
     expect(gameState.match.reason).toBeNull();
   });
 
+  it("uses dynamic hostile roster for elimination checks", () => {
+    const gameState = createInitialGameState({ seed: 6402, aiFactionCount: 6, mapWidth: 24, mapHeight: 24 });
+    const survivingAiOwner = gameState.factions.aiOwners[gameState.factions.aiOwners.length - 1];
+    gameState.units = gameState.units.filter((unit) => unit.owner === "player" || unit.owner === survivingAiOwner);
+    gameState.cities = gameState.cities.filter((city) => city.owner === "player" || city.owner === survivingAiOwner);
+
+    evaluateMatchState(gameState);
+    expect(gameState.match.status).toBe("ongoing");
+    expect(gameState.match.reason).toBeNull();
+
+    gameState.units = gameState.units.filter((unit) => unit.owner === "player");
+    gameState.cities = gameState.cities.filter((city) => city.owner === "player");
+    evaluateMatchState(gameState);
+    expect(gameState.match.status).toBe("won");
+    expect(gameState.match.reason).toBe("elimination");
+  });
+
   it("does not win from turn count alone", () => {
     const gameState = createInitialGameState();
     gameState.turnState.turn = 99;

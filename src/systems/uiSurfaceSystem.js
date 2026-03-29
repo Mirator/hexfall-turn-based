@@ -90,6 +90,7 @@ import { canSkipUnit, getSkipUnitReasonText } from "./unitActionSystem.js";
  * }}
  */
 export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackableTargets, attackableCities, uiContext = {}) {
+  const playerOwner = gameState.factions?.playerOwner ?? "player";
   const isPlayerTurn = gameState.turnState.phase === "player" && gameState.match.status === "ongoing";
   const foundCityCheck = selectedUnit ? canFoundCity(selectedUnit.id, gameState) : { ok: false, reason: "unit-not-found" };
   const canFound = !!selectedUnit && foundCityCheck.ok;
@@ -97,10 +98,10 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
   const skipCheck = selectedUnit ? canSkipUnit(selectedUnit.id, gameState) : { ok: false, reason: "unit-not-found" };
   const canSkip = !!selectedUnit && skipCheck.ok;
   const skipUnitReason = canSkip ? null : getSkipUnitReasonText(skipCheck.reason);
-  const selectedPlayerCity = !!selectedCity && selectedCity.owner === "player";
-  const selectedPlayerUnit = !!selectedUnit && selectedUnit.owner === "player";
+  const selectedPlayerCity = !!selectedCity && selectedCity.owner === playerOwner;
+  const selectedPlayerUnit = !!selectedUnit && selectedUnit.owner === playerOwner;
   const unlockedUnits = new Set(gameState.unlocks.units);
-  const cityEconomyBucket = selectedCity ? gameState.economy[selectedCity.owner] : gameState.economy.player;
+  const cityEconomyBucket = selectedCity ? gameState.economy[selectedCity.owner] : gameState.economy[playerOwner];
   const queueItems = selectedPlayerCity ? normalizeQueueItems(selectedCity.queue) : [];
   const cityProductionTab = selectedPlayerCity && selectedCity.productionTab === "buildings" ? "buildings" : "units";
   const queuedBuildingIds = new Set(queueItems.filter((item) => item.kind === "building").map((item) => item.id));
@@ -238,10 +239,10 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
     uiHints.secondary = "Resolve city outcome to continue the turn.";
     uiHints.level = "info";
   } else if (uiContext.restartConfirmOpen) {
-    uiHints.primary = "Confirm restart or cancel to keep playing.";
+    uiHints.primary = "Start a new game or cancel to keep playing.";
     uiHints.level = "info";
   } else if (gameState.match.status !== "ongoing") {
-    uiHints.primary = "Match ended. Restart to play again.";
+    uiHints.primary = "Match ended. Start a new game to play again.";
     uiHints.level = "info";
   } else if (gameState.turnState.phase === "enemy") {
     uiHints.primary = "AI factions are taking their turn.";

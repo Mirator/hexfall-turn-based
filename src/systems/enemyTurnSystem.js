@@ -1,5 +1,5 @@
 import { cloneGameState, getTileAt, getUnitById } from "../core/gameState.js";
-import { AI_OWNERS, getHostileOwners, isAiOwner } from "../core/factions.js";
+import { AI_OWNERS, getAiOwners, getHostileOwners, isAiOwner } from "../core/factions.js";
 import { distance } from "../core/hexGrid.js";
 import { mixSeed, normalizeSeed } from "../core/random.js";
 import { getUnitDefinition } from "../core/unitData.js";
@@ -178,10 +178,23 @@ const THREATENED_CITY_DISTANCE = 2;
 
 /**
  * @param {import("../core/types.js").AiOwner|undefined|null|string} owner
+ * @param {import("../core/types.js").GameState|undefined|null} [gameState]
  * @returns {import("../core/types.js").AiOwner}
  */
-function normalizeAiOwner(owner) {
-  return owner === "purple" ? "purple" : "enemy";
+function normalizeAiOwner(owner, gameState = null) {
+  const aiOwners = getAiOwners(gameState);
+  if (typeof owner === "string" && owner.length > 0) {
+    if (!gameState) {
+      return /** @type {import("../core/types.js").AiOwner} */ (owner);
+    }
+    if (aiOwners.includes(owner)) {
+      return /** @type {import("../core/types.js").AiOwner} */ (owner);
+    }
+  }
+  if (owner && aiOwners.includes(owner)) {
+    return /** @type {import("../core/types.js").AiOwner} */ (owner);
+  }
+  return /** @type {import("../core/types.js").AiOwner} */ (aiOwners[0] ?? AI_OWNERS[0] ?? "enemy");
 }
 
 /**
@@ -208,24 +221,17 @@ function derivePersonalityFromSeed(seed, owner) {
  * @returns {import("../core/types.js").EnemyAiState}
  */
 export function ensureAiState(gameState, owner = "enemy") {
-  const targetOwner = normalizeAiOwner(owner);
+  const targetOwner = normalizeAiOwner(owner, gameState);
+  const aiOwners = getAiOwners(gameState);
   if (!gameState.ai || typeof gameState.ai !== "object") {
     gameState.ai = /** @type {import("../core/types.js").GameState["ai"]} */ ({
-      enemy: {
-        personality: derivePersonalityFromSeed(gameState.map.seed, "enemy"),
-        lastGoal: null,
-        lastTurnSummary: null,
-      },
-      purple: {
-        personality: derivePersonalityFromSeed(gameState.map.seed, "purple"),
-        lastGoal: null,
-        lastTurnSummary: null,
-      },
+      enemy: null,
+      purple: null,
       byOwner: {},
     });
   }
 
-  for (const aiOwner of AI_OWNERS) {
+  for (const aiOwner of aiOwners) {
     const existing =
       gameState.ai?.byOwner?.[aiOwner] ??
       (aiOwner === "enemy" ? gameState.ai?.enemy : aiOwner === "purple" ? gameState.ai?.purple : null);
@@ -240,10 +246,14 @@ export function ensureAiState(gameState, owner = "enemy") {
       gameState.ai.byOwner = /** @type {Record<import("../core/types.js").AiOwner, import("../core/types.js").EnemyAiState>} */ ({});
     }
     gameState.ai.byOwner[aiOwner] = state;
-    if (aiOwner === "enemy") {
-      gameState.ai.enemy = state;
-    } else {
-      gameState.ai.purple = state;
+  }
+
+  gameState.ai.enemy = gameState.ai.byOwner.enemy ?? null;
+  gameState.ai.purple = gameState.ai.byOwner.purple ?? null;
+
+  for (const existingOwner of Object.keys(gameState.ai.byOwner)) {
+    if (!aiOwners.includes(existingOwner)) {
+      delete gameState.ai.byOwner[existingOwner];
     }
   }
 
@@ -376,7 +386,7 @@ export function pickEnemyGoal(gameState, personality = getEnemyPersonality(gameS
  */
 export function pickEnemyCityOutcome(attackerOwner, targetCity, gameState) {
   const ownedCities = gameState.cities.filter((city) => city.owner === attackerOwner).length;
-  if (!isAiOwner(attackerOwner)) {
+  if (!isAiOwner(attackerOwner, gameState)) {
     return ownedCities === 0 ? "capture" : "raze";
   }
 
@@ -415,12 +425,14 @@ export function pickEnemyCityOutcome(attackerOwner, targetCity, gameState) {
  * }}
  */
 export function prepareEnemyTurnPlan(gameState, owner = "enemy") {
-  const aiOwner = normalizeAiOwner(owner);
+  const aiOwner = normalizeAiOwner(owner, gameState);
   const planningState = cloneGameState(gameState);
   recomputeVisibility(planningState);
   const aiState = ensureAiState(planningState, aiOwner);
   const aiUnits = getAliveUnits(planningState, aiOwner);
-  const hasHostilePresence = getHostileOwners(aiOwner).some((hostileOwner) => hasFactionPresence(planningState, hostileOwner));
+  const hasHostilePresence = getHostileOwners(aiOwner, planningState).some((hostileOwner) =>
+    hasFactionPresence(planningState, hostileOwner)
+  );
   if (!hasHostilePresence) {
     return buildIdleTurnPlan(gameState, aiOwner, aiState.personality);
   }
@@ -448,7 +460,7 @@ export function prepareEnemyTurnPlan(gameState, owner = "enemy") {
  * @returns {{ selectedResearch: string|null, queueRefills: Array<{ cityId: string, item: string }> }}
  */
 export function executeEnemyTurnPrelude(gameState, plan) {
-  const owner = normalizeAiOwner(plan.owner ?? "enemy");
+  const owner = normalizeAiOwner(plan.owner ?? "enemy", gameState);
   let selectedResearch = null;
   if (plan.selectedResearch) {
     const selected = selectResearch(plan.selectedResearch, gameState);
@@ -573,7 +585,7 @@ export function executeEnemyTurnStep(gameState, step) {
  * @returns {import("../core/types.js").EnemyTurnSummary}
  */
 export function finalizeEnemyTurnPlan(gameState, plan, actions, appliedPrelude = null) {
-  const owner = normalizeAiOwner(plan.owner ?? "enemy");
+  const owner = normalizeAiOwner(plan.owner ?? "enemy", gameState);
   const aiState = ensureAiState(gameState, owner);
   aiState.lastGoal = plan.goal;
   aiState.lastTurnSummary = {
@@ -593,7 +605,7 @@ export function finalizeEnemyTurnPlan(gameState, plan, actions, appliedPrelude =
  * @returns {import("../core/types.js").GameState}
  */
 export function runEnemyTurn(gameState, owner = "enemy") {
-  const aiOwner = normalizeAiOwner(owner);
+  const aiOwner = normalizeAiOwner(owner, gameState);
   recomputeVisibility(gameState);
   const plan = prepareEnemyTurnPlan(gameState, aiOwner);
   const appliedPrelude = executeEnemyTurnPrelude(gameState, plan);
@@ -1210,12 +1222,12 @@ function getThreatenedCities(gameState, owner) {
 }
 
 function getVisibleHostileUnits(gameState, owner) {
-  const hostileOwners = new Set(getHostileOwners(owner));
+  const hostileOwners = new Set(getHostileOwners(owner, gameState));
   return gameState.units.filter((unit) => hostileOwners.has(unit.owner) && unit.health > 0 && canOwnerSeeUnit(gameState, owner, unit));
 }
 
 function getVisibleHostileCities(gameState, owner) {
-  const hostileOwners = new Set(getHostileOwners(owner));
+  const hostileOwners = new Set(getHostileOwners(owner, gameState));
   return gameState.cities.filter((city) => hostileOwners.has(city.owner) && city.health > 0 && canOwnerSeeCity(gameState, owner, city));
 }
 

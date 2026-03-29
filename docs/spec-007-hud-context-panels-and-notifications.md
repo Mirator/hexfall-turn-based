@@ -19,17 +19,17 @@
 - Chosen: panel has visible expand/collapse and pin controls; auto-expands on valid selection; pin persists expanded mode across selection changes.
 - Chosen: city mode supports `Units|Buildings` tabs with a horizontal production list in the bottom contextual panel and always-available production-cost/estimated-turn hover tooltip details.
 - Chosen: city production choices expose explicit cost context and per-item unavailable-state tags (`Locked`, `Built`, `Queued`, `Queue Full`).
-- Chosen: disabled city actions show exact unavailable reasons on hover via pointer-following tooltip and hint text paths.
+- Chosen: disabled city/unit actions expose exact unavailable reasons inline in the expanded context panel, with hover tooltip and hint text as secondary detail.
 - Chosen: queue supports deterministic per-slot up/down reorder controls plus explicit remove controls in a vertical single-column layout in the right-side city queue card.
 - Chosen: unit mode supports `Found City` + `Skip Unit`.
 - Chosen: hover-driven action preview surfaces (`move`, `attack-unit`, `attack-city`) with no state mutation.
 - Chosen: map clarity overlays include reachable/attackable emphasis and threat visualization when a player unit is selected.
-- Chosen: bottom-right readiness assistant uses clickable `Attention needed (X)` status, where `X = ready units + player cities with empty queues`; click cycles the next attention target (unit or city), and End Turn keeps warning tint while any attention remains.
+- Chosen: bottom-right readiness assistant uses clickable split summary (`Units ready X`, `Empty queues Y`), where `X + Y` still drives warning state; click cycles the next attention target (unit or city), and End Turn keeps warning tint while any attention remains.
 - Chosen: AI playback banner is displayed while sequential AI actions resolve (`Enemy action ...` / `Purple action ...`), centered above the map/HUD action layers.
 - Chosen: gameplay commands (End Turn + context actions) are disabled while animation timeline is busy, with explicit disabled reason text.
 - Chosen: support matrix is desktop + tablet only; phone-sized viewports are blocked by runtime bootstrap and do not participate in HUD acceptance.
 - Chosen: restart lives in Esc pause menu (`Resume`, `Restart`, confirm step) and blocks underlying interactions while modal is open.
-- Chosen: notification center v2 supports categories (`All/Combat/City/Research/System`), filtering, and click-to-jump focus.
+- Chosen: notification center supports categories (`All/Combat/City/Research/System`), filtering, unread metadata, `New this turn`/`Earlier` grouping rows, and click-to-jump focus with explicit jump affordance.
 - Chosen: city notifications are high-signal; keep high-level outcomes (city founded/captured/razed, research completed, combat outcomes) plus warnings/failures, and suppress low-value city production success logs (tab switch, queue add/move/remove success).
 - Chosen: notification rows with no map `focus` are rendered as non-clickable text and never emit "no target" warning on click.
 - Chosen: camera recentering recovery supports keyboard pan (`Arrow`/`WASD`) and right-mouse drag panning while no modal is open.
@@ -50,6 +50,7 @@
   - `devVisionEnabled`
   - `uiNotifications` entries with `category` and optional `focus`
   - `uiNotificationFilter`
+  - `uiNotificationUnreadCount`
   - `cameraScroll`
   - `cameraFocusHex`
   - `pauseMenu`
@@ -79,6 +80,7 @@
 - HUD layout remains readable on desktop and tablet viewports (`>= 768px`).
 - City/unit contextual controls appear only when relevant selection is active.
 - Disabled actions expose contextual reason feedback through hint/notification paths and disabled-button hover tooltips.
+- Expanded context panel shows inline blocked microcopy (`Blocked: ...`) whenever actions are unavailable.
 - City production buttons show clear production cost labels in a horizontal list and always expose hover tooltip details (`production cost`, `estimated turns`, `current production stock`, `local production per turn`, unavailable reason when blocked).
 - City queue renders in the right-side city queue card as a vertical 3-slot stack with per-slot status and up/down reorder + remove affordances.
 - Right-side city queue card appears only for city selection and remains vertically between notifications and `Attention needed`.
@@ -88,7 +90,8 @@
   - clears on selection/phase/modal changes
 - End-turn readiness flow:
   - one-click End Turn remains
-  - readiness count aggregates unit + city-queue attention
+  - readiness state still aggregates unit + city-queue attention
+  - assistant text is split (`Units ready`, `Empty queues`) for clarity
   - clicking the assistant deterministically cycles next attention target (ready unit or city with empty queue)
 - Playback/lock flow:
   - playback banner is visible only while `turnPlayback.active=true`
@@ -101,6 +104,7 @@
 - Notification center:
   - newest-first feed
   - filter chips by category
+  - grouped sections (`New this turn`, `Earlier`) with unread count shown in panel title
   - city feed keeps high-level outcomes (city founded/captured/razed, research completed, combat outcomes) plus warnings/failures
   - city feed omits low-value tab-switch/queue-edit success spam
   - rows without `focus` are non-clickable and do not emit warnings when clicked
@@ -124,11 +128,6 @@
 
 ## Known gaps and next steps
 
-- Notification center currently prioritizes compact single-line rows over expanded per-entry detail.
+- Notification center still prioritizes compact one-line rows over expanded per-entry detail cards.
 - Additional layout polish for dense tablet viewports (for example `768x1024`) can still improve readability.
 - No user-facing playback speed/skip controls yet.
-- Prioritized UI/UX polish backlog for next iteration:
-  - Add persistent "why blocked" microcopy near disabled context actions (not hover-only).
-  - Add unread notification treatment (badge + "new since last turn" grouping).
-  - Expand `Attention needed` into a drill-down summary (`Units ready: X`, `Empty queues: Y`).
-  - Add playback controls (`1x`, `2x`, `Skip visuals`) while preserving deterministic state ordering.

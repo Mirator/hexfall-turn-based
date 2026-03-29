@@ -441,9 +441,7 @@ function pickAiCityOutcome(attackerOwner, targetCity, gameState) {
     return ownedCities === 0 ? "capture" : "raze";
   }
 
-  const aiState =
-    gameState.ai?.byOwner?.[attackerOwner] ??
-    (attackerOwner === "enemy" ? gameState.ai?.enemy : attackerOwner === "purple" ? gameState.ai?.purple : null);
+  const aiState = gameState.ai?.byOwner?.[attackerOwner] ?? null;
   const personality = aiState?.personality ?? "expansionist";
   if (personality === "expansionist") {
     return "capture";

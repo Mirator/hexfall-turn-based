@@ -280,6 +280,41 @@ describe("city economy and identity", () => {
     expect(gameState.cities[0].queue).toEqual([]);
   });
 
+  it("processes city economy for arbitrary AI owners in expanded rosters", () => {
+    const gameState = createInitialGameState({ seed: 18446, aiFactionCount: 5, mapWidth: 24, mapHeight: 24 });
+    const dynamicAiOwner = gameState.factions.aiOwners.find((owner) => owner !== "enemy" && owner !== "purple");
+    expect(dynamicAiOwner).toBeTruthy();
+    if (!dynamicAiOwner) {
+      return;
+    }
+    const dynamicSettler = gameState.units.find((unit) => unit.owner === dynamicAiOwner && unit.type === "settler");
+    expect(dynamicSettler).toBeTruthy();
+    if (!dynamicSettler) {
+      return;
+    }
+
+    const founded = foundCity(dynamicSettler.id, gameState);
+    expect(founded.ok).toBe(true);
+    const city = gameState.cities.find((candidate) => candidate.id === founded.cityId);
+    expect(city).toBeTruthy();
+    if (!city) {
+      return;
+    }
+    city.queue = [{ kind: "unit", id: "warrior" }];
+    gameState.economy[dynamicAiOwner].foodStock = 0;
+    gameState.economy[dynamicAiOwner].productionStock = 12;
+    gameState.economy[dynamicAiOwner].scienceStock = 0;
+
+    for (const owner of gameState.factions.allOwners) {
+      expect(gameState.economy[owner]).toBeTruthy();
+    }
+
+    const result = processTurn(gameState, dynamicAiOwner);
+    expect(result.produced.length).toBeGreaterThan(0);
+    expect(gameState.units.some((unit) => unit.owner === dynamicAiOwner && unit.type === "warrior")).toBe(true);
+    expect(gameState.economy[dynamicAiOwner].productionStock).toBeLessThan(12);
+  });
+
   it("produces buildings from the shared queue and blocks duplicates per city", () => {
     const gameState = createInitialGameState({ seed: 447 });
     gameState.units = [];

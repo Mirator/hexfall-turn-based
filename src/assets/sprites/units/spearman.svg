@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="core" cx="50%" cy="36%" r="60%">
+      <stop offset="0%" stop-color="#FAFAFA"/>
+      <stop offset="100%" stop-color="#8A8A8A"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#B7B7B7"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="32" cy="55" rx="14.5" ry="4.4" fill="#000000" opacity="0.17"/>
+  <circle cx="32" cy="32" r="21" fill="url(#core)" stroke="url(#rim)" stroke-width="2.5"/>
+  <circle cx="32" cy="32" r="16.2" fill="#000000" opacity="0.13"/>
+  <rect x="31" y="15.5" width="2.8" height="30.2" rx="1.2" fill="#F2F2F2"/>
+  <polygon points="32.4,8.7 38.2,18.7 26.7,18.7" fill="#F2F2F2"/>
+  <path d="M24 32.7 L31 29.8 L31 43.4 L24 46.2 Z" fill="#DCDCDC" opacity="0.9"/>
+  <circle cx="26" cy="23.8" r="2" fill="#E6E6E6" opacity="0.8"/>
+</svg>
+
+

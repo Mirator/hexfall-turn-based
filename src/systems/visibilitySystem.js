@@ -1,4 +1,4 @@
-import { ALL_OWNERS, AI_OWNERS, PLAYER_OWNER, getHostileOwners, isOwner } from "../core/factions.js";
+import { AI_OWNERS, PLAYER_OWNER, getAllOwners, getHostileOwners } from "../core/factions.js";
 import { distance } from "../core/hexGrid.js";
 
 export const UNIT_SIGHT_RANGE = 2;
@@ -26,15 +26,14 @@ export function createEmptyVisibilityOwnerState(owner) {
 }
 
 /**
+ * @param {import("../core/types.js").Owner[]|undefined|null} [owners]
  * @returns {import("../core/types.js").VisibilityState}
  */
-export function createVisibilityState() {
+export function createVisibilityState(owners = null) {
+  const allOwners = normalizeOwners(owners);
+  const byOwner = Object.fromEntries(allOwners.map((owner) => [owner, createEmptyVisibilityOwnerState(owner)]));
   return {
-    byOwner: {
-      player: createEmptyVisibilityOwnerState("player"),
-      enemy: createEmptyVisibilityOwnerState("enemy"),
-      purple: createEmptyVisibilityOwnerState("purple"),
-    },
+    byOwner,
     devRevealPlayer: false,
   };
 }
@@ -44,14 +43,15 @@ export function createVisibilityState() {
  * @returns {import("../core/types.js").VisibilityState}
  */
 export function normalizeVisibilityState(gameState) {
+  const allOwners = getAllOwners(gameState);
   if (!gameState.visibility || typeof gameState.visibility !== "object") {
-    gameState.visibility = createVisibilityState();
+    gameState.visibility = createVisibilityState(allOwners);
   }
   if (!gameState.visibility.byOwner || typeof gameState.visibility.byOwner !== "object") {
-    gameState.visibility.byOwner = createVisibilityState().byOwner;
+    gameState.visibility.byOwner = createVisibilityState(allOwners).byOwner;
   }
 
-  for (const owner of ALL_OWNERS) {
+  for (const owner of allOwners) {
     const bucket = gameState.visibility.byOwner[owner];
     if (!bucket || typeof bucket !== "object") {
       gameState.visibility.byOwner[owner] = createEmptyVisibilityOwnerState(owner);
@@ -60,7 +60,7 @@ export function normalizeVisibilityState(gameState) {
 
     bucket.visibleHexes = normalizeHexKeyList(bucket.visibleHexes);
     bucket.exploredHexes = normalizeHexKeyList(bucket.exploredHexes);
-    bucket.seenOwners = normalizeSeenOwners(bucket.seenOwners, owner);
+    bucket.seenOwners = normalizeSeenOwners(bucket.seenOwners, owner, allOwners);
   }
 
   if (typeof gameState.visibility.devRevealPlayer !== "boolean") {
@@ -76,8 +76,9 @@ export function normalizeVisibilityState(gameState) {
  */
 export function recomputeVisibility(gameState) {
   const visibility = normalizeVisibilityState(gameState);
+  const allOwners = getAllOwners(gameState);
 
-  for (const owner of ALL_OWNERS) {
+  for (const owner of allOwners) {
     const visible = collectOwnerVisibleHexes(gameState, owner);
     const visibleKeys = [...visible].sort(compareHexKeys);
     const explored = new Set(visibility.byOwner[owner].exploredHexes);
@@ -87,7 +88,7 @@ export function recomputeVisibility(gameState) {
 
     const seenOwners = new Set(visibility.byOwner[owner].seenOwners);
     seenOwners.add(owner);
-    for (const hostile of getHostileOwners(owner)) {
+    for (const hostile of getHostileOwners(owner, gameState)) {
       if (ownerCanCurrentlySeeOwner(gameState, owner, hostile, visible)) {
         seenOwners.add(hostile);
       }
@@ -95,7 +96,7 @@ export function recomputeVisibility(gameState) {
 
     visibility.byOwner[owner].visibleHexes = visibleKeys;
     visibility.byOwner[owner].exploredHexes = [...explored].sort(compareHexKeys);
-    visibility.byOwner[owner].seenOwners = normalizeSeenOwners([...seenOwners], owner);
+    visibility.byOwner[owner].seenOwners = normalizeSeenOwners([...seenOwners], owner, allOwners);
   }
 
   return visibility;
@@ -108,7 +109,7 @@ export function recomputeVisibility(gameState) {
  */
 export function getVisibleHexSet(gameState, owner) {
   const visibility = normalizeVisibilityState(gameState);
-  return new Set(visibility.byOwner[owner].visibleHexes);
+  return new Set(visibility.byOwner[owner]?.visibleHexes ?? []);
 }
 
 /**
@@ -118,7 +119,7 @@ export function getVisibleHexSet(gameState, owner) {
  */
 export function getExploredHexSet(gameState, owner) {
   const visibility = normalizeVisibilityState(gameState);
-  return new Set(visibility.byOwner[owner].exploredHexes);
+  return new Set(visibility.byOwner[owner]?.exploredHexes ?? []);
 }
 
 /**
@@ -176,7 +177,7 @@ export function canOwnerSeeCity(gameState, observer, city) {
  */
 export function getSeenOwners(gameState, owner) {
   const visibility = normalizeVisibilityState(gameState);
-  return [...visibility.byOwner[owner].seenOwners];
+  return [...(visibility.byOwner[owner]?.seenOwners ?? [owner])];
 }
 
 /**
@@ -186,7 +187,7 @@ export function getSeenOwners(gameState, owner) {
  */
 export function getSeenHostileOwners(gameState, owner) {
   const seen = new Set(getSeenOwners(gameState, owner));
-  return getHostileOwners(owner).filter((candidate) => seen.has(candidate));
+  return getHostileOwners(owner, gameState).filter((candidate) => seen.has(candidate));
 }
 
 /**
@@ -308,18 +309,30 @@ function normalizeHexKeyList(value) {
 /**
  * @param {unknown} value
  * @param {import("../core/types.js").Owner} owner
+ * @param {import("../core/types.js").Owner[]} allOwners
  * @returns {import("../core/types.js").Owner[]}
  */
-function normalizeSeenOwners(value, owner) {
+function normalizeSeenOwners(value, owner, allOwners) {
   const seen = new Set([owner]);
   if (Array.isArray(value)) {
     for (const candidate of value) {
-      if (isOwner(candidate)) {
+      if (allOwners.includes(/** @type {import("../core/types.js").Owner} */ (candidate))) {
         seen.add(candidate);
       }
     }
   }
-  return ALL_OWNERS.filter((candidate) => seen.has(candidate));
+  return allOwners.filter((candidate) => seen.has(candidate));
+}
+
+/**
+ * @param {import("../core/types.js").Owner[]|undefined|null} owners
+ * @returns {import("../core/types.js").Owner[]}
+ */
+function normalizeOwners(owners) {
+  if (Array.isArray(owners) && owners.length > 0) {
+    return [...new Set(owners)];
+  }
+  return getAllOwners(null);
 }
 
 /**
@@ -335,4 +348,3 @@ function compareHexKeys(a, b) {
 
 export const VISIBILITY_AI_OWNERS = AI_OWNERS;
 export const VISIBILITY_PLAYER_OWNER = PLAYER_OWNER;
-

@@ -61,7 +61,7 @@ describe("UI surface hints/actions", () => {
   it("shows restart confirmation hint while modal context is active", () => {
     const gameState = createInitialGameState();
     const ui = deriveUiSurface(gameState, null, null, [], [], { restartConfirmOpen: true });
-    expect(ui.uiHints.primary).toContain("Confirm restart");
+    expect(ui.uiHints.primary).toContain("Start a new game");
     expect(ui.uiHints.level).toBe("info");
   });
 

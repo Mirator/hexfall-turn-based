@@ -8,7 +8,7 @@
 
 ## Decisions made (and alternatives rejected)
 
-- Chosen: keep current Graphics renderer and add a tween-driven presentation layer (`no full sprite refactor`).
+- Chosen: move to a sprite-backed presentation layer for terrain + unit/city actors while keeping simulation authority unchanged.
 - Chosen: movement/combat/founding/outcome visuals are queued clips (`move`, `attack`, `attack-city`, `found-city`, `city-outcome`) and run sequentially.
 - Chosen: authoritative state mutates first; animation reads committed results and visualizes them.
 - Chosen: AI phase executes as plan-based step playback per owner (`prepare -> prelude -> execute step-by-step -> finalize`).
@@ -29,10 +29,12 @@
   - `runEnemyTurn(gameState, owner?)` retained as compatibility wrapper.
 - Runtime payload surfaces:
   - `animationState: { busy, kind, queueLength }`
+  - `spriteLayers: { terrain, units, cities, fx }`
   - `turnPlayback: { active, actor, stepIndex, totalSteps, message }`
   - `EnemyActionSummary.presentation?: { from, to, target }`
 - Browser hooks:
   - `window.__hexfallTest.getAnimationState()`
+  - `window.__hexfallTest.getSpriteLayerCounts()`
   - `window.__hexfallTest.requestEndTurn()`
   - `window.__hexfallTest.endTurnImmediate()` retained unchanged for deterministic fast-path tests.
 
@@ -47,6 +49,10 @@
   - city assault pulse/damage feedback,
   - founding pulse/spawn animation,
   - capture/raze outcome burst animation.
+- Visual stack:
+  - terrain uses deterministic per-tile sprite variants with fog/memory overlays preserved,
+  - units/cities render as sprite containers keyed by entity id with subtle idle motion,
+  - health bars and tactical overlays remain deterministic and simulation-driven.
 - AI turn flow:
   - entering AI turn exposes active `turnPlayback`,
   - playback actor identifies currently resolving owner (`enemy` or `purple`),
@@ -67,6 +73,6 @@
 
 ## Known gaps and next steps
 
-- Presentation layer remains minimalist (shape/pulse/text feedback only; no authored sprite sheets yet).
+- Sprite content is static v1 (single-frame tokens with lightweight FX), not full multi-frame authored animation sheets.
 - No animation skip/fast-forward toggle in UI yet.
 - No dedicated combat timeline panel beyond playback banner + notification stream.

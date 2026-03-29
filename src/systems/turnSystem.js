@@ -1,3 +1,5 @@
+import { getAiOwners, getPlayerOwner } from "../core/factions.js";
+
 /**
  * @param {import("../core/types.js").GameState} gameState
  * @returns {import("../core/types.js").GameState}
@@ -5,8 +7,9 @@
 export function beginEnemyTurn(gameState) {
   gameState.turnState.phase = "enemy";
   gameState.selectedUnitId = null;
-  resetMovementForOwner(gameState, "enemy");
-  resetMovementForOwner(gameState, "purple");
+  for (const aiOwner of getAiOwners(gameState)) {
+    resetMovementForOwner(gameState, aiOwner);
+  }
   return gameState;
 }
 
@@ -18,7 +21,7 @@ export function beginPlayerTurn(gameState) {
   gameState.turnState.turn += 1;
   gameState.turnState.phase = "player";
   gameState.selectedUnitId = null;
-  resetMovementForOwner(gameState, "player");
+  resetMovementForOwner(gameState, getPlayerOwner(gameState));
   return gameState;
 }
 

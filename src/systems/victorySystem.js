@@ -1,4 +1,4 @@
-import { AI_OWNERS } from "../core/factions.js";
+import { getAiOwners, getPlayerOwner } from "../core/factions.js";
 
 /**
  * @param {import("../core/types.js").GameState} gameState
@@ -9,10 +9,12 @@ export function evaluateMatchState(gameState) {
     return gameState.match;
   }
 
-  const playerUnits = gameState.units.filter((unit) => unit.owner === "player");
-  const playerCities = gameState.cities.filter((city) => city.owner === "player");
-  const hostileUnits = gameState.units.filter((unit) => AI_OWNERS.includes(unit.owner));
-  const hostileCities = gameState.cities.filter((city) => AI_OWNERS.includes(city.owner));
+  const playerOwner = getPlayerOwner(gameState);
+  const aiOwners = getAiOwners(gameState);
+  const playerUnits = gameState.units.filter((unit) => unit.owner === playerOwner);
+  const playerCities = gameState.cities.filter((city) => city.owner === playerOwner);
+  const hostileUnits = gameState.units.filter((unit) => aiOwners.includes(unit.owner));
+  const hostileCities = gameState.cities.filter((city) => aiOwners.includes(city.owner));
 
   if (playerUnits.length === 0 && playerCities.length === 0) {
     gameState.match.status = "lost";

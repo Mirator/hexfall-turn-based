@@ -158,9 +158,14 @@ async function run() {
     const initialState = await page.evaluate(() => window.__hexfallTest.getState());
     assert.equal(initialState.turn, 1, "initial turn should be 1");
     assert.equal(initialState.match.status, "ongoing", "match should begin ongoing");
-    assert.equal(initialState.uiActions.canRestart, true, "restart should be available during gameplay");
+    assert.equal(initialState.uiActions.canRestart, true, "new game action should be available during gameplay");
     assert.equal(initialState.map.width, 16, "map width should be 16");
     assert.equal(initialState.map.height, 16, "map height should be 16");
+    assert.equal(initialState.matchConfig?.mapWidth, 16, "match config should report map width 16");
+    assert.equal(initialState.matchConfig?.mapHeight, 16, "match config should report map height 16");
+    assert.equal(initialState.matchConfig?.aiFactionCount, 2, "match config should default to two AI factions");
+    assert.deepEqual(initialState.factions?.aiOwners ?? [], ["enemy", "purple"], "default AI roster should remain enemy + purple");
+    assert.equal(initialState.factions?.allOwners?.length, 3, "all owners should include player plus two AI owners");
     const initialPlayerSettlers = initialState.units.filter((unit) => unit.owner === "player" && unit.type === "settler");
     const initialEnemySettlers = initialState.units.filter((unit) => unit.owner === "enemy" && unit.type === "settler");
     const initialPurpleSettlers = initialState.units.filter((unit) => unit.owner === "purple" && unit.type === "settler");
@@ -172,6 +177,8 @@ async function run() {
     assert.equal(initialState.uiPreview?.mode ?? "none", "none", "preview should be empty without hover selection");
     assert.equal(initialState.uiNotificationFilter, "All", "notification filter should default to All");
     assert.ok(initialState.uiTurnAssistant, "turn assistant payload should exist");
+    assert.ok(Number.isFinite(initialState.uiTurnAssistant.readyUnits), "turn assistant should expose readyUnits breakdown");
+    assert.ok(Number.isFinite(initialState.uiTurnAssistant.emptyQueues), "turn assistant should expose emptyQueues breakdown");
     assert.ok(initialState.hudTopLeft?.resources?.food, "top-left food resource display should exist");
     assert.ok(initialState.hudTopLeft?.resources?.production, "top-left production resource display should exist");
     assert.ok(initialState.hudTopLeft?.resources?.science, "top-left science resource display should exist");
@@ -189,9 +196,14 @@ async function run() {
 
     const hostileHiddenCount = initialState.units.filter((unit) => unit.owner !== "player").filter((unit) => !playerVisibleSet.has(`${unit.q},${unit.r}`)).length;
     assert.ok(hostileHiddenCount >= 1, "at least one hostile unit should start hidden by fog");
+    const spriteLayerCounts = await page.evaluate(() => window.__hexfallTest.getSpriteLayerCounts());
+    assert.ok((spriteLayerCounts?.terrain ?? 0) > 0, "terrain sprite layer should be populated");
+    assert.ok((spriteLayerCounts?.units ?? 0) >= 1, "unit sprite layer should be populated");
+    assert.ok((spriteLayerCounts?.cities ?? 0) >= 0, "city sprite layer payload should exist");
 
     const enemyVisibleBeforeDev = [...(initialState.visibility.byOwner.enemy.visibleHexes ?? [])];
     await page.keyboard.press("KeyV");
+    await page.waitForTimeout(90);
     const withDevVision = await page.evaluate(() => window.__hexfallTest.getState());
     assert.equal(withDevVision.devVisionEnabled, true, "V should toggle dev vision on");
     assert.deepEqual(
@@ -199,9 +211,111 @@ async function run() {
       enemyVisibleBeforeDev,
       "player dev reveal should not alter AI fog visibility"
     );
+    const spriteLayerCountsWithDevVision = await page.evaluate(() => window.__hexfallTest.getSpriteLayerCounts());
+    const unitSamples = spriteLayerCountsWithDevVision?.unitSamples ?? [];
+    assert.ok(unitSamples.length >= 3, "unit sprite diagnostics should include visible faction samples");
+    assert.ok(
+      unitSamples.every(
+        (sample) =>
+          sample &&
+          Number.isFinite(sample.displayWidth) &&
+          Number.isFinite(sample.displayHeight) &&
+          Math.abs(sample.displayWidth - 40) < 0.01 &&
+          Math.abs(sample.displayHeight - 40) < 0.01
+      ),
+      "unit sprites should render with 40x40 base display size"
+    );
+    assert.ok(
+      unitSamples.every((sample) => /^unit-(warrior|settler|spearman|archer)$/.test(String(sample.textureKey ?? ""))),
+      "shared unit textures should resolve to type-only keys"
+    );
+    const tintByOwner = new Map();
+    for (const sample of unitSamples) {
+      if (!sample?.owner || !Number.isFinite(sample.tint) || tintByOwner.has(sample.owner)) {
+        continue;
+      }
+      tintByOwner.set(sample.owner, sample.tint >>> 0);
+    }
+    const knownOwnersWithTint = ["player", "enemy", "purple"].filter((owner) => tintByOwner.has(owner));
+    assert.ok(knownOwnersWithTint.length >= 2, "at least two factions should expose tinted sprite samples");
+    const uniqueTintCount = new Set(knownOwnersWithTint.map((owner) => tintByOwner.get(owner))).size;
+    assert.ok(uniqueTintCount >= 2, "different factions should use different runtime unit tints");
     await page.keyboard.press("KeyV");
+    await page.waitForTimeout(90);
     const withoutDevVision = await page.evaluate(() => window.__hexfallTest.getState());
     assert.equal(withoutDevVision.devVisionEnabled, false, "V should toggle dev vision off");
+
+    const expandedRosterResult = await page.evaluate(async () => {
+      const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const getState = () => window.__hexfallTest.getState();
+
+      if (!window.__hexfallTest.openPauseMenu() || !window.__hexfallTest.openRestartConfirm()) {
+        return { ok: false, reason: "new-game-modal-open-failed" };
+      }
+      if (!window.__hexfallTest.setNewGameMapSize(24) || window.__hexfallTest.setNewGameAiFactionCount(6) !== 6) {
+        return { ok: false, reason: "new-game-config-controls-failed" };
+      }
+      const configuredModal = window.__hexfallTest.getRestartModalState();
+      if (!configuredModal?.open || configuredModal.mapSize !== 24 || configuredModal.aiFactionCount !== 6) {
+        return { ok: false, reason: "new-game-config-state-invalid" };
+      }
+
+      if (!window.__hexfallTest.confirmRestartConfirm()) {
+        return { ok: false, reason: "new-game-confirm-failed" };
+      }
+
+      let expandedState = null;
+      for (let i = 0; i < 70; i += 1) {
+        await pause(40);
+        const state = getState();
+        if (state.map?.width === 24 && state.map?.height === 24 && (state.factions?.aiOwners?.length ?? 0) === 6) {
+          expandedState = state;
+          break;
+        }
+      }
+      if (!expandedState) {
+        return { ok: false, reason: "expanded-roster-state-timeout" };
+      }
+
+      const allOwners = expandedState.factions?.allOwners ?? [];
+      for (const owner of allOwners) {
+        if (!expandedState.ai?.byOwner?.[owner] && owner !== expandedState.factions?.playerOwner) {
+          return { ok: false, reason: `missing-ai-by-owner-${owner}` };
+        }
+        if (!expandedState.economy?.byOwner?.[owner]) {
+          return { ok: false, reason: `missing-economy-by-owner-${owner}` };
+        }
+        if (!expandedState.visibility?.byOwner?.[owner]) {
+          return { ok: false, reason: `missing-visibility-by-owner-${owner}` };
+        }
+      }
+      const aiSettlers = expandedState.units.filter(
+        (unit) => expandedState.factions.aiOwners.includes(unit.owner) && unit.type === "settler"
+      );
+      if (aiSettlers.length !== expandedState.factions.aiOwners.length) {
+        return { ok: false, reason: "expanded-roster-settler-count-invalid" };
+      }
+
+      if (!window.__hexfallTest.openPauseMenu() || !window.__hexfallTest.openRestartConfirm()) {
+        return { ok: false, reason: "reset-to-default-open-failed" };
+      }
+      if (!window.__hexfallTest.setNewGameMapSize(16) || window.__hexfallTest.setNewGameAiFactionCount(2) !== 2) {
+        return { ok: false, reason: "reset-to-default-config-failed" };
+      }
+      if (!window.__hexfallTest.confirmRestartConfirm()) {
+        return { ok: false, reason: "reset-to-default-confirm-failed" };
+      }
+
+      for (let i = 0; i < 70; i += 1) {
+        await pause(40);
+        const state = getState();
+        if (state.map?.width === 16 && state.map?.height === 16 && (state.factions?.aiOwners?.length ?? 0) === 2) {
+          return { ok: true };
+        }
+      }
+      return { ok: false, reason: "reset-to-default-timeout" };
+    });
+    assert.equal(expandedRosterResult.ok, true, `expanded roster scenario failed: ${expandedRosterResult.reason}`);
 
     const scenarioResult = await page.evaluate(async () => {
       const getState = () => window.__hexfallTest.getState();
@@ -214,7 +328,7 @@ async function run() {
         return { ok: false, reason: "missing-player-settler" };
       }
 
-      // Pause + restart modal sanity check.
+      // Pause + New Game modal sanity check.
       const pauseOpened = window.__hexfallTest.openPauseMenu();
       const pauseMenu = window.__hexfallTest.getPauseMenuState();
       if (!pauseOpened || !pauseMenu?.open) {
@@ -230,11 +344,11 @@ async function run() {
         !restartModal?.cancelVisible ||
         restartModal.confirmDepth <= restartModal.panelDepth
       ) {
-        return { ok: false, reason: "restart-modal-broken" };
+        return { ok: false, reason: "new-game-modal-broken" };
       }
       window.__hexfallTest.cancelRestartConfirm();
       if (window.__hexfallTest.getRestartModalState()?.open) {
-        return { ok: false, reason: "restart-modal-did-not-close" };
+        return { ok: false, reason: "new-game-modal-did-not-close" };
       }
       window.__hexfallTest.closePauseMenu();
       if (window.__hexfallTest.getPauseMenuState()?.open) {
@@ -263,6 +377,9 @@ async function run() {
       const turnAssistantBeforeFound = window.__hexfallTest.getTurnAssistantState();
       if (!turnAssistantBeforeFound || turnAssistantBeforeFound.readyCount < 1) {
         return { ok: false, reason: "turn-assistant-ready-count-invalid" };
+      }
+      if (!Number.isFinite(turnAssistantBeforeFound.readyUnits) || !Number.isFinite(turnAssistantBeforeFound.emptyQueues)) {
+        return { ok: false, reason: "turn-assistant-breakdown-fields-missing" };
       }
       if (!window.__hexfallTest.nextReadyUnit()) {
         return { ok: false, reason: "next-ready-unit-action-failed" };
@@ -294,6 +411,9 @@ async function run() {
       const cityFeed = window.__hexfallTest.getNotificationCenterState();
       if ((cityFeed?.filteredCount ?? 0) < 1) {
         return { ok: false, reason: "notification-city-filter-empty" };
+      }
+      if (!(cityFeed?.entries ?? []).every((entry) => Object.prototype.hasOwnProperty.call(entry, "unread"))) {
+        return { ok: false, reason: "notification-unread-metadata-missing" };
       }
       if (!window.__hexfallTest.focusNotification(0)) {
         return { ok: false, reason: "notification-focus-failed" };
@@ -897,6 +1017,11 @@ async function run() {
     );
 
     await canvas.screenshot({ path: `${ARTIFACT_DIR}/smoke.png` });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForTimeout(250);
+    await page.locator("canvas").screenshot({ path: `${ARTIFACT_DIR}/smoke-tablet.png` });
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.waitForTimeout(180);
 
     assert.equal(consoleErrors.length, 0, `console errors found:\n${consoleErrors.join("\n")}`);
 

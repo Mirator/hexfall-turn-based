@@ -64,6 +64,14 @@ window.__hexfallTest = {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testConfirmRestartConfirm() : false;
   },
+  setNewGameMapSize(size) {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testSetNewGameMapSize(size) : false;
+  },
+  setNewGameAiFactionCount(count) {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testSetNewGameAiFactionCount(count) : false;
+  },
   getRestartModalState() {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testGetRestartModalState() : null;
@@ -107,6 +115,10 @@ window.__hexfallTest = {
   getAnimationState() {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testGetAnimationState() : null;
+  },
+  getSpriteLayerCounts() {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testGetSpriteLayerCounts() : null;
   },
   hoverHex(q, r) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;

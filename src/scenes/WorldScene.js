@@ -2,6 +2,14 @@ import Phaser from "../core/phaserRuntime.js";
 import { COLORS, HEX_SIZE } from "../core/constants.js";
 import { gameEvents } from "../core/eventBus.js";
 import {
+  FX_TEXTURE_KEYS,
+  getCityTextureKey,
+  getOwnerCityTint,
+  getOwnerUnitTint,
+  getTerrainTextureKey,
+  getUnitTextureKey,
+} from "../core/visualAssets.js";
+import {
   cloneGameState,
   createInitialGameState,
   DEFAULT_MIN_FACTION_DISTANCE,
@@ -11,9 +19,9 @@ import {
   getUnitById,
   isInsideMap,
 } from "../core/gameState.js";
-import { AI_OWNERS, getOwnerLabel, isAiOwner } from "../core/factions.js";
+import { getAiOwners, getOwnerLabel, isAiOwner } from "../core/factions.js";
 import { axialKey, axialToWorld, distance, neighbors, worldToAxial } from "../core/hexGrid.js";
-import { TERRAIN } from "../core/terrainData.js";
+import { resolveMatchConfig } from "../core/matchConfig.js";
 import {
   CITY_QUEUE_MAX,
   computeCityYield,
@@ -68,12 +76,16 @@ const MOVE_SEGMENT_MS = 160;
 const ATTACK_ANIMATION_MS = 260;
 const FOUND_CITY_ANIMATION_MS = 420;
 const ENEMY_ACTION_GAP_MS = 120;
+const TERRAIN_DISPLAY_WIDTH = SQRT_3 * HEX_SIZE * 1.08;
+const TERRAIN_DISPLAY_HEIGHT = HEX_SIZE * 2 * 1.08;
+const UNIT_SPRITE_DISPLAY_SIZE = 40;
 
 export class WorldScene extends Phaser.Scene {
   constructor() {
     super("WorldScene");
 
     this.gameState = createInitialGameState({ seed: 1, minFactionDistance: RESTART_MIN_FACTION_DISTANCE });
+    this.currentMatchConfig = resolveMatchConfig(this.gameState.matchConfig);
     this.reachableHexes = [];
     this.reachableLookup = new Set();
     this.reachableCostByKey = new Map();
@@ -106,9 +118,14 @@ export class WorldScene extends Phaser.Scene {
     this.unitRenderOverrides = new Map();
     this.cityRenderOverrides = new Map();
     this.fxBursts = [];
+    this.fxBurstNextId = 1;
+    this.fxBurstSpritesById = new Map();
     this.floatingDamage = [];
     this.floatingDamageTextById = new Map();
     this.floatingDamageNextId = 1;
+    this.terrainSpritesByHex = new Map();
+    this.unitSpritesById = new Map();
+    this.citySpritesById = new Map();
     this.turnPlayback = this.createTurnPlaybackState();
     this.activeTimers = new Set();
   }
@@ -117,6 +134,10 @@ export class WorldScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(COLORS.worldBackground);
     this.startNewMatch();
 
+    this.terrainSpriteLayer = this.add.layer();
+    this.citySpriteLayer = this.add.layer();
+    this.unitSpriteLayer = this.add.layer();
+    this.fxSpriteLayer = this.add.layer();
     this.mapGraphics = this.add.graphics();
     this.threatGraphics = this.add.graphics();
     this.reachableGraphics = this.add.graphics();
@@ -126,6 +147,19 @@ export class WorldScene extends Phaser.Scene {
     this.cityGraphics = this.add.graphics();
     this.unitGraphics = this.add.graphics();
     this.fxGraphics = this.add.graphics();
+    this.terrainSpriteLayer.setDepth(1);
+    this.mapGraphics.setDepth(2);
+    this.threatGraphics.setDepth(3);
+    this.reachableGraphics.setDepth(4);
+    this.attackableGraphics.setDepth(5);
+    this.previewGraphics.setDepth(6);
+    this.selectionGraphics.setDepth(7);
+    this.citySpriteLayer.setDepth(8);
+    this.unitSpriteLayer.setDepth(9);
+    this.cityGraphics.setDepth(10);
+    this.unitGraphics.setDepth(11);
+    this.fxSpriteLayer.setDepth(12);
+    this.fxGraphics.setDepth(13);
 
     this.input.on("pointerdown", this.handlePointerDown, this);
     this.input.on("pointermove", this.handlePointerMove, this);
@@ -162,6 +196,7 @@ export class WorldScene extends Phaser.Scene {
     gameEvents.on("city-queue-move-requested", this.handleCityQueueMoveRequested, this);
     gameEvents.on("city-queue-remove-requested", this.handleCityQueueRemoveRequested, this);
     gameEvents.on("city-outcome-requested", this.handleCityOutcomeRequested, this);
+    gameEvents.on("new-game-requested", this.handleNewGameRequested, this);
     gameEvents.on("restart-match-requested", this.handleRestartRequested, this);
     gameEvents.on("notification-focus-requested", this.handleNotificationFocusRequested, this);
     gameEvents.on("ui-modal-state-changed", this.handleUiModalStateChanged, this);
@@ -184,11 +219,13 @@ export class WorldScene extends Phaser.Scene {
       gameEvents.off("city-queue-move-requested", this.handleCityQueueMoveRequested, this);
       gameEvents.off("city-queue-remove-requested", this.handleCityQueueRemoveRequested, this);
       gameEvents.off("city-outcome-requested", this.handleCityOutcomeRequested, this);
+      gameEvents.off("new-game-requested", this.handleNewGameRequested, this);
       gameEvents.off("restart-match-requested", this.handleRestartRequested, this);
       gameEvents.off("notification-focus-requested", this.handleNotificationFocusRequested, this);
       gameEvents.off("ui-modal-state-changed", this.handleUiModalStateChanged, this);
       this.abortEnemyPlayback();
       this.clearAnimationArtifacts();
+      this.clearAllVisualSprites();
       if (this.game.canvas && this.preventContextMenuHandler) {
         this.game.canvas.removeEventListener("contextmenu", this.preventContextMenuHandler);
       }
@@ -626,17 +663,26 @@ export class WorldScene extends Phaser.Scene {
     }
   };
 
-  handleRestartRequested = () => {
+  handleNewGameRequested = (payload = {}) => {
     this.abortEnemyPlayback();
     this.clearAnimationArtifacts();
     const previousLayout = this.captureLayoutFingerprint(this.gameState);
-    this.startNewMatch(previousLayout);
+    const requestedMatchConfig = resolveMatchConfig({
+      mapWidth: payload?.mapWidth ?? payload?.matchConfig?.mapWidth ?? this.currentMatchConfig?.mapWidth,
+      mapHeight: payload?.mapHeight ?? payload?.matchConfig?.mapHeight ?? this.currentMatchConfig?.mapHeight,
+      aiFactionCount: payload?.aiFactionCount ?? payload?.matchConfig?.aiFactionCount ?? this.currentMatchConfig?.aiFactionCount,
+    });
+    this.startNewMatch(previousLayout, requestedMatchConfig);
     this.evaluateAndPublish();
     gameEvents.emit("ui-notifications-reset-requested");
-    this.emitNotification("Match restarted.", {
+    this.emitNotification("New match started.", {
       level: "info",
       category: "System",
     });
+  };
+
+  handleRestartRequested = () => {
+    this.handleNewGameRequested(this.currentMatchConfig);
   };
 
   handleUiModalStateChanged = (isOpen) => {
@@ -694,13 +740,15 @@ export class WorldScene extends Phaser.Scene {
     return "Could not move queue item.";
   }
 
-  startNewMatch(previousLayout = null) {
+  startNewMatch(previousLayout = null, requestedMatchConfig = this.currentMatchConfig) {
+    const nextMatchConfig = resolveMatchConfig(requestedMatchConfig);
     let nextState = null;
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const seed = this.generateRuntimeSeed();
       const candidate = createInitialGameState({
         seed,
         minFactionDistance: RESTART_MIN_FACTION_DISTANCE,
+        matchConfig: nextMatchConfig,
       });
       if (!previousLayout || !this.matchesLayout(candidate, previousLayout)) {
         nextState = candidate;
@@ -713,7 +761,9 @@ export class WorldScene extends Phaser.Scene {
       createInitialGameState({
         seed: this.generateRuntimeSeed(),
         minFactionDistance: RESTART_MIN_FACTION_DISTANCE,
+        matchConfig: nextMatchConfig,
       });
+    this.currentMatchConfig = resolveMatchConfig(this.gameState.matchConfig ?? nextMatchConfig);
     ensureEnemyAiState(this.gameState);
     this.enemyTurnPlaybackToken += 1;
     this.enemyTurnActivePlan = null;
@@ -739,6 +789,10 @@ export class WorldScene extends Phaser.Scene {
     const randomBits = Math.floor(Math.random() * 0xffffffff);
     const value = (Date.now() ^ randomBits ^ Math.imul(this.runtimeSeedCounter, 0x9e3779b1)) >>> 0;
     return value === 0 ? 1 : value;
+  }
+
+  getActiveAiOwners() {
+    return [...getAiOwners(this.gameState)];
   }
 
   captureLayoutFingerprint(gameState) {
@@ -770,9 +824,10 @@ export class WorldScene extends Phaser.Scene {
   enterEnemyPhase() {
     this.setUiPreview(null);
     beginEnemyTurn(this.gameState);
+    const aiOwners = this.getActiveAiOwners();
     this.turnPlayback = {
       active: true,
-      actor: AI_OWNERS[0],
+      actor: aiOwners[0] ?? null,
       stepIndex: 0,
       totalSteps: 0,
       message: "Planning AI actions...",
@@ -785,7 +840,8 @@ export class WorldScene extends Phaser.Scene {
   async runEnemyTurnPlayback(playbackToken) {
     /** @type {Array<ReturnType<typeof prepareEnemyTurnPlan>>} */
     const ownerPlans = [];
-    for (const owner of AI_OWNERS) {
+    const aiOwners = this.getActiveAiOwners();
+    for (const owner of aiOwners) {
       if (!this.isPlaybackTokenCurrent(playbackToken)) {
         return;
       }
@@ -796,7 +852,7 @@ export class WorldScene extends Phaser.Scene {
       this.turnPlayback.actor = owner;
       this.turnPlayback.stepIndex = 0;
       this.turnPlayback.totalSteps = plan.steps.length;
-      this.turnPlayback.message = `Planning ${getOwnerLabel(owner)} actions...`;
+      this.turnPlayback.message = `Planning ${getOwnerLabel(owner, this.gameState)} actions...`;
       const appliedPrelude = executeEnemyTurnPrelude(this.gameState, plan);
       finalizeEnemyTurnPlan(this.gameState, plan, [], appliedPrelude);
       this.evaluateAndPublish();
@@ -837,7 +893,10 @@ export class WorldScene extends Phaser.Scene {
       }
 
       finalizeEnemyTurnPlan(this.gameState, plan, executedActions, appliedPrelude);
-      this.turnPlayback.message = plan.steps.length > 0 ? `${getOwnerLabel(owner)} turn complete.` : `${getOwnerLabel(owner)} is idle.`;
+      this.turnPlayback.message =
+        plan.steps.length > 0
+          ? `${getOwnerLabel(owner, this.gameState)} turn complete.`
+          : `${getOwnerLabel(owner, this.gameState)} is idle.`;
       this.publishState();
       await this.waitForAnimationDelay(ENEMY_ACTION_GAP_MS, playbackToken);
     }
@@ -846,19 +905,21 @@ export class WorldScene extends Phaser.Scene {
   }
 
   resolveEnemyAndAdvanceTurn() {
+    const aiOwners = this.getActiveAiOwners();
+    const playerOwner = this.gameState.factions?.playerOwner ?? "player";
     if (this.turnPlayback.active && this.enemyTurnActivePlan) {
       this.enemyTurnActivePlan = null;
     } else {
-      for (const owner of AI_OWNERS) {
+      for (const owner of aiOwners) {
         runEnemyTurn(this.gameState, owner);
       }
     }
-    for (const owner of AI_OWNERS) {
+    for (const owner of aiOwners) {
       processCityTurn(this.gameState, owner);
     }
     beginPlayerTurn(this.gameState);
-    const cityTurnResult = processCityTurn(this.gameState, "player");
-    const researchResult = consumeScienceStock(this.gameState, "player", 1);
+    const cityTurnResult = processCityTurn(this.gameState, playerOwner);
+    const researchResult = consumeScienceStock(this.gameState, playerOwner, 1);
     this.gameState.economy.researchIncomeThisTurn = 1 + cityTurnResult.researchIncome;
     if (researchResult.completedTechIds.length > 0) {
       for (const techId of researchResult.completedTechIds) {
@@ -895,7 +956,7 @@ export class WorldScene extends Phaser.Scene {
     const summary = formatCombatBreakdownSummary(attackResult.breakdown);
     const counterSummary = formatCounterattackSummary(attackResult.counterattack);
     const actorPrefix =
-      attackerOwner && attackerOwner !== "player" ? `${getOwnerLabel(attackerOwner)} ` : "";
+      attackerOwner && attackerOwner !== "player" ? `${getOwnerLabel(attackerOwner, this.gameState)} ` : "";
     const message =
       `${actorPrefix}hit ${target.id} for ${attackResult.damage ?? 0}${summary}.` +
       `${attackResult.targetDefeated ? " Target defeated." : ""}${counterSummary}`;
@@ -945,7 +1006,7 @@ export class WorldScene extends Phaser.Scene {
     }
 
     if (attackResult.outcomeChoice === "capture") {
-      const actorLabel = attackerOwner && attackerOwner !== "player" ? getOwnerLabel(attackerOwner) : "Hostile faction";
+      const actorLabel = attackerOwner && attackerOwner !== "player" ? getOwnerLabel(attackerOwner, this.gameState) : "Hostile faction";
       this.emitNotification(`${actorLabel} captured a city.`, {
         level: "warning",
         category: "Combat",
@@ -956,7 +1017,7 @@ export class WorldScene extends Phaser.Scene {
     }
 
     if (attackResult.outcomeChoice === "raze") {
-      const actorLabel = attackerOwner && attackerOwner !== "player" ? getOwnerLabel(attackerOwner) : "Hostile faction";
+      const actorLabel = attackerOwner && attackerOwner !== "player" ? getOwnerLabel(attackerOwner, this.gameState) : "Hostile faction";
       this.emitNotification(`${actorLabel} razed a city.`, {
         level: "warning",
         category: "Combat",
@@ -1060,7 +1121,7 @@ export class WorldScene extends Phaser.Scene {
     if (step.action === "foundCity") {
       const foundedCityId = execution.result.cityId ?? null;
       const foundedCity = foundedCityId ? this.gameState.cities.find((city) => city.id === foundedCityId) ?? null : null;
-      this.emitNotification(`${getOwnerLabel(owner)} founded a city.`, {
+      this.emitNotification(`${getOwnerLabel(owner, this.gameState)} founded a city.`, {
         level: "warning",
         category: "City",
         focus: foundedCity
@@ -1113,7 +1174,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   describeEnemyStep(step, index, total, owner = "enemy") {
-    const prefix = `${getOwnerLabel(owner)} action ${index}/${Math.max(1, total)}`;
+    const prefix = `${getOwnerLabel(owner, this.gameState)} action ${index}/${Math.max(1, total)}`;
     if (!step) {
       return `${prefix}: thinking...`;
     }
@@ -1267,14 +1328,14 @@ export class WorldScene extends Phaser.Scene {
         y: originWorld.y + (targetWorld.y - originWorld.y) * 0.34,
       };
       await this.tweenObjectTo(override, lungePoint, ATTACK_ANIMATION_MS * 0.46 * speedScale);
-      this.spawnFxBurst(targetHex.q, targetHex.r, { color: 0xf1998f, maxRadius: 28 });
+      this.spawnFxBurst(targetHex.q, targetHex.r, { color: 0xf1998f, maxRadius: 28, textureKey: FX_TEXTURE_KEYS.impact });
       if (typeof attackResult?.damage === "number" && attackResult.damage > 0) {
         this.spawnFloatingDamage(targetHex.q, targetHex.r, attackResult.damage);
       }
       await this.tweenObjectTo(override, originWorld, ATTACK_ANIMATION_MS * 0.54 * speedScale);
       this.unitRenderOverrides.delete(attackerId);
     } else {
-      this.spawnFxBurst(targetHex.q, targetHex.r, { color: 0xf1998f, maxRadius: 30 });
+      this.spawnFxBurst(targetHex.q, targetHex.r, { color: 0xf1998f, maxRadius: 30, textureKey: FX_TEXTURE_KEYS.impact });
       if (typeof attackResult?.damage === "number" && attackResult.damage > 0) {
         this.spawnFloatingDamage(targetHex.q, targetHex.r, attackResult.damage);
       }
@@ -1298,7 +1359,7 @@ export class WorldScene extends Phaser.Scene {
           await this.tweenObjectTo(defenderOverride, defenderOrigin, ATTACK_ANIMATION_MS * 0.26 * speedScale);
           this.unitRenderOverrides.delete(defender.id);
         }
-        this.spawnFxBurst(counterTarget.q, counterTarget.r, { color: 0xeb8f7f, maxRadius: 22 });
+        this.spawnFxBurst(counterTarget.q, counterTarget.r, { color: 0xeb8f7f, maxRadius: 22, textureKey: FX_TEXTURE_KEYS.impact });
         if (counterDamage > 0) {
           this.spawnFloatingDamage(counterTarget.q, counterTarget.r, counterDamage, "#fbe2d4");
         }
@@ -1306,10 +1367,20 @@ export class WorldScene extends Phaser.Scene {
     }
 
     if (attackResult?.targetDefeated) {
-      this.spawnFxBurst(targetHex.q, targetHex.r, { color: 0xffcc7a, maxRadius: 34, duration: 360 });
+      this.spawnFxBurst(targetHex.q, targetHex.r, {
+        color: 0xffcc7a,
+        maxRadius: 34,
+        duration: 360,
+        textureKey: FX_TEXTURE_KEYS.burst,
+      });
     }
     if (attackResult?.attackerDefeated && attackerOrigin) {
-      this.spawnFxBurst(attackerOrigin.q, attackerOrigin.r, { color: 0xffcc7a, maxRadius: 34, duration: 360 });
+      this.spawnFxBurst(attackerOrigin.q, attackerOrigin.r, {
+        color: 0xffcc7a,
+        maxRadius: 34,
+        duration: 360,
+        textureKey: FX_TEXTURE_KEYS.burst,
+      });
     }
     if (attackResult?.targetDefeated || attackResult?.attackerDefeated) {
       this.cameras.main.shake(90, 0.0018);
@@ -1348,17 +1419,37 @@ export class WorldScene extends Phaser.Scene {
       this.cityRenderOverrides.delete(cityId);
     }
 
-    this.spawnFxBurst(cityHex.q, cityHex.r, { color: 0xf1998f, maxRadius: 34, duration: 280 });
+    this.spawnFxBurst(cityHex.q, cityHex.r, {
+      color: 0xf1998f,
+      maxRadius: 34,
+      duration: 280,
+      textureKey: FX_TEXTURE_KEYS.impact,
+    });
     if (typeof attackResult?.damage === "number" && attackResult.damage > 0) {
       this.spawnFloatingDamage(cityHex.q, cityHex.r, attackResult.damage);
     }
     if (attackResult?.cityDefeated) {
-      this.spawnFxBurst(cityHex.q, cityHex.r, { color: 0xffd076, maxRadius: 40, duration: 420 });
+      this.spawnFxBurst(cityHex.q, cityHex.r, {
+        color: 0xffd076,
+        maxRadius: 40,
+        duration: 420,
+        textureKey: FX_TEXTURE_KEYS.burst,
+      });
       if (attackResult.outcomeChoice === "capture") {
-        this.spawnFxBurst(cityHex.q, cityHex.r, { color: 0x7fd59d, maxRadius: 28, duration: 380 });
+        this.spawnFxBurst(cityHex.q, cityHex.r, {
+          color: 0x7fd59d,
+          maxRadius: 28,
+          duration: 380,
+          textureKey: FX_TEXTURE_KEYS.found,
+        });
       }
       if (attackResult.outcomeChoice === "raze") {
-        this.spawnFxBurst(cityHex.q, cityHex.r, { color: 0xd36f63, maxRadius: 36, duration: 420 });
+        this.spawnFxBurst(cityHex.q, cityHex.r, {
+          color: 0xd36f63,
+          maxRadius: 36,
+          duration: 420,
+          textureKey: FX_TEXTURE_KEYS.impact,
+        });
       }
       this.cameras.main.shake(100, 0.0022);
     }
@@ -1372,7 +1463,12 @@ export class WorldScene extends Phaser.Scene {
     if (!Number.isFinite(q) || !Number.isFinite(r)) {
       return;
     }
-    this.spawnFxBurst(q, r, { color: 0x8dd575, maxRadius: 44, duration: FOUND_CITY_ANIMATION_MS * speedScale });
+    this.spawnFxBurst(q, r, {
+      color: 0x8dd575,
+      maxRadius: 44,
+      duration: FOUND_CITY_ANIMATION_MS * speedScale,
+      textureKey: FX_TEXTURE_KEYS.found,
+    });
 
     const foundedCity = cityId ? this.gameState.cities.find((city) => city.id === cityId) ?? null : null;
     if (!foundedCity) {
@@ -1395,11 +1491,11 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
     if (choice === "capture") {
-      this.spawnFxBurst(q, r, { color: 0x7fd59d, maxRadius: 36, duration: 320 });
-      this.spawnFxBurst(q, r, { color: 0xb5f0c4, maxRadius: 26, duration: 260 });
+      this.spawnFxBurst(q, r, { color: 0x7fd59d, maxRadius: 36, duration: 320, textureKey: FX_TEXTURE_KEYS.found });
+      this.spawnFxBurst(q, r, { color: 0xb5f0c4, maxRadius: 26, duration: 260, textureKey: FX_TEXTURE_KEYS.burst });
     } else {
-      this.spawnFxBurst(q, r, { color: 0xd36f63, maxRadius: 40, duration: 360 });
-      this.spawnFxBurst(q, r, { color: 0xffb079, maxRadius: 28, duration: 280 });
+      this.spawnFxBurst(q, r, { color: 0xd36f63, maxRadius: 40, duration: 360, textureKey: FX_TEXTURE_KEYS.impact });
+      this.spawnFxBurst(q, r, { color: 0xffb079, maxRadius: 28, duration: 280, textureKey: FX_TEXTURE_KEYS.burst });
     }
     this.cameras.main.shake(80, 0.0016);
     await this.waitForAnimationDelay(220);
@@ -1482,10 +1578,14 @@ export class WorldScene extends Phaser.Scene {
     }
     const world = this.hexToWorld(q, r);
     const duration = Number.isFinite(options.duration) ? options.duration : 300;
+    const id = `fx-${this.fxBurstNextId}`;
+    this.fxBurstNextId += 1;
     this.fxBursts.push({
+      id,
       x: world.x,
       y: world.y,
       color: Number.isFinite(options.color) ? options.color : 0xf1998f,
+      textureKey: options.textureKey ?? FX_TEXTURE_KEYS.burst,
       maxRadius: Number.isFinite(options.maxRadius) ? options.maxRadius : 26,
       minRadius: Number.isFinite(options.minRadius) ? options.minRadius : 8,
       alpha: Number.isFinite(options.alpha) ? options.alpha : 0.9,
@@ -1552,11 +1652,33 @@ export class WorldScene extends Phaser.Scene {
     this.unitRenderOverrides.clear();
     this.cityRenderOverrides.clear();
     this.fxBursts = [];
+    this.fxBurstNextId = 1;
+    for (const sprite of this.fxBurstSpritesById.values()) {
+      sprite.destroy();
+    }
+    this.fxBurstSpritesById.clear();
     this.floatingDamage = [];
     for (const text of this.floatingDamageTextById.values()) {
       text.destroy();
     }
     this.floatingDamageTextById.clear();
+  }
+
+  clearAllVisualSprites() {
+    for (const sprite of this.terrainSpritesByHex.values()) {
+      sprite.destroy();
+    }
+    this.terrainSpritesByHex.clear();
+    for (const record of this.unitSpritesById.values()) {
+      record.idleTween?.remove?.();
+      record.container.destroy(true);
+    }
+    this.unitSpritesById.clear();
+    for (const record of this.citySpritesById.values()) {
+      record.idleTween?.remove?.();
+      record.container.destroy(true);
+    }
+    this.citySpritesById.clear();
   }
 
   abortEnemyPlayback() {
@@ -1584,6 +1706,38 @@ export class WorldScene extends Phaser.Scene {
       busy: this.isAnimationBusy,
       kind: this.activeAnimationKind,
       queueLength: this.animationQueue.length,
+    };
+  }
+
+  getSpriteLayerCounts() {
+    const visibleUnitEntries = [];
+    for (const [unitId, entry] of this.unitSpritesById.entries()) {
+      if (!entry.container.visible) {
+        continue;
+      }
+      const unit = getUnitById(this.gameState, unitId);
+      if (!unit) {
+        continue;
+      }
+      visibleUnitEntries.push({
+        id: unit.id,
+        owner: unit.owner,
+        type: unit.type,
+        textureKey: entry.image.texture?.key ?? null,
+        tint: entry.image.tintTopLeft >>> 0,
+        displayWidth: Number(entry.image.displayWidth.toFixed(2)),
+        displayHeight: Number(entry.image.displayHeight.toFixed(2)),
+      });
+    }
+    const visibleUnitSprites = visibleUnitEntries.length;
+    const visibleCitySprites = [...this.citySpritesById.values()].filter((entry) => entry.container.visible).length;
+    const visibleTerrainSprites = [...this.terrainSpritesByHex.values()].filter((sprite) => sprite.visible).length;
+    return {
+      terrain: visibleTerrainSprites,
+      units: visibleUnitSprites,
+      cities: visibleCitySprites,
+      fx: this.fxBursts.length,
+      unitSamples: visibleUnitEntries.slice(0, 24),
     };
   }
 
@@ -1618,16 +1772,46 @@ export class WorldScene extends Phaser.Scene {
   renderEffects() {
     this.fxGraphics.clear();
     const now = this.time.now;
+    const activeBurstIds = new Set();
     for (const burst of this.fxBursts) {
       const duration = Math.max(1, burst.expiresAt - burst.createdAt);
       const progress = Phaser.Math.Clamp((now - burst.createdAt) / duration, 0, 1);
-      const radius = Phaser.Math.Linear(burst.minRadius, burst.maxRadius, progress);
       const alpha = Phaser.Math.Clamp((1 - progress) * burst.alpha, 0, 1);
-      this.fxGraphics.lineStyle(2, burst.color, alpha);
-      this.fxGraphics.strokeCircle(burst.x, burst.y, radius);
-      this.fxGraphics.fillStyle(burst.color, alpha * 0.18);
-      this.fxGraphics.fillCircle(burst.x, burst.y, radius * 0.52);
+      const radius = Phaser.Math.Linear(burst.minRadius, burst.maxRadius, progress);
+      const textureRadius = 22;
+      const scale = Math.max(0.2, radius / textureRadius);
+      const fxSprite = this.getOrCreateFxSprite(burst);
+      activeBurstIds.add(burst.id);
+      fxSprite.setVisible(true);
+      fxSprite.setPosition(burst.x, burst.y);
+      fxSprite.setScale(scale);
+      fxSprite.setAlpha(alpha);
+      fxSprite.setTint(burst.color);
+      fxSprite.setDepth(1200 + burst.y);
+      this.fxGraphics.lineStyle(1, burst.color, alpha * 0.3);
+      this.fxGraphics.strokeCircle(burst.x, burst.y, radius * 0.9);
     }
+    for (const [burstId, sprite] of this.fxBurstSpritesById.entries()) {
+      if (activeBurstIds.has(burstId)) {
+        continue;
+      }
+      sprite.destroy();
+      this.fxBurstSpritesById.delete(burstId);
+    }
+  }
+
+  getOrCreateFxSprite(burst) {
+    const existing = this.fxBurstSpritesById.get(burst.id);
+    if (existing) {
+      if (existing.texture?.key !== burst.textureKey) {
+        existing.setTexture(burst.textureKey, 0);
+      }
+      return existing;
+    }
+    const sprite = this.add.image(0, 0, burst.textureKey, 0).setOrigin(0.5);
+    this.fxSpriteLayer.add(sprite);
+    this.fxBurstSpritesById.set(burst.id, sprite);
+    return sprite;
   }
 
   canPanCamera() {
@@ -1832,11 +2016,13 @@ export class WorldScene extends Phaser.Scene {
       uiTurnAssistant,
       uiContextPanel,
       uiNotificationFilter: uiRuntime.notificationFilter ?? "All",
+      uiNotificationUnreadCount: uiRuntime.notificationUnreadCount ?? 0,
       uiHints: uiSurface.uiHints,
       uiActions: uiSurface.uiActions,
       uiModalOpen: this.uiModalOpen,
       devVisionEnabled: isPlayerDevVisionEnabled(this.gameState),
       animationState: this.getAnimationStatePayload(),
+      spriteLayers: this.getSpriteLayerCounts(),
       turnPlayback: structuredClone(this.turnPlayback),
       pauseMenu: {
         open: uiRuntime.pauseMenuOpen,
@@ -1882,10 +2068,14 @@ export class WorldScene extends Phaser.Scene {
 
     for (const tile of this.gameState.map.tiles) {
       const center = this.hexToWorld(tile.q, tile.r);
-      const terrainDefinition = TERRAIN[tile.terrainType];
       const visible = revealAll || isHexVisibleToOwner(this.gameState, "player", tile.q, tile.r);
       const explored = revealAll || isHexExploredByOwner(this.gameState, "player", tile.q, tile.r);
+      const terrainKey = getTerrainTextureKey(tile.terrainType, this.gameState.map.seed, tile.q, tile.r);
+      const terrainSprite = this.getOrCreateTerrainSprite(tile, terrainKey);
+      terrainSprite.setPosition(center.x, center.y);
+      terrainSprite.setDisplaySize(TERRAIN_DISPLAY_WIDTH, TERRAIN_DISPLAY_HEIGHT);
       if (!explored) {
+        terrainSprite.setVisible(false);
         drawHex(
           this.mapGraphics,
           center.x,
@@ -1898,12 +2088,17 @@ export class WorldScene extends Phaser.Scene {
         );
         continue;
       }
+      terrainSprite.setVisible(true);
       if (!visible) {
-        drawHex(this.mapGraphics, center.x, center.y, HEX_SIZE, terrainDefinition.fillColor, 0.35, COLORS.tileStroke, 1.2);
-        drawHex(this.mapGraphics, center.x, center.y, HEX_SIZE, COLORS.fogMemoryFill, 0.46, COLORS.fogMemoryStroke, 1.1);
+        terrainSprite.setAlpha(0.74);
+        terrainSprite.setTint(0xd0c8b9);
+        drawHex(this.mapGraphics, center.x, center.y, HEX_SIZE, undefined, 0, COLORS.tileStroke, 1.22);
+        drawHex(this.mapGraphics, center.x, center.y, HEX_SIZE, COLORS.fogMemoryFill, 0.32, COLORS.fogMemoryStroke, 1.05);
         continue;
       }
-      drawHex(this.mapGraphics, center.x, center.y, HEX_SIZE, terrainDefinition.fillColor, 1, COLORS.tileStroke, 1.2);
+      terrainSprite.setAlpha(1);
+      terrainSprite.clearTint();
+      drawHex(this.mapGraphics, center.x, center.y, HEX_SIZE, undefined, 0, COLORS.tileStroke, 1.22);
     }
   }
 
@@ -2013,20 +2208,25 @@ export class WorldScene extends Phaser.Scene {
 
   renderCities() {
     this.cityGraphics.clear();
+    const activeCityIds = new Set();
     for (const city of this.gameState.cities) {
+      const citySprite = this.getOrCreateCitySprite(city);
       if (!this.isCityVisibleToPlayer(city)) {
+        citySprite.container.setVisible(false);
         continue;
       }
       const center = this.resolveCityRenderPosition(city);
       const override = this.cityRenderOverrides.get(city.id) ?? null;
       const scale = Math.max(0.2, override?.scale ?? 1);
       const alpha = Phaser.Math.Clamp(override?.alpha ?? 0.95, 0.05, 1);
-      const halfSize = 13 * scale;
-      const fillColor = city.owner === "enemy" ? COLORS.cityEnemy : city.owner === "purple" ? COLORS.cityPurple : COLORS.cityPlayer;
-      this.cityGraphics.fillStyle(fillColor, alpha);
-      this.cityGraphics.fillRect(center.x - halfSize, center.y - halfSize, halfSize * 2, halfSize * 2);
-      this.cityGraphics.lineStyle(2, COLORS.cityStroke, alpha);
-      this.cityGraphics.strokeRect(center.x - halfSize, center.y - halfSize, halfSize * 2, halfSize * 2);
+      citySprite.container.setVisible(true);
+      citySprite.container.setPosition(center.x, center.y);
+      citySprite.container.setScale(scale);
+      citySprite.container.setAlpha(alpha);
+      citySprite.image.setTexture(getCityTextureKey(city.owner), 0);
+      citySprite.image.setTint(getOwnerCityTint(city.owner));
+      citySprite.container.setDepth(800 + center.y);
+      activeCityIds.add(city.id);
 
       const hpRatio = Math.max(0, city.health / city.maxHealth);
       const healthY = center.y + 17 * scale;
@@ -2035,31 +2235,30 @@ export class WorldScene extends Phaser.Scene {
       this.cityGraphics.fillStyle(0xb8df8f, alpha);
       this.cityGraphics.fillRect(center.x - 14, healthY, 28 * hpRatio, 4);
     }
+    this.pruneHiddenCitySprites(activeCityIds);
   }
 
   renderUnits() {
     this.unitGraphics.clear();
+    const activeUnitIds = new Set();
     for (const unit of this.gameState.units) {
+      const unitSprite = this.getOrCreateUnitSprite(unit);
       if (!this.isUnitVisibleToPlayer(unit)) {
+        unitSprite.container.setVisible(false);
         continue;
       }
       const center = this.resolveUnitRenderPosition(unit);
       const override = this.unitRenderOverrides.get(unit.id) ?? null;
       const scale = Math.max(0.15, override?.scale ?? 1);
       const alpha = Phaser.Math.Clamp(override?.alpha ?? 1, 0.05, 1);
-      const fillColor =
-        unit.owner === "enemy" ? COLORS.enemyUnit : unit.owner === "purple" ? COLORS.purpleUnit : COLORS.playerUnit;
-      const strokeColor =
-        unit.owner === "enemy"
-          ? COLORS.enemyUnitStroke
-          : unit.owner === "purple"
-            ? COLORS.purpleUnitStroke
-            : COLORS.playerUnitStroke;
-      const radius = HEX_SIZE * 0.4 * scale;
-      this.unitGraphics.fillStyle(fillColor, alpha);
-      this.unitGraphics.fillCircle(center.x, center.y, radius);
-      this.unitGraphics.lineStyle(2, strokeColor, alpha);
-      this.unitGraphics.strokeCircle(center.x, center.y, radius);
+      unitSprite.container.setVisible(true);
+      unitSprite.container.setPosition(center.x, center.y);
+      unitSprite.container.setScale(scale);
+      unitSprite.container.setAlpha(alpha);
+      unitSprite.image.setTexture(getUnitTextureKey(unit.type));
+      unitSprite.image.setTint(getOwnerUnitTint(unit.owner));
+      unitSprite.container.setDepth(900 + center.y);
+      activeUnitIds.add(unit.id);
 
       const hpRatio = Math.max(0, unit.health / unit.maxHealth);
       const healthY = center.y + HEX_SIZE * 0.47 * Math.max(0.7, scale);
@@ -2067,6 +2266,105 @@ export class WorldScene extends Phaser.Scene {
       this.unitGraphics.fillRect(center.x - 14, healthY, 28, 4);
       this.unitGraphics.fillStyle(0x8dd575, alpha);
       this.unitGraphics.fillRect(center.x - 14, healthY, 28 * hpRatio, 4);
+    }
+    this.pruneHiddenUnitSprites(activeUnitIds);
+  }
+
+  getOrCreateTerrainSprite(tile, textureKey) {
+    const key = axialKey(tile);
+    const existing = this.terrainSpritesByHex.get(key);
+    if (existing) {
+      if (existing.texture?.key !== textureKey) {
+        existing.setTexture(textureKey);
+      }
+      return existing;
+    }
+    const sprite = this.add.image(0, 0, textureKey).setOrigin(0.5);
+    this.terrainSpriteLayer.add(sprite);
+    this.terrainSpritesByHex.set(key, sprite);
+    return sprite;
+  }
+
+  getOrCreateUnitSprite(unit) {
+    const existing = this.unitSpritesById.get(unit.id);
+    if (existing) {
+      return existing;
+    }
+    const container = this.add.container(0, 0);
+    const image = this.add
+      .image(0, 0, getUnitTextureKey(unit.type))
+      .setDisplaySize(UNIT_SPRITE_DISPLAY_SIZE, UNIT_SPRITE_DISPLAY_SIZE)
+      .setOrigin(0.5);
+    image.setTint(getOwnerUnitTint(unit.owner));
+    container.add(image);
+    this.unitSpriteLayer.add(container);
+    const jitter = ((mixSeedFromString(unit.id) % 7) + 8) * 100;
+    const idleTween = this.tweens.add({
+      targets: image,
+      y: -1.6,
+      duration: 820 + jitter,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+    });
+    const record = { container, image, idleTween };
+    this.unitSpritesById.set(unit.id, record);
+    return record;
+  }
+
+  getOrCreateCitySprite(city) {
+    const existing = this.citySpritesById.get(city.id);
+    if (existing) {
+      return existing;
+    }
+    const container = this.add.container(0, 0);
+    const image = this.add.image(0, 0, getCityTextureKey(city.owner), 0).setDisplaySize(34, 34).setOrigin(0.5);
+    container.add(image);
+    this.citySpriteLayer.add(container);
+    const jitter = ((mixSeedFromString(city.id) % 5) + 10) * 110;
+    const idleTween = this.tweens.add({
+      targets: image,
+      scaleX: 1.035,
+      scaleY: 1.035,
+      duration: 1200 + jitter,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+    });
+    const record = { container, image, idleTween };
+    this.citySpritesById.set(city.id, record);
+    return record;
+  }
+
+  pruneHiddenUnitSprites(activeUnitIds) {
+    for (const [unitId, record] of this.unitSpritesById.entries()) {
+      if (activeUnitIds.has(unitId)) {
+        continue;
+      }
+      const unit = getUnitById(this.gameState, unitId);
+      if (unit) {
+        record.container.setVisible(false);
+        continue;
+      }
+      record.idleTween?.remove?.();
+      record.container.destroy(true);
+      this.unitSpritesById.delete(unitId);
+    }
+  }
+
+  pruneHiddenCitySprites(activeCityIds) {
+    for (const [cityId, record] of this.citySpritesById.entries()) {
+      if (activeCityIds.has(cityId)) {
+        continue;
+      }
+      const city = this.gameState.cities.find((candidate) => candidate.id === cityId) ?? null;
+      if (city) {
+        record.container.setVisible(false);
+        continue;
+      }
+      record.idleTween?.remove?.();
+      record.container.destroy(true);
+      this.citySpritesById.delete(cityId);
     }
   }
 
@@ -2079,6 +2377,7 @@ export class WorldScene extends Phaser.Scene {
     const selectedCity = this.gameState.cities.find((city) => city.id === this.gameState.selectedCityId) ?? null;
     const projectedIncome = this.getProjectedPlayerIncome();
     const projectedNetIncome = this.getProjectedPlayerNetIncome();
+    const uiRuntime = this.getUiRuntimeState();
     const uiSurface = deriveUiSurface(
       this.gameState,
       selectedUnit,
@@ -2086,7 +2385,7 @@ export class WorldScene extends Phaser.Scene {
       this.attackableTargets,
       this.attackableCities,
       {
-        restartConfirmOpen: this.uiModalOpen,
+        restartConfirmOpen: !!uiRuntime.restartConfirmOpen,
         pendingCityResolution: this.gameState.pendingCityResolution,
       }
     );
@@ -2097,11 +2396,23 @@ export class WorldScene extends Phaser.Scene {
       },
       /** @type {Record<string, number>} */ ({})
     );
-    const uiRuntime = this.getUiRuntimeState();
-    const playerEconomy = this.gameState.economy.player;
+    const playerOwner = this.gameState.factions?.playerOwner ?? "player";
+    const ownerOrder = this.gameState.factions?.allOwners ?? [playerOwner];
+    const playerEconomy =
+      this.gameState.economy[playerOwner] ??
+      ({
+        foodStock: 0,
+        productionStock: 0,
+        scienceStock: 0,
+        lastTurnIncome: { food: 0, production: 0, science: 0 },
+      });
+    const economyByOwner = Object.fromEntries(ownerOrder.map((owner) => [owner, this.gameState.economy[owner] ?? null]));
+    const aiByOwner = this.gameState.ai?.byOwner ? structuredClone(this.gameState.ai.byOwner) : {};
 
     const payload = {
       coordinateSystem: "Axial coordinates: q increases down-right, r increases down.",
+      matchConfig: this.gameState.matchConfig,
+      factions: structuredClone(this.gameState.factions),
       turn: this.gameState.turnState.turn,
       phase: this.gameState.turnState.phase,
       map: {
@@ -2126,6 +2437,7 @@ export class WorldScene extends Phaser.Scene {
       threatHexes: this.threatHexes.map((hex) => ({ q: hex.q, r: hex.r })),
       uiPreview: this.buildUiPreviewPayload(),
       animationState: this.getAnimationStatePayload(),
+      spriteLayers: this.getSpriteLayerCounts(),
       turnPlayback: structuredClone(this.turnPlayback),
       uiTurnAssistant: this.getTurnAssistantState(),
       uiContextPanel: {
@@ -2133,6 +2445,7 @@ export class WorldScene extends Phaser.Scene {
         pinned: !!uiRuntime.contextPanelPinned,
       },
       uiNotificationFilter: uiRuntime.notificationFilter ?? "All",
+      uiNotificationUnreadCount: uiRuntime.notificationUnreadCount ?? 0,
       units: this.gameState.units.map((unit) => ({
         id: unit.id,
         owner: unit.owner,
@@ -2184,22 +2497,23 @@ export class WorldScene extends Phaser.Scene {
       },
       economy: {
         researchIncomeThisTurn: this.gameState.economy.researchIncomeThisTurn,
-        player: this.gameState.economy.player,
-        enemy: this.gameState.economy.enemy,
-        purple: this.gameState.economy.purple,
+        byOwner: economyByOwner,
+        player: economyByOwner[playerOwner] ?? economyByOwner.player ?? null,
+        enemy: economyByOwner.enemy ?? null,
+        purple: economyByOwner.purple ?? null,
       },
       ai: {
         enemy: {
-          personality: this.gameState.ai?.enemy?.personality ?? null,
-          lastGoal: this.gameState.ai?.enemy?.lastGoal ?? null,
-          lastTurnSummary: this.gameState.ai?.enemy?.lastTurnSummary ?? null,
+          personality: aiByOwner.enemy?.personality ?? this.gameState.ai?.enemy?.personality ?? null,
+          lastGoal: aiByOwner.enemy?.lastGoal ?? this.gameState.ai?.enemy?.lastGoal ?? null,
+          lastTurnSummary: aiByOwner.enemy?.lastTurnSummary ?? this.gameState.ai?.enemy?.lastTurnSummary ?? null,
         },
         purple: {
-          personality: this.gameState.ai?.purple?.personality ?? null,
-          lastGoal: this.gameState.ai?.purple?.lastGoal ?? null,
-          lastTurnSummary: this.gameState.ai?.purple?.lastTurnSummary ?? null,
+          personality: aiByOwner.purple?.personality ?? this.gameState.ai?.purple?.personality ?? null,
+          lastGoal: aiByOwner.purple?.lastGoal ?? this.gameState.ai?.purple?.lastGoal ?? null,
+          lastTurnSummary: aiByOwner.purple?.lastTurnSummary ?? this.gameState.ai?.purple?.lastTurnSummary ?? null,
         },
-        byOwner: this.gameState.ai?.byOwner ? structuredClone(this.gameState.ai.byOwner) : null,
+        byOwner: aiByOwner,
       },
       visibility: structuredClone(this.gameState.visibility),
       hudTopLeft: {
@@ -2238,13 +2552,14 @@ export class WorldScene extends Phaser.Scene {
   }
 
   getProjectedPlayerIncome() {
+    const playerOwner = this.gameState.factions?.playerOwner ?? "player";
     const projected = {
       food: 0,
       production: 0,
       science: 1,
     };
     for (const city of this.gameState.cities) {
-      if (city.owner !== "player") {
+      if (city.owner !== playerOwner) {
         continue;
       }
       const cityYield = computeCityYield(city.id, this.gameState);
@@ -2256,16 +2571,20 @@ export class WorldScene extends Phaser.Scene {
   }
 
   getProjectedPlayerNetIncome() {
+    const playerOwner = this.gameState.factions?.playerOwner ?? "player";
     const simulation = cloneGameState(this.gameState);
-    const before = simulation.economy.player;
+    const before = simulation.economy[playerOwner];
+    if (!before) {
+      return { food: 0, production: 0, science: 0 };
+    }
     const beforeFood = before.foodStock;
     const beforeProduction = before.productionStock;
     const beforeScience = before.scienceStock;
 
-    processCityTurn(simulation, "player");
-    consumeScienceStock(simulation, "player", 1);
+    processCityTurn(simulation, playerOwner);
+    consumeScienceStock(simulation, playerOwner, 1);
 
-    const after = simulation.economy.player;
+    const after = simulation.economy[playerOwner] ?? before;
     return {
       food: after.foodStock - beforeFood,
       production: after.productionStock - beforeProduction,
@@ -2355,6 +2674,8 @@ export class WorldScene extends Phaser.Scene {
       contextPanelExpanded: true,
       contextPanelPinned: false,
       notificationFilter: "All",
+      notificationUnreadCount: 0,
+      currentTurn: 0,
     };
     if (!this.scene.isActive("UIScene")) {
       return defaults;
@@ -2372,7 +2693,7 @@ export class WorldScene extends Phaser.Scene {
     }
     const sourceOwner = options.sourceOwner ?? null;
     const focus = options.focus ?? null;
-    if (isAiOwner(sourceOwner) && !this.isNotificationFocusVisibleToPlayer(focus)) {
+    if (isAiOwner(sourceOwner, this.gameState) && !this.isNotificationFocusVisibleToPlayer(focus)) {
       return;
     }
     gameEvents.emit("ui-toast-requested", {
@@ -2602,16 +2923,20 @@ export class WorldScene extends Phaser.Scene {
     ) {
       return {
         readyCount: 0,
+        readyUnits: 0,
         nextReadyUnitId: null,
         emptyQueueCityCount: 0,
+        emptyQueues: 0,
       };
     }
     const readyUnits = this.getReadyPlayerUnits();
     const idleQueueCities = this.getPlayerCitiesWithEmptyQueue();
     return {
       readyCount: readyUnits.length,
+      readyUnits: readyUnits.length,
       nextReadyUnitId: this.getNextReadyUnitId(),
       emptyQueueCityCount: idleQueueCities.length,
+      emptyQueues: idleQueueCities.length,
     };
   }
 
@@ -2635,11 +2960,13 @@ export class WorldScene extends Phaser.Scene {
   }
 
   isHexThreatenedByEnemy(hex) {
+    const aiOwners = new Set(this.getActiveAiOwners());
+    const playerOwner = this.gameState.factions?.playerOwner ?? "player";
     for (const enemyUnit of this.gameState.units) {
-      if (!AI_OWNERS.includes(enemyUnit.owner) || enemyUnit.health <= 0) {
+      if (!aiOwners.has(enemyUnit.owner) || enemyUnit.health <= 0) {
         continue;
       }
-      if (!isPlayerDevVisionEnabled(this.gameState) && !canOwnerSeeUnit(this.gameState, "player", enemyUnit)) {
+      if (!isPlayerDevVisionEnabled(this.gameState) && !canOwnerSeeUnit(this.gameState, playerOwner, enemyUnit)) {
         continue;
       }
       const minRange = Math.max(1, enemyUnit.minAttackRange ?? 1);
@@ -2702,6 +3029,10 @@ export class WorldScene extends Phaser.Scene {
 
   testGetAnimationState() {
     return this.getAnimationStatePayload();
+  }
+
+  testGetSpriteLayerCounts() {
+    return this.getSpriteLayerCounts();
   }
 
   testHoverHex(q, r) {
@@ -2923,7 +3254,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   testSetAiPersonality(owner, personality) {
-    if (!AI_OWNERS.includes(owner)) {
+    if (!this.getActiveAiOwners().includes(owner)) {
       return false;
     }
     if (personality !== "raider" && personality !== "expansionist" && personality !== "guardian") {
@@ -2944,7 +3275,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   testGetAiState(owner = "enemy") {
-    if (!AI_OWNERS.includes(owner)) {
+    if (!this.getActiveAiOwners().includes(owner)) {
       return null;
     }
     return structuredClone(ensureAiState(this.gameState, owner));
@@ -2959,7 +3290,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   testClearAiCityQueue(owner = "enemy", cityId) {
-    if (!AI_OWNERS.includes(owner)) {
+    if (!this.getActiveAiOwners().includes(owner)) {
       return false;
     }
     const targetCity =
@@ -3095,6 +3426,16 @@ function normalizeIncomingQueueItem(payload) {
   }
 
   return null;
+}
+
+function mixSeedFromString(value) {
+  const text = String(value ?? "");
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
 }
 
 function sanitizePreview(preview) {
