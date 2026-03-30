@@ -179,6 +179,11 @@ async function run() {
     assert.ok(initialState.uiTurnAssistant, "turn assistant payload should exist");
     assert.ok(Number.isFinite(initialState.uiTurnAssistant.readyUnits), "turn assistant should expose readyUnits breakdown");
     assert.ok(Number.isFinite(initialState.uiTurnAssistant.emptyQueues), "turn assistant should expose emptyQueues breakdown");
+    assert.ok(initialState.uiTurnForecast, "turn forecast payload should exist");
+    assert.equal(initialState.uiStatsPanelOpen, false, "stats drawer should default closed");
+    assert.ok(initialState.uiStats, "stats payload should be present");
+    assert.ok(initialState.mapWorldBounds, "map world bounds payload should exist");
+    assert.ok(initialState.cameraViewportWorld, "camera viewport payload should exist");
     assert.ok(initialState.hudTopLeft?.resources?.food, "top-left food resource display should exist");
     assert.ok(initialState.hudTopLeft?.resources?.production, "top-left production resource display should exist");
     assert.ok(initialState.hudTopLeft?.resources?.science, "top-left science resource display should exist");
@@ -326,6 +331,56 @@ async function run() {
       const playerSettler = getUnit(initial, "player", "settler");
       if (!playerSettler) {
         return { ok: false, reason: "missing-player-settler" };
+      }
+      const polishInitial = window.__hexfallTest.getHudPolishState();
+      if (!polishInitial?.forecast?.visible || !String(polishInitial?.forecast?.linePrimary ?? "").includes("Net:")) {
+        return { ok: false, reason: "turn-forecast-card-missing" };
+      }
+      if (polishInitial?.stats?.open) {
+        return { ok: false, reason: "stats-panel-should-start-hidden" };
+      }
+      if (window.__hexfallTest.toggleStatsPanel() !== true) {
+        return { ok: false, reason: "stats-panel-toggle-open-failed" };
+      }
+      const polishStatsOpen = window.__hexfallTest.getHudPolishState();
+      if (!polishStatsOpen?.stats?.open || !Number.isFinite(polishStatsOpen?.stats?.payload?.cities)) {
+        return { ok: false, reason: "stats-panel-open-payload-invalid" };
+      }
+      if (window.__hexfallTest.toggleStatsPanel() !== false || window.__hexfallTest.getHudPolishState()?.stats?.open) {
+        return { ok: false, reason: "stats-panel-toggle-close-failed" };
+      }
+      if (!polishInitial?.minimap?.visible || !polishInitial?.minimap?.frameVisible) {
+        return { ok: false, reason: "minimap-or-frame-not-visible" };
+      }
+      const viewport = getState().cameraViewportWorld ?? { width: window.innerWidth, height: window.innerHeight };
+      const isInside = (bounds) =>
+        bounds &&
+        Number.isFinite(bounds.x) &&
+        Number.isFinite(bounds.y) &&
+        Number.isFinite(bounds.width) &&
+        Number.isFinite(bounds.height) &&
+        bounds.x >= 0 &&
+        bounds.y >= 0 &&
+        bounds.x + bounds.width <= viewport.width &&
+        bounds.y + bounds.height <= viewport.height;
+      if (!isInside(polishInitial?.forecast?.bounds) || !isInside(polishInitial?.minimap?.bounds)) {
+        return { ok: false, reason: "new-hud-panels-overflow-viewport" };
+      }
+      const focusBeforeMinimap = getState().cameraFocusHex;
+      if (!window.__hexfallTest.clickMinimapNormalized(0.72, 0.68)) {
+        return { ok: false, reason: "minimap-click-focus-failed" };
+      }
+      await pause(80);
+      const focusAfterMinimap = getState().cameraFocusHex;
+      if (!focusAfterMinimap) {
+        return { ok: false, reason: "minimap-click-did-not-update-camera-focus" };
+      }
+      if (
+        focusBeforeMinimap &&
+        focusAfterMinimap.q === focusBeforeMinimap.q &&
+        focusAfterMinimap.r === focusBeforeMinimap.r
+      ) {
+        return { ok: false, reason: "minimap-click-did-not-change-focus-target" };
       }
 
       // Pause + New Game modal sanity check.

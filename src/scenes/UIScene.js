@@ -1,9 +1,12 @@
 import Phaser from "../core/phaserRuntime.js";
 import { gameEvents } from "../core/eventBus.js";
+import { HEX_SIZE } from "../core/constants.js";
+import { worldToAxial } from "../core/hexGrid.js";
 
 const BUTTON_WIDTH = 180;
 const BUTTON_HEIGHT = 40;
 const TABLET_LAYOUT_BREAKPOINT = 900;
+const SQRT_3 = Math.sqrt(3);
 const CITY_PANEL_TAB_WIDTH = 102;
 const CITY_PANEL_ACTION_WIDTH = 100;
 const CITY_PANEL_QUEUE_ITEM_WIDTH = 126;
@@ -31,6 +34,15 @@ const RIGHT_RAIL_QUEUE_SLOT_OUTER_PADDING = 14;
 const RIGHT_RAIL_QUEUE_SLOT_ROW_GAP = 6;
 const RIGHT_RAIL_QUEUE_SLOT_INNER_GAP = 6;
 const NOTIFICATION_ROW_HEIGHT = 46;
+const FORECAST_PANEL_HEIGHT = 74;
+const FORECAST_PANEL_HEIGHT_TABLET = 66;
+const STATS_PANEL_HEIGHT = 120;
+const STATS_PANEL_HEIGHT_TABLET = 108;
+const MINIMAP_PANEL_WIDTH = 220;
+const MINIMAP_PANEL_HEIGHT = 166;
+const MINIMAP_PANEL_WIDTH_TABLET = 186;
+const MINIMAP_PANEL_HEIGHT_TABLET = 146;
+const MINIMAP_INSET = 10;
 const PRODUCTION_TABS = ["units", "buildings"];
 const UNIT_PRODUCTION_TYPES = ["warrior", "settler", "spearman", "archer"];
 const BUILDING_PRODUCTION_TYPES = ["granary", "workshop", "monument"];
@@ -91,11 +103,22 @@ export class UIScene extends Phaser.Scene {
     this.notificationVisibleDisplaySlice = [];
     this.notificationUnreadCount = 0;
     this.currentTurn = 0;
+    this.statsPanelOpen = false;
+    this.latestStatsPayload = {
+      cities: 0,
+      units: 0,
+      readyUnits: 0,
+      techCompleted: 0,
+      activeTech: null,
+      exploredPercent: 0,
+    };
     this.contextPanelExpanded = false;
     this.contextPanelPinned = false;
     this.lastContextSelectionKey = null;
     this.disabledTooltipVisible = false;
     this.notificationRows = [];
+    this.minimapContentBounds = { x: 0, y: 0, width: 1, height: 1 };
+    this.minimapVisible = false;
     this.uiSfxMuted = false;
     this.uiSfxContext = null;
     this.uiSfxMasterGain = null;
@@ -122,11 +145,48 @@ export class UIScene extends Phaser.Scene {
       activeFill: 0x355e94,
       stroke: 0xe8dcc4,
     });
+    this.statsToggleButton = this.createButton("Stats", "toggle-stats", () => this.toggleStatsPanel(), {
+      width: 74,
+      height: 24,
+      fontSize: "11px",
+      enabledFill: 0x6d6d73,
+      hoverFill: 0x7f8088,
+      activeFill: 0x355e94,
+      stroke: 0xe8dcc4,
+    });
     this.sfxToggleButton.rectangle.setDepth(10);
     this.sfxToggleButton.label.setDepth(11);
+    this.statsToggleButton.rectangle.setDepth(10);
+    this.statsToggleButton.label.setDepth(11);
     this.playbackPanel = this.add.rectangle(0, 0, 10, 10, 0xe9dcc1, 0.96).setDepth(11).setVisible(false);
     this.playbackPanel.setStrokeStyle(2, 0x7d5a2f, 0.86);
     this.playbackLabel = this.createLabel("", 0, 0, "15px", "#3f2d18", 12).setOrigin(0.5).setVisible(false);
+    this.forecastPanel = this.add.rectangle(0, 0, 10, 10, 0xe9dcc1, 0.95).setOrigin(0, 0).setDepth(10);
+    this.forecastPanel.setStrokeStyle(2, 0x7d5a2f, 0.85);
+    this.forecastTitle = this.createLabel("Next Turn", 0, 0, "14px", "#3f2d18", 11);
+    this.forecastLinePrimary = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textStrong, 11);
+    this.forecastLineSecondary = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textMuted, 11);
+    this.forecastLineTertiary = this.createLabel("", 0, 0, "11px", SEMANTIC_COLORS.textMuted, 11);
+    this.statsPanel = this.add.rectangle(0, 0, 10, 10, 0xe8dbc2, 0.96).setOrigin(0, 0).setDepth(10).setVisible(false);
+    this.statsPanel.setStrokeStyle(2, 0x7d5a2f, 0.85);
+    this.statsTitle = this.createLabel("Progress Stats", 0, 0, "14px", "#3f2d18", 11).setVisible(false);
+    this.statsCitiesLabel = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textStrong, 11).setVisible(false);
+    this.statsUnitsLabel = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textStrong, 11).setVisible(false);
+    this.statsTechLabel = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textInfo, 11).setVisible(false);
+    this.statsExploreLabel = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textPositive, 11).setVisible(false);
+    this.minimapPanel = this.add.rectangle(0, 0, MINIMAP_PANEL_WIDTH, MINIMAP_PANEL_HEIGHT, 0xe8dbc2, 0.97).setOrigin(0, 0).setDepth(16);
+    this.minimapPanel.setStrokeStyle(2, 0x7d5a2f, 0.85);
+    this.minimapTitle = this.createLabel("Minimap", 0, 0, "14px", "#3f2d18", 17);
+    this.minimapGraphics = this.add.graphics().setDepth(17);
+    this.minimapViewportFrame = this.add.rectangle(0, 0, 12, 12).setDepth(18).setOrigin(0, 0).setVisible(false);
+    this.minimapViewportFrame.setStrokeStyle(2, 0x1f4f93, 0.92);
+    this.minimapViewportFrame.setFillStyle(0x1f4f93, 0.12);
+    this.minimapHitArea = this.add
+      .rectangle(0, 0, 10, 10, 0x000000, 0)
+      .setOrigin(0, 0)
+      .setDepth(18)
+      .setInteractive({ useHandCursor: true });
+    this.minimapHitArea.on("pointerdown", (pointer) => this.handleMinimapPointerDown(pointer));
 
     this.selectedPanel = this.add.rectangle(24, 0, 460, 92, SEMANTIC_COLORS.panelBg, 0.96).setOrigin(0, 0).setDepth(10);
     this.selectedPanel.setStrokeStyle(2, SEMANTIC_COLORS.panelBorder, 0.86);
@@ -360,11 +420,13 @@ export class UIScene extends Phaser.Scene {
     this.setCompositeVisible(this.attentionReadyButton, true);
     this.setCompositeVisible(this.attentionQueueButton, true);
     this.setSfxMuted(false);
+    this.setButtonActive(this.statsToggleButton, false);
     this.setCompositeVisible(this.contextPanelExpandButton, false);
     this.setCompositeVisible(this.contextPanelPinButton, false);
     this.contextPanelMetaPrimary.setVisible(false);
     this.contextPanelMetaSecondary.setVisible(false);
     this.contextPanelDisabledReason.setVisible(false);
+    this.setStatsPanelVisible(false);
 
     this.hintPanel = this.add.rectangle(0, 0, 440, 74, 0xf0e4cb, 0.95).setDepth(20).setVisible(false);
     this.hintPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
@@ -894,6 +956,27 @@ export class UIScene extends Phaser.Scene {
     return this.uiSfxMuted;
   }
 
+  setStatsPanelVisible(visible) {
+    this.statsPanelOpen = !!visible;
+    const show = this.statsPanelOpen;
+    this.statsPanel.setVisible(show);
+    this.statsTitle.setVisible(show);
+    this.statsCitiesLabel.setVisible(show);
+    this.statsUnitsLabel.setVisible(show);
+    this.statsTechLabel.setVisible(show);
+    this.statsExploreLabel.setVisible(show);
+    this.setButtonActive(this.statsToggleButton, show);
+    if (this.latestState) {
+      this.layout(this.scale.gameSize);
+    }
+  }
+
+  toggleStatsPanel() {
+    this.setStatsPanelVisible(!this.statsPanelOpen);
+    this.playUiSfx(this.statsPanelOpen ? "confirm" : "select");
+    return this.statsPanelOpen;
+  }
+
   getDisabledActionHint(actionId) {
     if (!this.latestState) {
       return null;
@@ -1012,11 +1095,40 @@ export class UIScene extends Phaser.Scene {
     const hudPanelHeight = isTabletLayout ? 138 : 156;
     this.topHudPanel.setPosition(edgePadding, hudTop);
     this.topHudPanel.setSize(hudPanelWidth, hudPanelHeight);
-    this.sfxToggleButton.rectangle.setPosition(
-      edgePadding + hudPanelWidth - this.sfxToggleButton.width / 2 - 8,
-      hudTop + hudPanelHeight - this.sfxToggleButton.height / 2 - 8
-    );
+    const sfxX = edgePadding + hudPanelWidth - this.sfxToggleButton.width / 2 - 8;
+    const sfxY = hudTop + hudPanelHeight - this.sfxToggleButton.height / 2 - 8;
+    this.sfxToggleButton.rectangle.setPosition(sfxX, sfxY);
     this.sfxToggleButton.label.setPosition(this.sfxToggleButton.rectangle.x, this.sfxToggleButton.rectangle.y);
+    const statsX = sfxX - this.sfxToggleButton.width / 2 - this.statsToggleButton.width / 2 - 6;
+    this.statsToggleButton.rectangle.setPosition(statsX, sfxY);
+    this.statsToggleButton.label.setPosition(statsX, sfxY);
+    const forecastWidth = isTabletLayout ? 240 : 282;
+    const forecastHeight = isTabletLayout ? FORECAST_PANEL_HEIGHT_TABLET : FORECAST_PANEL_HEIGHT;
+    const forecastLeft = edgePadding;
+    const forecastTop = hudTop + hudPanelHeight + 8;
+    const forecastPosition = this.clampPanelTopLeft(forecastLeft, forecastTop, forecastWidth, forecastHeight, edgePadding);
+    this.forecastPanel.setPosition(forecastPosition.x, forecastPosition.y);
+    this.forecastPanel.setSize(forecastWidth, forecastHeight);
+    this.forecastPanel.setDisplaySize(forecastWidth, forecastHeight);
+    this.forecastTitle.setPosition(forecastPosition.x + 10, forecastPosition.y + 8);
+    this.forecastLinePrimary.setPosition(forecastPosition.x + 10, forecastPosition.y + 26);
+    this.forecastLineSecondary.setPosition(forecastPosition.x + 10, forecastPosition.y + 42);
+    this.forecastLineTertiary.setPosition(forecastPosition.x + 10, forecastPosition.y + (isTabletLayout ? 56 : 58));
+    const statsWidth = forecastWidth;
+    const statsHeight = isTabletLayout ? STATS_PANEL_HEIGHT_TABLET : STATS_PANEL_HEIGHT;
+    const statsTop = forecastPosition.y + forecastHeight + 6;
+    const statsPosition = this.clampPanelTopLeft(forecastPosition.x, statsTop, statsWidth, statsHeight, edgePadding);
+    this.statsPanel.setPosition(statsPosition.x, statsPosition.y);
+    this.statsPanel.setSize(statsWidth, statsHeight);
+    this.statsPanel.setDisplaySize(statsWidth, statsHeight);
+    this.statsTitle.setPosition(statsPosition.x + 10, statsPosition.y + 8);
+    this.statsCitiesLabel.setPosition(statsPosition.x + 10, statsPosition.y + 28);
+    this.statsUnitsLabel.setPosition(statsPosition.x + 10, statsPosition.y + 46);
+    this.statsTechLabel.setPosition(statsPosition.x + 10, statsPosition.y + 64);
+    this.statsExploreLabel.setPosition(statsPosition.x + 10, statsPosition.y + 82);
+    if (this.statsPanelOpen && statsPosition.y + statsHeight > this.scale.height - edgePadding) {
+      this.setStatsPanelVisible(false);
+    }
     this.layoutResourceDeltas();
     const playbackWidth = isTabletLayout ? Math.max(220, Math.floor(gameSize.width * 0.58)) : 520;
     const playbackX = gameSize.width / 2;
@@ -1131,6 +1243,38 @@ export class UIScene extends Phaser.Scene {
     this.selectedTitle.setPosition(edgePadding + 14, selectedPanelY + 12);
     this.selectedDetails.setPosition(edgePadding + 14, selectedPanelY + 38);
     this.selectedDetails.setWordWrapWidth(Math.max(120, selectedPanelWidth - 24), true);
+    const minimapWidth = isTabletLayout ? MINIMAP_PANEL_WIDTH_TABLET : MINIMAP_PANEL_WIDTH;
+    const minimapHeight = isTabletLayout ? MINIMAP_PANEL_HEIGHT_TABLET : MINIMAP_PANEL_HEIGHT;
+    const minimapTopCandidate = this.statsPanelOpen
+      ? this.statsPanel.y + this.statsPanel.displayHeight + 8
+      : this.forecastPanel.y + this.forecastPanel.displayHeight + 8;
+    const minimapBottomAnchor = selectedPanelY - 10;
+    const minimapTop = Math.max(minimapTopCandidate, minimapBottomAnchor - minimapHeight);
+    const minimapHasRoom = minimapTop + minimapHeight <= minimapBottomAnchor;
+    const minimapPosition = this.clampPanelTopLeft(edgePadding, minimapTop, minimapWidth, minimapHeight, edgePadding);
+    this.minimapPanel.setPosition(minimapPosition.x, minimapPosition.y);
+    this.minimapPanel.setSize(minimapWidth, minimapHeight);
+    this.minimapPanel.setDisplaySize(minimapWidth, minimapHeight);
+    this.minimapTitle.setPosition(minimapPosition.x + 10, minimapPosition.y + 8);
+    this.minimapContentBounds = {
+      x: minimapPosition.x + MINIMAP_INSET,
+      y: minimapPosition.y + 24,
+      width: Math.max(32, minimapWidth - MINIMAP_INSET * 2),
+      height: Math.max(32, minimapHeight - 32),
+    };
+    this.minimapHitArea.setPosition(this.minimapContentBounds.x, this.minimapContentBounds.y);
+    this.minimapHitArea.setSize(this.minimapContentBounds.width, this.minimapContentBounds.height);
+    this.minimapHitArea.setDisplaySize(this.minimapContentBounds.width, this.minimapContentBounds.height);
+    this.minimapVisible = minimapHasRoom && this.latestState?.match?.status === "ongoing";
+    this.minimapPanel.setVisible(this.minimapVisible);
+    this.minimapTitle.setVisible(this.minimapVisible);
+    this.minimapHitArea.setVisible(this.minimapVisible);
+    this.minimapViewportFrame.setVisible(this.minimapVisible);
+    if (this.minimapVisible) {
+      this.minimapHitArea.setInteractive({ useHandCursor: true });
+    } else {
+      this.minimapHitArea.disableInteractive();
+    }
 
     const endTurnWidth = isTabletLayout ? 146 : BUTTON_WIDTH;
     this.endTurnButton.width = endTurnWidth;
@@ -1138,7 +1282,8 @@ export class UIScene extends Phaser.Scene {
     this.endTurnButton.rectangle.setDisplaySize(endTurnWidth, BUTTON_HEIGHT);
     const bottomSafePadding = isTabletLayout ? 18 : 24;
     const endTurnX = gameSize.width - edgePadding - endTurnWidth / 2;
-    const endTurnY = gameSize.height - bottomSafePadding - BUTTON_HEIGHT / 2;
+    const minEndTurnY = edgePadding + (isTabletLayout ? 92 : 104);
+    const endTurnY = Math.max(minEndTurnY, gameSize.height - bottomSafePadding - BUTTON_HEIGHT / 2);
     this.endTurnButton.rectangle.setPosition(endTurnX, endTurnY);
     this.endTurnButton.label.setPosition(endTurnX, endTurnY);
 
@@ -1233,6 +1378,132 @@ export class UIScene extends Phaser.Scene {
     this.resultSubtitle.setPosition(gameSize.width / 2, gameSize.height / 2 + 22);
     this.resultRestartButton.rectangle.setPosition(gameSize.width / 2, gameSize.height / 2 + 74);
     this.resultRestartButton.label.setPosition(gameSize.width / 2, gameSize.height / 2 + 74);
+    this.renderMinimap();
+  }
+
+  clampPanelTopLeft(x, y, width, height, edgePadding = 6) {
+    return {
+      x: Phaser.Math.Clamp(x, edgePadding, this.scale.width - edgePadding - width),
+      y: Phaser.Math.Clamp(y, edgePadding, this.scale.height - edgePadding - height),
+    };
+  }
+
+  handleMinimapPointerDown(pointer) {
+    if (!this.minimapVisible || !this.latestState || this.isAnyModalOpen()) {
+      return false;
+    }
+    const mapWidth = Math.max(1, Number(this.latestState.map?.width ?? 0));
+    const mapHeight = Math.max(1, Number(this.latestState.map?.height ?? 0));
+    const bounds = this.minimapContentBounds;
+    const normalizedX = Phaser.Math.Clamp((pointer.x - bounds.x) / Math.max(1, bounds.width), 0, 1);
+    const normalizedY = Phaser.Math.Clamp((pointer.y - bounds.y) / Math.max(1, bounds.height), 0, 1);
+    const q = Phaser.Math.Clamp(Math.round(normalizedX * (mapWidth - 1)), 0, mapWidth - 1);
+    const r = Phaser.Math.Clamp(Math.round(normalizedY * (mapHeight - 1)), 0, mapHeight - 1);
+    gameEvents.emit("minimap-focus-requested", { q, r });
+    this.playUiSfx("select");
+    return true;
+  }
+
+  renderMinimap() {
+    this.minimapGraphics.clear();
+    if (!this.minimapVisible || !this.latestState) {
+      this.minimapViewportFrame.setVisible(false);
+      return;
+    }
+    const map = this.latestState.map;
+    if (!map || !Array.isArray(map.tiles) || map.tiles.length === 0) {
+      this.minimapViewportFrame.setVisible(false);
+      return;
+    }
+    const bounds = this.minimapContentBounds;
+    const mapWidth = Math.max(1, map.width ?? 1);
+    const mapHeight = Math.max(1, map.height ?? 1);
+    const cellWidth = bounds.width / mapWidth;
+    const cellHeight = bounds.height / mapHeight;
+    const playerVisibility = this.latestState.visibility?.byOwner?.player ?? { visibleHexes: [], exploredHexes: [] };
+    const visibleSet = new Set(playerVisibility.visibleHexes ?? []);
+    const exploredSet = new Set(playerVisibility.exploredHexes ?? []);
+
+    this.minimapGraphics.fillStyle(0x3f3c37, 0.88);
+    this.minimapGraphics.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+    for (const tile of map.tiles) {
+      const q = Phaser.Math.Clamp(Math.round(tile.q), 0, mapWidth - 1);
+      const r = Phaser.Math.Clamp(Math.round(tile.r), 0, mapHeight - 1);
+      const key = `${q},${r}`;
+      const color = resolveMinimapTileColor(tile.terrainType, exploredSet.has(key), visibleSet.has(key));
+      this.minimapGraphics.fillStyle(color, 0.96);
+      this.minimapGraphics.fillRect(
+        bounds.x + q * cellWidth,
+        bounds.y + r * cellHeight,
+        Math.max(1, cellWidth - 0.35),
+        Math.max(1, cellHeight - 0.35)
+      );
+    }
+
+    for (const city of this.latestState.cities ?? []) {
+      const key = `${city.q},${city.r}`;
+      if (!exploredSet.has(key) && !this.latestState.devVisionEnabled) {
+        continue;
+      }
+      this.minimapGraphics.fillStyle(resolveMinimapOwnerColor(city.owner), 0.98);
+      this.minimapGraphics.fillCircle(
+        bounds.x + (city.q + 0.5) * cellWidth,
+        bounds.y + (city.r + 0.5) * cellHeight,
+        Math.max(1.4, Math.min(cellWidth, cellHeight) * 0.42)
+      );
+    }
+
+    for (const unit of this.latestState.units ?? []) {
+      const key = `${unit.q},${unit.r}`;
+      if (!visibleSet.has(key) && !this.latestState.devVisionEnabled) {
+        continue;
+      }
+      this.minimapGraphics.fillStyle(resolveMinimapOwnerColor(unit.owner), 0.92);
+      const markerSize = Math.max(1, Math.min(cellWidth, cellHeight) * 0.38);
+      this.minimapGraphics.fillRect(
+        bounds.x + (unit.q + 0.5) * cellWidth - markerSize / 2,
+        bounds.y + (unit.r + 0.5) * cellHeight - markerSize / 2,
+        markerSize,
+        markerSize
+      );
+    }
+
+    const frame = this.projectCameraFrameToMinimap(mapWidth, mapHeight, cellWidth, cellHeight, bounds);
+    if (!frame) {
+      this.minimapViewportFrame.setVisible(false);
+      return;
+    }
+    this.minimapViewportFrame.setVisible(true);
+    this.minimapViewportFrame.setPosition(frame.x, frame.y);
+    this.minimapViewportFrame.setSize(frame.width, frame.height);
+    this.minimapViewportFrame.setDisplaySize(frame.width, frame.height);
+  }
+
+  projectCameraFrameToMinimap(mapWidth, mapHeight, cellWidth, cellHeight, bounds) {
+    const scroll = this.latestState?.cameraScroll;
+    if (!scroll || !Number.isFinite(scroll.x) || !Number.isFinite(scroll.y)) {
+      return null;
+    }
+    const hexWidth = SQRT_3 * HEX_SIZE;
+    const mapPixelWidth = hexWidth * mapWidth + hexWidth * 0.5 * (mapHeight - 1);
+    const mapPixelHeight = HEX_SIZE * 1.5 * (mapHeight - 1) + HEX_SIZE * 2;
+    const originX = (this.scale.width - mapPixelWidth) / 2 + hexWidth / 2;
+    const originY = (this.scale.height - mapPixelHeight) / 2 + HEX_SIZE;
+    const viewportLeft = scroll.x;
+    const viewportTop = scroll.y;
+    const viewportRight = viewportLeft + this.scale.width;
+    const viewportBottom = viewportTop + this.scale.height;
+    const topLeft = worldToAxial(viewportLeft, viewportTop, HEX_SIZE, originX, originY);
+    const bottomRight = worldToAxial(viewportRight, viewportBottom, HEX_SIZE, originX, originY);
+    const qMin = Phaser.Math.Clamp(Math.min(topLeft.q, bottomRight.q) - 1, 0, mapWidth - 1);
+    const qMax = Phaser.Math.Clamp(Math.max(topLeft.q, bottomRight.q) + 1, 0, mapWidth - 1);
+    const rMin = Phaser.Math.Clamp(Math.min(topLeft.r, bottomRight.r) - 1, 0, mapHeight - 1);
+    const rMax = Phaser.Math.Clamp(Math.max(topLeft.r, bottomRight.r) + 1, 0, mapHeight - 1);
+    const x = Phaser.Math.Clamp(bounds.x + qMin * cellWidth, bounds.x, bounds.x + bounds.width - 2);
+    const y = Phaser.Math.Clamp(bounds.y + rMin * cellHeight, bounds.y, bounds.y + bounds.height - 2);
+    const width = Phaser.Math.Clamp((qMax - qMin + 1) * cellWidth, 2, bounds.width);
+    const height = Phaser.Math.Clamp((rMax - rMin + 1) * cellHeight, 2, bounds.height);
+    return { x, y, width, height };
   }
 
   layoutButtonRow(buttons, centerX, y, gap) {
@@ -1399,6 +1670,9 @@ export class UIScene extends Phaser.Scene {
     }
     const previousTurn = this.currentTurn;
     this.currentTurn = Math.max(0, Number(gameState.turnState?.turn ?? 0));
+    if (previousTurn > 0 && this.currentTurn < previousTurn) {
+      this.setStatsPanelVisible(false);
+    }
     if (previousTurn > 0 && this.currentTurn !== previousTurn) {
       for (const entry of this.notifications) {
         if ((entry.turn ?? 0) < this.currentTurn) {
@@ -1446,6 +1720,48 @@ export class UIScene extends Phaser.Scene {
     this.devVisionLabel.setText(`Dev Vision: ${gameState.devVisionEnabled ? "ON (V)" : "OFF (V)"}`);
     this.devVisionLabel.setColor(gameState.devVisionEnabled ? "#2f7a41" : "#5a4224");
     this.setSfxMuted(this.uiSfxMuted);
+    const forecastStatus = hasPendingCityResolution
+      ? "Resolve pending city outcome"
+      : turnPlayback.active
+        ? "AI playback in progress"
+        : pendingOrders > 0
+          ? `${pendingOrders} actions still waiting`
+          : "Ready to end turn";
+    this.forecastLinePrimary.setText(
+      `Net: F ${formatSigned(projected.food)} | P ${formatSigned(projected.production)} | S ${formatSigned(projected.science)}`
+    );
+    this.forecastLineSecondary.setText(`Pending: Units ${readyUnits}, Queues ${pendingQueues}`);
+    this.forecastLineTertiary.setText(`Status: ${forecastStatus}`);
+    const forecastWarning = pendingOrders > 0 || projected.food < 0 || projected.production < 0 || projected.science < 0;
+    this.forecastPanel.setFillStyle(forecastWarning ? 0xf3e2c8 : 0xe9dcc1, 0.95);
+    this.forecastPanel.setStrokeStyle(2, forecastWarning ? 0x8f3a2a : 0x7d5a2f, 0.86);
+    this.forecastLineTertiary.setColor(
+      hasPendingCityResolution || pendingOrders > 0
+        ? SEMANTIC_COLORS.textWarning
+        : canIssueOrders
+          ? SEMANTIC_COLORS.textPositive
+          : SEMANTIC_COLORS.textMuted
+    );
+    const playerOwner = gameState.factions?.playerOwner ?? "player";
+    const playerCities = gameState.cities.filter((city) => city.owner === playerOwner).length;
+    const playerUnits = gameState.units.filter((unit) => unit.owner === playerOwner).length;
+    const completedTech = gameState.research?.completedTechIds?.length ?? 0;
+    const activeTech = gameState.research?.activeTechId ?? "None";
+    const exploredHexes = gameState.visibility?.byOwner?.[playerOwner]?.exploredHexes?.length ?? 0;
+    const totalHexes = Math.max(1, (gameState.map?.width ?? 1) * (gameState.map?.height ?? 1));
+    const exploredPercent = Math.round((exploredHexes / totalHexes) * 100);
+    this.latestStatsPayload = {
+      cities: playerCities,
+      units: playerUnits,
+      readyUnits,
+      techCompleted: completedTech,
+      activeTech,
+      exploredPercent,
+    };
+    this.statsCitiesLabel.setText(`Cities: ${playerCities}`);
+    this.statsUnitsLabel.setText(`Units: ${playerUnits} (Ready ${readyUnits})`);
+    this.statsTechLabel.setText(`Tech: ${completedTech} complete | Active ${capitalizeLabel(activeTech)}`);
+    this.statsExploreLabel.setText(`Explored: ${exploredPercent}%`);
     this.layoutResourceDeltas();
 
     this.playbackPanel.setVisible(!!turnPlayback.active);
@@ -2421,6 +2737,8 @@ export class UIScene extends Phaser.Scene {
       contextPanelExpanded: this.contextPanelExpanded,
       contextPanelPinned: this.contextPanelPinned,
       sfxMuted: this.uiSfxMuted,
+      statsPanelOpen: this.statsPanelOpen,
+      stats: { ...this.latestStatsPayload },
     };
   }
 
@@ -2517,6 +2835,41 @@ export class UIScene extends Phaser.Scene {
         y: this.notificationPanel.y,
         width: this.notificationPanel.displayWidth,
         height: this.notificationPanel.displayHeight,
+      },
+      forecastPanel: {
+        x: this.forecastPanel.x,
+        y: this.forecastPanel.y,
+        width: this.forecastPanel.displayWidth,
+        height: this.forecastPanel.displayHeight,
+        linePrimary: this.forecastLinePrimary.text,
+        lineSecondary: this.forecastLineSecondary.text,
+        lineTertiary: this.forecastLineTertiary.text,
+      },
+      statsPanel: {
+        open: this.statsPanelOpen,
+        visible: this.statsPanel.visible,
+        x: this.statsPanel.x,
+        y: this.statsPanel.y,
+        width: this.statsPanel.displayWidth,
+        height: this.statsPanel.displayHeight,
+        cities: this.statsCitiesLabel.text,
+        units: this.statsUnitsLabel.text,
+        tech: this.statsTechLabel.text,
+        explored: this.statsExploreLabel.text,
+      },
+      minimap: {
+        visible: this.minimapVisible,
+        x: this.minimapPanel.x,
+        y: this.minimapPanel.y,
+        width: this.minimapPanel.displayWidth,
+        height: this.minimapPanel.displayHeight,
+        frameVisible: this.minimapViewportFrame.visible,
+        frame: {
+          x: this.minimapViewportFrame.x,
+          y: this.minimapViewportFrame.y,
+          width: this.minimapViewportFrame.displayWidth,
+          height: this.minimapViewportFrame.displayHeight,
+        },
       },
       turnAssistant: {
         x: this.turnAssistantPanel.x,
@@ -2705,6 +3058,67 @@ export class UIScene extends Phaser.Scene {
     };
   }
 
+  testToggleStatsPanel() {
+    return this.toggleStatsPanel();
+  }
+
+  testClickMinimapNormalized(nx, ny) {
+    if (!this.minimapVisible) {
+      return false;
+    }
+    const bounds = this.minimapContentBounds;
+    const pointer = {
+      x: bounds.x + Phaser.Math.Clamp(Number(nx) || 0, 0, 1) * bounds.width,
+      y: bounds.y + Phaser.Math.Clamp(Number(ny) || 0, 0, 1) * bounds.height,
+    };
+    return this.handleMinimapPointerDown(pointer);
+  }
+
+  testFocusMinimapHex(q, r) {
+    if (!Number.isFinite(q) || !Number.isFinite(r) || !this.latestState?.map) {
+      return false;
+    }
+    const mapWidth = this.latestState.map.width ?? 0;
+    const mapHeight = this.latestState.map.height ?? 0;
+    const qClamped = Phaser.Math.Clamp(Math.round(q), 0, Math.max(0, mapWidth - 1));
+    const rClamped = Phaser.Math.Clamp(Math.round(r), 0, Math.max(0, mapHeight - 1));
+    gameEvents.emit("minimap-focus-requested", { q: qClamped, r: rClamped });
+    return true;
+  }
+
+  testGetHudPolishState() {
+    return {
+      forecast: {
+        visible: this.forecastPanel.visible,
+        bounds: {
+          x: this.forecastPanel.x,
+          y: this.forecastPanel.y,
+          width: this.forecastPanel.displayWidth,
+          height: this.forecastPanel.displayHeight,
+        },
+        linePrimary: this.forecastLinePrimary.text,
+        lineSecondary: this.forecastLineSecondary.text,
+        lineTertiary: this.forecastLineTertiary.text,
+      },
+      stats: {
+        open: this.statsPanelOpen,
+        buttonActive: this.statsToggleButton.isActive,
+        payload: { ...this.latestStatsPayload },
+      },
+      minimap: {
+        visible: this.minimapVisible,
+        bounds: this.minimapContentBounds ? { ...this.minimapContentBounds } : null,
+        frameVisible: this.minimapViewportFrame.visible,
+        frame: {
+          x: this.minimapViewportFrame.x,
+          y: this.minimapViewportFrame.y,
+          width: this.minimapViewportFrame.displayWidth,
+          height: this.minimapViewportFrame.displayHeight,
+        },
+      },
+    };
+  }
+
   testGetContextPanelState() {
     return {
       expanded: this.contextPanelExpanded,
@@ -2778,6 +3192,43 @@ function formatTurns(turns) {
 function formatTurnsShort(turns) {
   const normalized = Math.max(0, Number.isFinite(turns) ? Math.round(turns) : 0);
   return `${normalized}t`;
+}
+
+function resolveMinimapTileColor(terrainType, explored, visible) {
+  if (!explored) {
+    return 0x383530;
+  }
+  const terrainColor =
+    terrainType === "forest"
+      ? 0x6f8f56
+      : terrainType === "hill"
+        ? 0x9b8d6b
+        : terrainType === "mountain"
+          ? 0x7a7470
+          : 0xb2c87c;
+  if (visible) {
+    return terrainColor;
+  }
+  return terrainType === "forest"
+    ? 0x4a5a3b
+    : terrainType === "hill"
+      ? 0x6a614d
+      : terrainType === "mountain"
+        ? 0x595451
+        : 0x748050;
+}
+
+function resolveMinimapOwnerColor(owner) {
+  if (owner === "enemy") {
+    return 0x8f2c23;
+  }
+  if (owner === "purple") {
+    return 0x6a3a98;
+  }
+  if (owner === "player") {
+    return 0x1f4f93;
+  }
+  return 0x6f6d63;
 }
 
 function normalizeNotificationCategory(input, message = "") {

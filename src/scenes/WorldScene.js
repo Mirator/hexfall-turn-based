@@ -201,6 +201,7 @@ export class WorldScene extends Phaser.Scene {
     gameEvents.on("new-game-requested", this.handleNewGameRequested, this);
     gameEvents.on("restart-match-requested", this.handleRestartRequested, this);
     gameEvents.on("notification-focus-requested", this.handleNotificationFocusRequested, this);
+    gameEvents.on("minimap-focus-requested", this.handleMinimapFocusRequested, this);
     gameEvents.on("ui-modal-state-changed", this.handleUiModalStateChanged, this);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -226,6 +227,7 @@ export class WorldScene extends Phaser.Scene {
       gameEvents.off("new-game-requested", this.handleNewGameRequested, this);
       gameEvents.off("restart-match-requested", this.handleRestartRequested, this);
       gameEvents.off("notification-focus-requested", this.handleNotificationFocusRequested, this);
+      gameEvents.off("minimap-focus-requested", this.handleMinimapFocusRequested, this);
       gameEvents.off("ui-modal-state-changed", this.handleUiModalStateChanged, this);
       this.abortEnemyPlayback();
       this.clearAnimationArtifacts();
@@ -421,6 +423,23 @@ export class WorldScene extends Phaser.Scene {
 
     this.focusCameraOnHex(resolved.q, resolved.r);
     this.cameraFocusHex = { q: resolved.q, r: resolved.r };
+    this.renderAll();
+    this.publishState();
+    return true;
+  };
+
+  handleMinimapFocusRequested = (payload) => {
+    if (!payload || !Number.isFinite(payload.q) || !Number.isFinite(payload.r)) {
+      return false;
+    }
+    const q = Math.round(payload.q);
+    const r = Math.round(payload.r);
+    if (!isInsideMap(this.gameState.map, q, r)) {
+      return false;
+    }
+    this.focusCameraOnHex(q, r);
+    this.cameraFocusHex = { q, r };
+    this.pulseAttentionFocus(q, r, "unit");
     this.renderAll();
     this.publishState();
     return true;
@@ -1954,6 +1973,50 @@ export class WorldScene extends Phaser.Scene {
     };
   }
 
+  getCameraViewportWorld() {
+    const camera = this.cameras?.main;
+    if (!camera) {
+      return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
+    }
+    const worldView = camera.worldView;
+    return {
+      left: worldView?.left ?? camera.scrollX,
+      top: worldView?.top ?? camera.scrollY,
+      right: worldView?.right ?? camera.scrollX + camera.width,
+      bottom: worldView?.bottom ?? camera.scrollY + camera.height,
+      width: worldView?.width ?? camera.width,
+      height: worldView?.height ?? camera.height,
+    };
+  }
+
+  getMapWorldBounds() {
+    const tiles = this.gameState.map?.tiles ?? [];
+    if (tiles.length === 0) {
+      return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
+    }
+    const hexWidth = SQRT_3 * HEX_SIZE;
+    const halfHexWidth = hexWidth / 2;
+    let left = Number.POSITIVE_INFINITY;
+    let right = Number.NEGATIVE_INFINITY;
+    let top = Number.POSITIVE_INFINITY;
+    let bottom = Number.NEGATIVE_INFINITY;
+    for (const tile of tiles) {
+      const center = this.hexToWorld(tile.q, tile.r);
+      left = Math.min(left, center.x - halfHexWidth);
+      right = Math.max(right, center.x + halfHexWidth);
+      top = Math.min(top, center.y - HEX_SIZE);
+      bottom = Math.max(bottom, center.y + HEX_SIZE);
+    }
+    return {
+      left,
+      top,
+      right,
+      bottom,
+      width: right - left,
+      height: bottom - top,
+    };
+  }
+
   canAcceptPlayerCommands() {
     return (
       this.gameState.turnState.phase === "player" &&
@@ -2070,10 +2133,13 @@ export class WorldScene extends Phaser.Scene {
     );
     const uiRuntime = this.getUiRuntimeState();
     const uiTurnAssistant = this.getTurnAssistantState();
+    const uiTurnForecast = this.getTurnForecastPayload(projectedNetIncome, uiTurnAssistant);
     const uiContextPanel = {
       expanded: !!uiRuntime.contextPanelExpanded,
       pinned: !!uiRuntime.contextPanelPinned,
     };
+    const mapWorldBounds = this.getMapWorldBounds();
+    const cameraViewportWorld = this.getCameraViewportWorld();
     return {
       ...snapshot,
       projectedIncome,
@@ -2086,6 +2152,9 @@ export class WorldScene extends Phaser.Scene {
       uiNotificationFilter: uiRuntime.notificationFilter ?? "All",
       uiNotificationUnreadCount: uiRuntime.notificationUnreadCount ?? 0,
       uiSfxMuted: !!uiRuntime.sfxMuted,
+      uiStatsPanelOpen: !!uiRuntime.statsPanelOpen,
+      uiStats: uiRuntime.stats ?? null,
+      uiTurnForecast,
       uiHints: uiSurface.uiHints,
       uiActions: uiSurface.uiActions,
       uiModalOpen: this.uiModalOpen,
@@ -2099,6 +2168,8 @@ export class WorldScene extends Phaser.Scene {
       },
       uiNotifications: uiRuntime.notifications,
       cameraScroll: this.getCameraScrollPayload(),
+      cameraViewportWorld,
+      mapWorldBounds,
       cameraFocusHex: this.cameraFocusHex,
       lastCombatEvent: this.lastCombatEvent,
     };
@@ -2447,6 +2518,10 @@ export class WorldScene extends Phaser.Scene {
     const projectedIncome = this.getProjectedPlayerIncome();
     const projectedNetIncome = this.getProjectedPlayerNetIncome();
     const uiRuntime = this.getUiRuntimeState();
+    const uiTurnAssistant = this.getTurnAssistantState();
+    const uiTurnForecast = this.getTurnForecastPayload(projectedNetIncome, uiTurnAssistant);
+    const mapWorldBounds = this.getMapWorldBounds();
+    const cameraViewportWorld = this.getCameraViewportWorld();
     const uiSurface = deriveUiSurface(
       this.gameState,
       selectedUnit,
@@ -2508,7 +2583,8 @@ export class WorldScene extends Phaser.Scene {
       animationState: this.getAnimationStatePayload(),
       spriteLayers: this.getSpriteLayerCounts(),
       turnPlayback: structuredClone(this.turnPlayback),
-      uiTurnAssistant: this.getTurnAssistantState(),
+      uiTurnAssistant,
+      uiTurnForecast,
       uiContextPanel: {
         expanded: !!uiRuntime.contextPanelExpanded,
         pinned: !!uiRuntime.contextPanelPinned,
@@ -2516,6 +2592,8 @@ export class WorldScene extends Phaser.Scene {
       uiNotificationFilter: uiRuntime.notificationFilter ?? "All",
       uiNotificationUnreadCount: uiRuntime.notificationUnreadCount ?? 0,
       uiSfxMuted: !!uiRuntime.sfxMuted,
+      uiStatsPanelOpen: !!uiRuntime.statsPanelOpen,
+      uiStats: uiRuntime.stats ?? null,
       units: this.gameState.units.map((unit) => ({
         id: unit.id,
         owner: unit.owner,
@@ -2608,6 +2686,8 @@ export class WorldScene extends Phaser.Scene {
       uiNotifications: uiRuntime.notifications,
       uiSfxMuted: !!uiRuntime.sfxMuted,
       cameraScroll: this.getCameraScrollPayload(),
+      cameraViewportWorld,
+      mapWorldBounds,
       cameraFocusHex: this.cameraFocusHex,
       unlocks: {
         units: [...this.gameState.unlocks.units],
@@ -2660,6 +2740,38 @@ export class WorldScene extends Phaser.Scene {
       food: after.foodStock - beforeFood,
       production: after.productionStock - beforeProduction,
       science: after.scienceStock - beforeScience,
+    };
+  }
+
+  getTurnForecastPayload(projectedNetIncome, uiTurnAssistant) {
+    const readyUnits = uiTurnAssistant?.readyUnits ?? uiTurnAssistant?.readyCount ?? 0;
+    const emptyQueues = uiTurnAssistant?.emptyQueues ?? uiTurnAssistant?.emptyQueueCityCount ?? 0;
+    const pendingOrders = readyUnits + emptyQueues;
+    const blockedBy = this.gameState.pendingCityResolution
+      ? "cityResolution"
+      : this.turnPlayback.active
+        ? "enemyPlayback"
+        : this.isAnimationBusy
+          ? "animation"
+          : null;
+    return {
+      net: {
+        food: projectedNetIncome?.food ?? 0,
+        production: projectedNetIncome?.production ?? 0,
+        science: projectedNetIncome?.science ?? 0,
+      },
+      pending: {
+        readyUnits,
+        emptyQueues,
+        total: pendingOrders,
+      },
+      blockedBy,
+      canEndTurn:
+        this.gameState.turnState.phase === "player" &&
+        this.gameState.match.status === "ongoing" &&
+        !this.gameState.pendingCityResolution &&
+        !this.turnPlayback.active &&
+        !this.isAnimationBusy,
     };
   }
 
@@ -2748,6 +2860,15 @@ export class WorldScene extends Phaser.Scene {
       notificationUnreadCount: 0,
       currentTurn: 0,
       sfxMuted: false,
+      statsPanelOpen: false,
+      stats: {
+        cities: 0,
+        units: 0,
+        readyUnits: 0,
+        techCompleted: 0,
+        activeTech: null,
+        exploredPercent: 0,
+      },
     };
     if (!this.scene.isActive("UIScene")) {
       return defaults;
@@ -3179,6 +3300,10 @@ export class WorldScene extends Phaser.Scene {
 
   testNextReadyUnit() {
     return this.handleNextReadyUnitRequested();
+  }
+
+  testFocusHex(q, r) {
+    return this.handleMinimapFocusRequested({ q, r });
   }
 
   testSelectUnit(unitId) {

@@ -152,6 +152,22 @@ window.__hexfallTest = {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testFocusAttention(kind) : false;
   },
+  getHudPolishState() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testGetHudPolishState() : null;
+  },
+  toggleStatsPanel() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testToggleStatsPanel() : false;
+  },
+  clickMinimapNormalized(nx, ny) {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testClickMinimapNormalized(nx, ny) : false;
+  },
+  focusMinimapHex(q, r) {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testFocusMinimapHex(q, r) : false;
+  },
   toggleSfxMute() {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testToggleSfxMute() : false;
@@ -223,6 +239,10 @@ window.__hexfallTest = {
   endTurnImmediate() {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
     return worldScene ? worldScene.testEndTurnImmediate() : false;
+  },
+  focusHex(q, r) {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene ? worldScene.testFocusHex(q, r) : false;
   },
   requestEndTurn() {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
