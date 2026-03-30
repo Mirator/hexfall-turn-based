@@ -12,6 +12,7 @@
 - Chosen: JavaScript + JSDoc typing for rapid iteration.
 - Chosen: dynamic runtime bootstrap (lazy import of game creation from `main.js`).
 - Chosen: chunk-splitting for runtime separation (`entry`, `gameplay`, `vendor/runtime`).
+- Chosen: startup scene flow enters a full-screen menu first (`MainMenu -> NewGame/About`) before launching gameplay scenes.
 - Chosen: keep the early enemy-turn implementation documented as baseline history; current enemy behavior is authoritative in `spec-008`/`spec-004`.
 - Rejected for now: TypeScript-first bootstrap and CI-specific workflow requirements in this foundational spec.
 
@@ -34,6 +35,7 @@
 - `npm run build` produces deployable assets in `dist/`.
 - `npm run lint` and `npm test` run locally after dependency install.
 - Runtime is initialized through lazy loading rather than eager Phaser bootstrap.
+- Supported viewports (`>= 768px`) initialize a startup menu first; gameplay starts only after confirming startup new-game configuration.
 - Build output is split into meaningful runtime chunks.
 - Historical milestone behavior (enemy phase stub) is treated as baseline context and superseded by later AI/combat specs.
 

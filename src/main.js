@@ -12,6 +12,10 @@ let game = null;
 let sceneGetters = {
   getWorldScene: () => null,
   getUIScene: () => null,
+  getMainMenuScene: () => null,
+  getNewGameScene: () => null,
+  getAboutScene: () => null,
+  getBootstrapState: () => null,
 };
 let gameLoadPromise = null;
 let viewportSupported = false;
@@ -19,17 +23,21 @@ let viewportSupported = false;
 window.__hexfallGame = null;
 window.render_game_to_text = () => {
   const worldScene = game ? sceneGetters.getWorldScene(game) : null;
-  if (!worldScene) {
-    if (!isViewportSupported()) {
-      return JSON.stringify({
-        mode: "unsupported",
-        viewportWidth: getViewportWidth(),
-        minSupportedViewportWidth: MIN_SUPPORTED_VIEWPORT_WIDTH,
-      });
-    }
-    return JSON.stringify({ mode: "loading" });
+  if (worldScene) {
+    return worldScene.renderGameToText();
   }
-  return worldScene.renderGameToText();
+  if (!isViewportSupported()) {
+    return JSON.stringify({
+      mode: "unsupported",
+      viewportWidth: getViewportWidth(),
+      minSupportedViewportWidth: MIN_SUPPORTED_VIEWPORT_WIDTH,
+    });
+  }
+  const bootstrapState = game ? sceneGetters.getBootstrapState(game) : null;
+  if (bootstrapState) {
+    return JSON.stringify(bootstrapState);
+  }
+  return JSON.stringify({ mode: "loading" });
 };
 
 window.advanceTime = (ms) => {
@@ -43,6 +51,42 @@ window.advanceTime = (ms) => {
 window.__hexfallTest = {
   getState() {
     return JSON.parse(window.render_game_to_text());
+  },
+  getBootstrapState() {
+    const state = game ? sceneGetters.getBootstrapState(game) : null;
+    return state ? structuredClone(state) : null;
+  },
+  openMainMenuNewGame() {
+    const menuScene = game ? sceneGetters.getMainMenuScene(game) : null;
+    return menuScene ? menuScene.testOpenNewGame() : false;
+  },
+  openMainMenuAbout() {
+    const menuScene = game ? sceneGetters.getMainMenuScene(game) : null;
+    return menuScene ? menuScene.testOpenAbout() : false;
+  },
+  closeAboutToMainMenu() {
+    const aboutScene = game ? sceneGetters.getAboutScene(game) : null;
+    return aboutScene ? aboutScene.testBackToMenu() : false;
+  },
+  setStartupNewGameMapSize(size) {
+    const newGameScene = game ? sceneGetters.getNewGameScene(game) : null;
+    return newGameScene ? newGameScene.testSetMapSize(size) : false;
+  },
+  setStartupNewGameAiFactionCount(count) {
+    const newGameScene = game ? sceneGetters.getNewGameScene(game) : null;
+    return newGameScene ? newGameScene.testSetAiFactionCount(count) : false;
+  },
+  startStartupNewGame() {
+    const newGameScene = game ? sceneGetters.getNewGameScene(game) : null;
+    return newGameScene ? newGameScene.testStartMatch() : false;
+  },
+  backFromStartupNewGame() {
+    const newGameScene = game ? sceneGetters.getNewGameScene(game) : null;
+    return newGameScene ? newGameScene.testBackToMenu() : false;
+  },
+  getStartupNewGameState() {
+    const newGameScene = game ? sceneGetters.getNewGameScene(game) : null;
+    return newGameScene ? newGameScene.testGetBootstrapState() : null;
   },
   hexToWorld(q, r) {
     const worldScene = game ? sceneGetters.getWorldScene(game) : null;
@@ -354,6 +398,10 @@ async function startGame() {
       sceneGetters = {
         getWorldScene: module.getWorldScene,
         getUIScene: module.getUIScene,
+        getMainMenuScene: module.getMainMenuScene,
+        getNewGameScene: module.getNewGameScene,
+        getAboutScene: module.getAboutScene,
+        getBootstrapState: module.getBootstrapState,
       };
       game = module.createGame();
       window.__hexfallGame = game;

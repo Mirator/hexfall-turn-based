@@ -22,6 +22,15 @@
   - `window.render_game_to_text(): string`
   - `window.advanceTime(ms: number): void`
   - `window.__hexfallTest.getState()`
+  - `window.__hexfallTest.getBootstrapState()`
+  - `window.__hexfallTest.openMainMenuNewGame()`
+  - `window.__hexfallTest.openMainMenuAbout()`
+  - `window.__hexfallTest.closeAboutToMainMenu()`
+  - `window.__hexfallTest.setStartupNewGameMapSize(size)`
+  - `window.__hexfallTest.setStartupNewGameAiFactionCount(count)`
+  - `window.__hexfallTest.startStartupNewGame()`
+  - `window.__hexfallTest.backFromStartupNewGame()`
+  - `window.__hexfallTest.getStartupNewGameState()`
   - `window.__hexfallTest.hexToWorld(q, r)`
   - `window.__hexfallTest.getEndTurnButtonCenter()`
   - `window.__hexfallTest.openPauseMenu()`
@@ -82,6 +91,7 @@
 
 - `render_game_to_text` includes:
   - unsupported bootstrap payload when runtime is blocked by viewport policy (`mode="unsupported"`, `viewportWidth`, `minSupportedViewportWidth`)
+  - pregame bootstrap payloads for startup scenes (`mode="menu"`, `mode="new-game"`, `mode="about"`)
   - seed/hash/spawn metadata
   - units/cities/combat/research/economy snapshots
   - `uiPreview`, `uiTurnAssistant`, `uiContextPanel`, `uiNotificationFilter`
@@ -110,7 +120,9 @@
 - `endTurnImmediate()` remains unchanged as deterministic fast-path bypass for smoke/integration flows that do not need playback assertions.
 - Smoke scenario validates:
   - phone viewport bootstrap block (`390x844`) shows unsupported banner and does not initialize gameplay canvas
-  - tablet viewport bootstrap path (`768x1024`) initializes gameplay and proceeds through full smoke scenario
+  - tablet viewport bootstrap path (`768x1024`) initializes startup menu flow before gameplay
+  - startup menu `About` scene is reachable and returns to menu deterministically
+  - startup `New Game` config scene accepts map/AI settings and launches gameplay deterministically
   - hover move and city-attack previews
   - sprite layer payload reports populated terrain/unit visual layers
   - turn readiness assistant and deterministic attention-cycle path (ready units + cities with empty queues)

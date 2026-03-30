@@ -39,6 +39,8 @@ npm run dev
 
 ## Current Gameplay Slice
 
+- Startup full-screen menu with `New Game` and `About` before gameplay begins
+- Startup `New Game` configuration screen for map size (`16/20/24`) and AI faction count (`1..6`)
 - Seeded `16x16` axial hex map with terrain costs and obstacles
 - Three factions (`player`, `enemy`, `purple`) with settler starts and deterministic spawn spacing
 - Explored-memory fog-of-war per faction (`unit sight = 2`, `city sight = 3`)
@@ -51,6 +53,8 @@ npm run dev
 
 ## Controls
 
+- On startup, choose `New Game` to configure map size + AI faction count before entering a match
+- On startup, `About` opens a full-screen game info panel with a back action
 - Left click unit to select
 - Left click highlighted hex to move
 - Left click red-highlighted hostile unit/city to attack (when visible)

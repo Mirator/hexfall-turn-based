@@ -143,14 +143,53 @@ async function run() {
     await page.setViewportSize({ width: 768, height: 1024 });
     await page.waitForFunction(() => document.getElementById("unsupported-viewport-banner")?.hidden === true);
     await page.waitForSelector("canvas", { state: "visible" });
-    await page.waitForFunction(() => {
-      const state = window.__hexfallTest.getState();
-      return state?.mode !== "loading" && state?.mode !== "unsupported";
-    });
+    await page.waitForFunction(() => window.__hexfallTest.getState()?.mode === "menu");
     await page.waitForTimeout(700);
     const tabletBootstrapState = await page.evaluate(() => window.__hexfallTest.getState());
-    assert.equal(tabletBootstrapState.turn, 1, "tablet viewport should load active gameplay state");
-    assert.equal(tabletBootstrapState.match?.status, "ongoing", "tablet viewport should enter normal match flow");
+    assert.equal(tabletBootstrapState.mode, "menu", "tablet viewport should land on the startup menu");
+
+    const openedAbout = await page.evaluate(() => window.__hexfallTest.openMainMenuAbout());
+    assert.equal(openedAbout, true, "about flow failed: open-about-failed");
+    await page.waitForFunction(() => window.__hexfallTest.getState()?.mode === "about");
+
+    const closedAbout = await page.evaluate(() => window.__hexfallTest.closeAboutToMainMenu());
+    assert.equal(closedAbout, true, "about flow failed: close-about-failed");
+    await page.waitForFunction(() => window.__hexfallTest.getState()?.mode === "menu");
+
+    const openedNewGame = await page.evaluate(() => window.__hexfallTest.openMainMenuNewGame());
+    assert.equal(openedNewGame, true, "startup flow failed: open-new-game-failed");
+    await page.waitForFunction(() => window.__hexfallTest.getState()?.mode === "new-game");
+
+    const startupConfigResult = await page.evaluate(() => {
+      const mapSize = window.__hexfallTest.setStartupNewGameMapSize(16);
+      const aiCount = window.__hexfallTest.setStartupNewGameAiFactionCount(2);
+      if (mapSize !== 16 || aiCount !== 2) {
+        return { ok: false, reason: "new-game-config-controls-failed" };
+      }
+      const configuredState = window.__hexfallTest.getStartupNewGameState();
+      if (!configuredState || configuredState.mapSize !== 16 || configuredState.aiFactionCount !== 2) {
+        return { ok: false, reason: "new-game-config-state-invalid" };
+      }
+      if (!window.__hexfallTest.startStartupNewGame()) {
+        return { ok: false, reason: "start-new-game-failed" };
+      }
+      return { ok: true };
+    });
+    assert.equal(startupConfigResult.ok, true, `startup flow failed: ${startupConfigResult.reason}`);
+
+    await page.waitForFunction(() => {
+      const state = window.__hexfallTest.getState();
+      return (
+        state?.mode !== "loading" &&
+        state?.mode !== "unsupported" &&
+        state?.mode !== "menu" &&
+        state?.mode !== "new-game" &&
+        state?.mode !== "about"
+      );
+    });
+    const tabletGameplayState = await page.evaluate(() => window.__hexfallTest.getState());
+    assert.equal(tabletGameplayState.turn, 1, "tablet viewport should enter active gameplay after startup flow");
+    assert.equal(tabletGameplayState.match?.status, "ongoing", "tablet viewport should enter normal match flow");
 
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.waitForTimeout(220);

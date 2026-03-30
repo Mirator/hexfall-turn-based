@@ -130,9 +130,9 @@ export class WorldScene extends Phaser.Scene {
     this.activeTimers = new Set();
   }
 
-  create() {
+  create(data = {}) {
     this.cameras.main.setBackgroundColor(COLORS.worldBackground);
-    this.startNewMatch();
+    this.startNewMatch(null, data?.matchConfig ?? this.currentMatchConfig);
 
     this.terrainSpriteLayer = this.add.layer();
     this.citySpriteLayer = this.add.layer();

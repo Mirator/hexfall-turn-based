@@ -17,7 +17,6 @@ export class BootScene extends Phaser.Scene {
   }
 
   create() {
-    this.scene.start("WorldScene");
-    this.scene.launch("UIScene");
+    this.scene.start("MainMenuScene");
   }
 }
