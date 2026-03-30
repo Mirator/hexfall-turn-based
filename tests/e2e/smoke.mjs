@@ -618,6 +618,19 @@ async function run() {
       ) {
         return { ok: false, reason: "right-rail-city-queue-not-between-notifications-and-attention" };
       }
+      const assistant = cityPanelAfterQueue?.turnAssistant;
+      const readyLeft = Number(assistant?.readyX) - Number(assistant?.readyWidth) / 2;
+      const queueRight = Number(assistant?.queueX) + Number(assistant?.queueWidth) / 2;
+      if (
+        !Number.isFinite(readyLeft) ||
+        !Number.isFinite(queueRight) ||
+        !Number.isFinite(assistant?.left) ||
+        !Number.isFinite(assistant?.right) ||
+        readyLeft < assistant.left - 0.5 ||
+        queueRight > assistant.right + 0.5
+      ) {
+        return { ok: false, reason: "attention-chips-overflow-panel" };
+      }
       if (!String(queueRail.detailsPrimary ?? "").includes("Population")) {
         return { ok: false, reason: "right-rail-city-queue-missing-city-details" };
       }

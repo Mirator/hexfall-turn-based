@@ -1296,8 +1296,15 @@ export class UIScene extends Phaser.Scene {
     this.turnAssistantPanel.setDisplaySize(statusWidth, statusHeight);
     this.turnAssistantLabel.setPosition(endTurnX, statusY - statusHeight / 2 + 11);
     this.turnAssistantSecondaryLabel.setPosition(endTurnX, statusY + statusHeight / 2 - 12);
+    const chipGap = isTabletLayout ? 4 : 6;
+    const chipInset = isTabletLayout ? 6 : 8;
+    const chipHeight = isTabletLayout ? 22 : 24;
+    const chipWidth = Math.max(56, Math.floor((statusWidth - chipInset * 2 - chipGap) / 2));
+    this.resizeButton(this.attentionReadyButton, chipWidth, chipHeight);
+    this.resizeButton(this.attentionQueueButton, chipWidth, chipHeight);
+    this.attentionReadyButton.label.setFontSize(chipWidth < 74 ? 11 : 12);
+    this.attentionQueueButton.label.setFontSize(chipWidth < 74 ? 11 : 12);
     const chipY = statusY + 6;
-    const chipGap = 6;
     const chipTotal = this.attentionReadyButton.width + this.attentionQueueButton.width + chipGap;
     const chipLeft = endTurnX - chipTotal / 2;
     const readyX = chipLeft + this.attentionReadyButton.width / 2;
@@ -2876,10 +2883,16 @@ export class UIScene extends Phaser.Scene {
         y: this.turnAssistantPanel.y,
         width: this.turnAssistantPanel.displayWidth,
         height: this.turnAssistantPanel.displayHeight,
+        left: this.turnAssistantPanel.x - this.turnAssistantPanel.displayWidth / 2,
+        right: this.turnAssistantPanel.x + this.turnAssistantPanel.displayWidth / 2,
         readyLabel: this.attentionReadyButton.label.text,
         readyEnabled: this.attentionReadyButton.enabled,
+        readyX: this.attentionReadyButton.rectangle.x,
+        readyWidth: this.attentionReadyButton.width,
         queueLabel: this.attentionQueueButton.label.text,
         queueEnabled: this.attentionQueueButton.enabled,
+        queueX: this.attentionQueueButton.rectangle.x,
+        queueWidth: this.attentionQueueButton.width,
       },
       cityQueueRail: {
         visible: this.cityQueueRailPanel.visible && this.cityQueueRailTitle.visible,
