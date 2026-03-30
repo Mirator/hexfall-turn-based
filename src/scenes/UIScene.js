@@ -119,6 +119,8 @@ export class UIScene extends Phaser.Scene {
     this.notificationRows = [];
     this.minimapContentBounds = { x: 0, y: 0, width: 1, height: 1 };
     this.minimapVisible = false;
+    this.minimapTerrainKey = "";
+    this.lastLayoutKey = "";
     this.uiSfxMuted = false;
     this.uiSfxContext = null;
     this.uiSfxMasterGain = null;
@@ -178,6 +180,7 @@ export class UIScene extends Phaser.Scene {
     this.minimapPanel.setStrokeStyle(2, 0x7d5a2f, 0.85);
     this.minimapTitle = this.createLabel("Minimap", 0, 0, "14px", "#3f2d18", 17);
     this.minimapGraphics = this.add.graphics().setDepth(17);
+    this.minimapMarkerGraphics = this.add.graphics().setDepth(17);
     this.minimapViewportFrame = this.add.rectangle(0, 0, 12, 12).setDepth(18).setOrigin(0, 0).setVisible(false);
     this.minimapViewportFrame.setStrokeStyle(2, 0x1f4f93, 0.92);
     this.minimapViewportFrame.setFillStyle(0x1f4f93, 0.12);
@@ -625,6 +628,8 @@ export class UIScene extends Phaser.Scene {
     this.input.on("wheel", this.handleWheel, this);
     this.input.on("pointermove", this.handlePointerMove, this);
     gameEvents.on("state-changed", this.updateFromState, this);
+    gameEvents.on("camera-changed", this.handleCameraChanged, this);
+    gameEvents.on("preview-changed", this.handlePreviewChanged, this);
     gameEvents.on("ui-toast-requested", this.handleNotificationRequested, this);
     gameEvents.on("ui-notifications-reset-requested", this.handleNotificationsReset, this);
     gameEvents.on("ui-sfx-requested", this.handleUiSfxRequested, this);
@@ -635,6 +640,8 @@ export class UIScene extends Phaser.Scene {
       this.input.off("wheel", this.handleWheel, this);
       this.input.off("pointermove", this.handlePointerMove, this);
       gameEvents.off("state-changed", this.updateFromState, this);
+      gameEvents.off("camera-changed", this.handleCameraChanged, this);
+      gameEvents.off("preview-changed", this.handlePreviewChanged, this);
       gameEvents.off("ui-toast-requested", this.handleNotificationRequested, this);
       gameEvents.off("ui-notifications-reset-requested", this.handleNotificationsReset, this);
       gameEvents.off("ui-sfx-requested", this.handleUiSfxRequested, this);
@@ -1385,6 +1392,7 @@ export class UIScene extends Phaser.Scene {
     this.resultSubtitle.setPosition(gameSize.width / 2, gameSize.height / 2 + 22);
     this.resultRestartButton.rectangle.setPosition(gameSize.width / 2, gameSize.height / 2 + 74);
     this.resultRestartButton.label.setPosition(gameSize.width / 2, gameSize.height / 2 + 74);
+    this.minimapTerrainKey = "";
     this.renderMinimap();
   }
 
@@ -1393,6 +1401,33 @@ export class UIScene extends Phaser.Scene {
       x: Phaser.Math.Clamp(x, edgePadding, this.scale.width - edgePadding - width),
       y: Phaser.Math.Clamp(y, edgePadding, this.scale.height - edgePadding - height),
     };
+  }
+
+  handleCameraChanged(cameraPatch) {
+    if (!this.latestState || !cameraPatch) {
+      return;
+    }
+    if (cameraPatch.cameraScroll) {
+      this.latestState.cameraScroll = cameraPatch.cameraScroll;
+    }
+    if (cameraPatch.cameraViewportWorld) {
+      this.latestState.cameraViewportWorld = cameraPatch.cameraViewportWorld;
+    }
+    if (cameraPatch.mapWorldBounds) {
+      this.latestState.mapWorldBounds = cameraPatch.mapWorldBounds;
+    }
+    if (Object.prototype.hasOwnProperty.call(cameraPatch, "cameraFocusHex")) {
+      this.latestState.cameraFocusHex = cameraPatch.cameraFocusHex;
+    }
+    this.renderMinimapViewportFrame();
+  }
+
+  handlePreviewChanged(previewPatch) {
+    if (!this.latestState || !previewPatch) {
+      return;
+    }
+    this.latestState.uiPreview = previewPatch.uiPreview ?? { mode: "none" };
+    this.updatePreviewCard(this.latestState.uiPreview);
   }
 
   handleMinimapPointerDown(pointer) {
@@ -1412,13 +1447,19 @@ export class UIScene extends Phaser.Scene {
   }
 
   renderMinimap() {
-    this.minimapGraphics.clear();
-    if (!this.minimapVisible || !this.latestState) {
+    if (!this.latestState || !this.minimapVisible) {
+      this.minimapGraphics.clear();
+      this.minimapMarkerGraphics.clear();
+      this.minimapTerrainKey = "";
       this.minimapViewportFrame.setVisible(false);
       return;
     }
+    this.minimapMarkerGraphics.clear();
     const map = this.latestState.map;
     if (!map || !Array.isArray(map.tiles) || map.tiles.length === 0) {
+      this.minimapGraphics.clear();
+      this.minimapMarkerGraphics.clear();
+      this.minimapTerrainKey = "";
       this.minimapViewportFrame.setVisible(false);
       return;
     }
@@ -1430,21 +1471,28 @@ export class UIScene extends Phaser.Scene {
     const playerVisibility = this.latestState.visibility?.byOwner?.player ?? { visibleHexes: [], exploredHexes: [] };
     const visibleSet = new Set(playerVisibility.visibleHexes ?? []);
     const exploredSet = new Set(playerVisibility.exploredHexes ?? []);
+    const terrainKey = `${this.latestState.meta?.mapRevision ?? map.width}:${this.latestState.meta?.visibilityRevision ?? exploredSet.size}:${
+      this.latestState.devVisionEnabled ? 1 : 0
+    }`;
 
-    this.minimapGraphics.fillStyle(0x3f3c37, 0.88);
-    this.minimapGraphics.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-    for (const tile of map.tiles) {
-      const q = Phaser.Math.Clamp(Math.round(tile.q), 0, mapWidth - 1);
-      const r = Phaser.Math.Clamp(Math.round(tile.r), 0, mapHeight - 1);
-      const key = `${q},${r}`;
-      const color = resolveMinimapTileColor(tile.terrainType, exploredSet.has(key), visibleSet.has(key));
-      this.minimapGraphics.fillStyle(color, 0.96);
-      this.minimapGraphics.fillRect(
-        bounds.x + q * cellWidth,
-        bounds.y + r * cellHeight,
-        Math.max(1, cellWidth - 0.35),
-        Math.max(1, cellHeight - 0.35)
-      );
+    if (terrainKey !== this.minimapTerrainKey) {
+      this.minimapGraphics.clear();
+      this.minimapGraphics.fillStyle(0x3f3c37, 0.88);
+      this.minimapGraphics.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+      for (const tile of map.tiles) {
+        const q = Phaser.Math.Clamp(Math.round(tile.q), 0, mapWidth - 1);
+        const r = Phaser.Math.Clamp(Math.round(tile.r), 0, mapHeight - 1);
+        const key = `${q},${r}`;
+        const color = resolveMinimapTileColor(tile.terrainType, exploredSet.has(key), visibleSet.has(key));
+        this.minimapGraphics.fillStyle(color, 0.96);
+        this.minimapGraphics.fillRect(
+          bounds.x + q * cellWidth,
+          bounds.y + r * cellHeight,
+          Math.max(1, cellWidth - 0.35),
+          Math.max(1, cellHeight - 0.35)
+        );
+      }
+      this.minimapTerrainKey = terrainKey;
     }
 
     for (const city of this.latestState.cities ?? []) {
@@ -1452,8 +1500,8 @@ export class UIScene extends Phaser.Scene {
       if (!exploredSet.has(key) && !this.latestState.devVisionEnabled) {
         continue;
       }
-      this.minimapGraphics.fillStyle(resolveMinimapOwnerColor(city.owner), 0.98);
-      this.minimapGraphics.fillCircle(
+      this.minimapMarkerGraphics.fillStyle(resolveMinimapOwnerColor(city.owner), 0.98);
+      this.minimapMarkerGraphics.fillCircle(
         bounds.x + (city.q + 0.5) * cellWidth,
         bounds.y + (city.r + 0.5) * cellHeight,
         Math.max(1.4, Math.min(cellWidth, cellHeight) * 0.42)
@@ -1465,9 +1513,9 @@ export class UIScene extends Phaser.Scene {
       if (!visibleSet.has(key) && !this.latestState.devVisionEnabled) {
         continue;
       }
-      this.minimapGraphics.fillStyle(resolveMinimapOwnerColor(unit.owner), 0.92);
+      this.minimapMarkerGraphics.fillStyle(resolveMinimapOwnerColor(unit.owner), 0.92);
       const markerSize = Math.max(1, Math.min(cellWidth, cellHeight) * 0.38);
-      this.minimapGraphics.fillRect(
+      this.minimapMarkerGraphics.fillRect(
         bounds.x + (unit.q + 0.5) * cellWidth - markerSize / 2,
         bounds.y + (unit.r + 0.5) * cellHeight - markerSize / 2,
         markerSize,
@@ -1475,6 +1523,19 @@ export class UIScene extends Phaser.Scene {
       );
     }
 
+    this.renderMinimapViewportFrame();
+  }
+
+  renderMinimapViewportFrame() {
+    if (!this.minimapVisible || !this.latestState) {
+      this.minimapViewportFrame.setVisible(false);
+      return;
+    }
+    const mapWidth = Math.max(1, this.latestState.map?.width ?? 1);
+    const mapHeight = Math.max(1, this.latestState.map?.height ?? 1);
+    const bounds = this.minimapContentBounds;
+    const cellWidth = bounds.width / mapWidth;
+    const cellHeight = bounds.height / mapHeight;
     const frame = this.projectCameraFrameToMinimap(mapWidth, mapHeight, cellWidth, cellHeight, bounds);
     if (!frame) {
       this.minimapViewportFrame.setVisible(false);
@@ -1671,11 +1732,12 @@ export class UIScene extends Phaser.Scene {
   }
 
   updateFromState(gameState) {
+    const previousTurn = this.currentTurn;
+    const previousUnread = this.notificationUnreadCount;
     this.latestState = gameState;
     if (!this.restartConfirmOpen) {
       this.syncNewGameConfigFromState();
     }
-    const previousTurn = this.currentTurn;
     this.currentTurn = Math.max(0, Number(gameState.turnState?.turn ?? 0));
     if (previousTurn > 0 && this.currentTurn < previousTurn) {
       this.setStatsPanelVisible(false);
@@ -1834,8 +1896,19 @@ export class UIScene extends Phaser.Scene {
     this.syncCityResolutionModal(gameState.pendingCityResolution);
     this.updatePreviewCard(gameState.uiPreview ?? { mode: "none" });
     this.updateContextualHint();
-    this.layout(this.scale.gameSize);
-    this.updateNotificationCenter();
+    const nextLayoutKey = this.buildLayoutStateKey(gameState);
+    const layoutChanged = nextLayoutKey !== this.lastLayoutKey;
+    if (layoutChanged) {
+      this.layout(this.scale.gameSize);
+      this.lastLayoutKey = nextLayoutKey;
+    } else {
+      this.renderMinimap();
+    }
+
+    const turnChanged = previousTurn > 0 && this.currentTurn !== previousTurn;
+    if (turnChanged || layoutChanged || previousUnread !== this.notificationUnreadCount) {
+      this.updateNotificationCenter();
+    }
 
     const hasResult = gameState.match.status !== "ongoing";
     this.resultPanel.setVisible(hasResult);
@@ -1849,6 +1922,27 @@ export class UIScene extends Phaser.Scene {
       );
       this.setButtonEnabled(this.resultRestartButton, true);
     }
+  }
+
+  buildLayoutStateKey(gameState) {
+    if (!gameState) {
+      return "none";
+    }
+    const selectionKey = gameState.selectedUnitId
+      ? `u:${gameState.selectedUnitId}`
+      : gameState.selectedCityId
+        ? `c:${gameState.selectedCityId}`
+        : "none";
+    const contextType = gameState.uiActions?.contextMenuType ?? "none";
+    const turnState = `${gameState.turnState?.phase ?? "none"}`;
+    const matchState = `${gameState.match?.status ?? "none"}:${gameState.match?.reason ?? "none"}`;
+    const blockers = `${gameState.pendingCityResolution ? 1 : 0}:${gameState.turnPlayback?.active ? 1 : 0}:${
+      gameState.animationState?.busy ? 1 : 0
+    }`;
+    const mapSize = `${gameState.map?.width ?? 0}x${gameState.map?.height ?? 0}`;
+    const localUi = `${this.statsPanelOpen ? 1 : 0}:${this.contextPanelExpanded ? 1 : 0}:${this.contextPanelPinned ? 1 : 0}`;
+    const modals = `${this.pauseMenuOpen ? 1 : 0}:${this.restartConfirmOpen ? 1 : 0}:${this.cityResolutionOpen ? 1 : 0}`;
+    return [selectionKey, contextType, turnState, matchState, blockers, mapSize, localUi, modals].join("|");
   }
 
   syncContextMenu(gameState, selectedUnit, selectedCity, canIssueOrders) {

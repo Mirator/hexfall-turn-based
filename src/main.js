@@ -52,6 +52,10 @@ window.__hexfallTest = {
   getState() {
     return JSON.parse(window.render_game_to_text());
   },
+  getPerfStats() {
+    const worldScene = game ? sceneGetters.getWorldScene(game) : null;
+    return worldScene && typeof worldScene.testGetPerfStats === "function" ? worldScene.testGetPerfStats() : null;
+  },
   getBootstrapState() {
     const state = game ? sceneGetters.getBootstrapState(game) : null;
     return state ? structuredClone(state) : null;

@@ -61,9 +61,6 @@ import { deriveUiSurface } from "../systems/uiSurfaceSystem.js";
 import { getSkipUnitReasonText, skipUnit } from "../systems/unitActionSystem.js";
 import { evaluateMatchState } from "../systems/victorySystem.js";
 import {
-  canOwnerSeeUnit,
-  isHexExploredByOwner,
-  isHexVisibleToOwner,
   isPlayerDevVisionEnabled,
   recomputeVisibility,
   togglePlayerDevVision,
@@ -128,6 +125,29 @@ export class WorldScene extends Phaser.Scene {
     this.citySpritesById = new Map();
     this.turnPlayback = this.createTurnPlaybackState();
     this.activeTimers = new Set();
+    this.playerVisibleHexSet = new Set();
+    this.playerExploredHexSet = new Set();
+    this.mapRevision = 0;
+    this.visibilityRevision = 0;
+    this.cachedMapWorldBounds = null;
+    this.cachedMapWorldBoundsDirty = true;
+    this.cachedProjectedIncome = { food: 0, production: 0, science: 1 };
+    this.cachedProjectedNetIncome = { food: 0, production: 0, science: 0 };
+    this.projectedEconomyDirty = true;
+    this.cachedUiSurface = null;
+    this.uiSurfaceDirty = true;
+    this.cachedUiMapPayload = null;
+    this.cachedUiMapPayloadRevision = -1;
+    this.cachedPlayerVisibilityPayload = null;
+    this.cachedVisibilityPayloadRevision = -1;
+    this.playerVisibleMask = new Uint8Array(0);
+    this.playerExploredMask = new Uint8Array(0);
+    this.perfFrameSamples = [];
+    this.perfPublishCounters = {
+      state: 0,
+      camera: 0,
+      preview: 0,
+    };
   }
 
   create(data = {}) {
@@ -244,13 +264,14 @@ export class WorldScene extends Phaser.Scene {
   }
 
   update(time, delta) {
+    this.recordFrameSample(delta);
     const moved = this.updateKeyboardCameraPan(delta);
     const hasAnimationFrame = this.updateTransientVisualState(time);
     if (hasAnimationFrame) {
       this.renderAll();
     }
     if (moved) {
-      this.publishState();
+      this.emitCameraState();
     }
   }
 
@@ -260,7 +281,9 @@ export class WorldScene extends Phaser.Scene {
     this.cameras.main.setScroll(0, 0);
     this.cameraFocusHex = null;
     this.endCameraDrag();
+    this.cachedMapWorldBoundsDirty = true;
     this.renderAll();
+    this.emitCameraState();
   }
 
   handlePointerDown(pointer) {
@@ -348,7 +371,7 @@ export class WorldScene extends Phaser.Scene {
       }
       const moved = this.updateCameraDrag(pointer);
       if (moved) {
-        this.publishState();
+        this.emitCameraState();
       }
       return;
     }
@@ -356,7 +379,7 @@ export class WorldScene extends Phaser.Scene {
     if (!this.canAcceptPlayerCommands()) {
       if (this.setUiPreview(null)) {
         this.renderAll();
-        this.publishState();
+        this.emitPreviewState();
       }
       return;
     }
@@ -365,7 +388,7 @@ export class WorldScene extends Phaser.Scene {
     if (!selectedUnit || selectedUnit.owner !== "player") {
       if (this.setUiPreview(null)) {
         this.renderAll();
-        this.publishState();
+        this.emitPreviewState();
       }
       return;
     }
@@ -375,7 +398,7 @@ export class WorldScene extends Phaser.Scene {
     if (!isInsideMap(this.gameState.map, hoveredHex.q, hoveredHex.r)) {
       if (this.setUiPreview(null)) {
         this.renderAll();
-        this.publishState();
+        this.emitPreviewState();
       }
       return;
     }
@@ -383,7 +406,7 @@ export class WorldScene extends Phaser.Scene {
     const nextPreview = this.buildHoverPreview(selectedUnit, hoveredHex);
     if (this.setUiPreview(nextPreview)) {
       this.renderAll();
-      this.publishState();
+      this.emitPreviewState();
     }
   }
 
@@ -424,7 +447,7 @@ export class WorldScene extends Phaser.Scene {
     this.focusCameraOnHex(resolved.q, resolved.r);
     this.cameraFocusHex = { q: resolved.q, r: resolved.r };
     this.renderAll();
-    this.publishState();
+    this.emitCameraState();
     return true;
   };
 
@@ -441,7 +464,7 @@ export class WorldScene extends Phaser.Scene {
     this.cameraFocusHex = { q, r };
     this.pulseAttentionFocus(q, r, "unit");
     this.renderAll();
-    this.publishState();
+    this.emitCameraState();
     return true;
   };
 
@@ -710,8 +733,11 @@ export class WorldScene extends Phaser.Scene {
     const previewCleared = isOpen ? this.setUiPreview(null) : false;
     if (previewCleared) {
       this.renderAll();
+      this.emitPreviewState();
     }
-    this.publishState();
+    this.projectedEconomyDirty = true;
+    this.uiSurfaceDirty = true;
+    this.publishState("ui-modal");
   };
 
   getQueueFailureMessage(reason) {
@@ -782,6 +808,11 @@ export class WorldScene extends Phaser.Scene {
       });
     this.currentMatchConfig = resolveMatchConfig(this.gameState.matchConfig ?? nextMatchConfig);
     ensureEnemyAiState(this.gameState);
+    this.mapRevision += 1;
+    this.cachedMapWorldBoundsDirty = true;
+    this.projectedEconomyDirty = true;
+    this.uiSurfaceDirty = true;
+    this.refreshVisibilityCaches();
     this.enemyTurnPlaybackToken += 1;
     this.enemyTurnActivePlan = null;
     this.uiModalOpen = false;
@@ -840,6 +871,7 @@ export class WorldScene extends Phaser.Scene {
 
   enterEnemyPhase() {
     this.setUiPreview(null);
+    this.clearAnimationArtifacts();
     beginEnemyTurn(this.gameState);
     const aiOwners = this.getActiveAiOwners();
     this.turnPlayback = {
@@ -1990,9 +2022,14 @@ export class WorldScene extends Phaser.Scene {
   }
 
   getMapWorldBounds() {
+    if (!this.cachedMapWorldBoundsDirty && this.cachedMapWorldBounds) {
+      return { ...this.cachedMapWorldBounds };
+    }
     const tiles = this.gameState.map?.tiles ?? [];
     if (tiles.length === 0) {
-      return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
+      this.cachedMapWorldBounds = { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
+      this.cachedMapWorldBoundsDirty = false;
+      return { ...this.cachedMapWorldBounds };
     }
     const hexWidth = SQRT_3 * HEX_SIZE;
     const halfHexWidth = hexWidth / 2;
@@ -2007,7 +2044,7 @@ export class WorldScene extends Phaser.Scene {
       top = Math.min(top, center.y - HEX_SIZE);
       bottom = Math.max(bottom, center.y + HEX_SIZE);
     }
-    return {
+    this.cachedMapWorldBounds = {
       left,
       top,
       right,
@@ -2015,6 +2052,8 @@ export class WorldScene extends Phaser.Scene {
       width: right - left,
       height: bottom - top,
     };
+    this.cachedMapWorldBoundsDirty = false;
+    return { ...this.cachedMapWorldBounds };
   }
 
   canAcceptPlayerCommands() {
@@ -2084,6 +2123,9 @@ export class WorldScene extends Phaser.Scene {
 
   evaluateAndPublish() {
     recomputeVisibility(this.gameState);
+    this.refreshVisibilityCaches();
+    this.projectedEconomyDirty = true;
+    this.uiSurfaceDirty = true;
     this.normalizeSelectionState();
     evaluateMatchState(this.gameState);
     this.refreshActionHints();
@@ -2110,27 +2152,37 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  publishState() {
-    gameEvents.emit("state-changed", this.getGameStateSnapshot());
+  publishState(reason = "gameplay") {
+    this.perfPublishCounters.state += 1;
+    gameEvents.emit("state-changed", this.getGameStateSnapshot(reason));
   }
 
-  getGameStateSnapshot() {
-    const snapshot = cloneGameState(this.gameState);
+  emitCameraState(reason = "camera") {
+    this.perfPublishCounters.camera += 1;
+    gameEvents.emit("camera-changed", {
+      reason,
+      cameraScroll: this.getCameraScrollPayload(),
+      cameraViewportWorld: this.getCameraViewportWorld(),
+      mapWorldBounds: this.getMapWorldBounds(),
+      cameraFocusHex: this.cameraFocusHex ? { ...this.cameraFocusHex } : null,
+      mapRevision: this.mapRevision,
+    });
+  }
+
+  emitPreviewState(reason = "preview") {
+    this.perfPublishCounters.preview += 1;
+    gameEvents.emit("preview-changed", {
+      reason,
+      uiPreview: this.buildUiPreviewPayload(),
+    });
+  }
+
+  getGameStateSnapshot(reason = "gameplay") {
     const selectedUnit = getUnitById(this.gameState, this.gameState.selectedUnitId);
     const selectedCity = this.gameState.cities.find((city) => city.id === this.gameState.selectedCityId) ?? null;
     const projectedIncome = this.getProjectedPlayerIncome();
     const projectedNetIncome = this.getProjectedPlayerNetIncome();
-    const uiSurface = deriveUiSurface(
-      this.gameState,
-      selectedUnit,
-      selectedCity,
-      this.attackableTargets,
-      this.attackableCities,
-      {
-      restartConfirmOpen: this.uiModalOpen,
-      pendingCityResolution: this.gameState.pendingCityResolution,
-    }
-    );
+    const uiSurface = this.getUiSurface(selectedUnit, selectedCity);
     const uiRuntime = this.getUiRuntimeState();
     const uiTurnAssistant = this.getTurnAssistantState();
     const uiTurnForecast = this.getTurnForecastPayload(projectedNetIncome, uiTurnAssistant);
@@ -2140,8 +2192,103 @@ export class WorldScene extends Phaser.Scene {
     };
     const mapWorldBounds = this.getMapWorldBounds();
     const cameraViewportWorld = this.getCameraViewportWorld();
+    const playerOwner = this.gameState.factions?.playerOwner ?? "player";
+    const playerEconomy =
+      this.gameState.economy[playerOwner] ??
+      ({
+        foodStock: 0,
+        productionStock: 0,
+        scienceStock: 0,
+        lastTurnIncome: { food: 0, production: 0, science: 0 },
+      });
     return {
-      ...snapshot,
+      eventReason: reason,
+      turnState: {
+        turn: this.gameState.turnState.turn,
+        phase: this.gameState.turnState.phase,
+      },
+      match: {
+        status: this.gameState.match.status,
+        reason: this.gameState.match.reason,
+      },
+      matchConfig: {
+        mapWidth: this.currentMatchConfig?.mapWidth ?? this.gameState.matchConfig?.mapWidth ?? this.gameState.map.width,
+        mapHeight: this.currentMatchConfig?.mapHeight ?? this.gameState.matchConfig?.mapHeight ?? this.gameState.map.height,
+        aiFactionCount:
+          this.currentMatchConfig?.aiFactionCount ??
+          this.gameState.matchConfig?.aiFactionCount ??
+          (this.gameState.factions?.aiOwners?.length ?? 1),
+      },
+      map: this.getUiMapPayload(),
+      factions: {
+        playerOwner,
+        aiOwners: [...(this.gameState.factions?.aiOwners ?? [])],
+        allOwners: [...(this.gameState.factions?.allOwners ?? [playerOwner])],
+      },
+      selectedUnitId: this.gameState.selectedUnitId,
+      selectedCityId: this.gameState.selectedCityId,
+      units: this.gameState.units.map((unit) => ({
+        id: unit.id,
+        owner: unit.owner,
+        type: unit.type,
+        q: unit.q,
+        r: unit.r,
+        health: unit.health,
+        maxHealth: unit.maxHealth,
+        attack: unit.attack,
+        armor: unit.armor,
+        attackRange: unit.attackRange,
+        minAttackRange: unit.minAttackRange,
+        role: unit.role,
+        movementRemaining: unit.movementRemaining,
+        maxMovement: unit.maxMovement,
+        hasActed: unit.hasActed,
+      })),
+      cities: this.gameState.cities.map((city) => ({
+        id: city.id,
+        owner: city.owner,
+        q: city.q,
+        r: city.r,
+        population: city.population,
+        identity: city.identity,
+        specialization: city.specialization,
+        growthProgress: city.growthProgress,
+        health: city.health,
+        maxHealth: city.maxHealth,
+        productionTab: city.productionTab,
+        buildings: [...(city.buildings ?? [])],
+        yieldLastTurn: city.yieldLastTurn,
+        workedHexes: city.workedHexes.map((hex) => ({ q: hex.q, r: hex.r })),
+        queue: city.queue.map((item) =>
+          typeof item === "string" ? { kind: "unit", id: item } : { kind: item.kind, id: item.id }
+        ),
+      })),
+      pendingCityResolution: this.gameState.pendingCityResolution
+        ? {
+            cityId: this.gameState.pendingCityResolution.cityId,
+            attackerOwner: this.gameState.pendingCityResolution.attackerOwner,
+            defenderOwner: this.gameState.pendingCityResolution.defenderOwner,
+            choices: [...this.gameState.pendingCityResolution.choices],
+          }
+        : null,
+      research: {
+        activeTechId: this.gameState.research.activeTechId,
+        progress: this.gameState.research.progress,
+        completedTechIds: [...this.gameState.research.completedTechIds],
+      },
+      economy: {
+        player: {
+          foodStock: playerEconomy.foodStock,
+          productionStock: playerEconomy.productionStock,
+          scienceStock: playerEconomy.scienceStock,
+          lastTurnIncome: playerEconomy.lastTurnIncome ? { ...playerEconomy.lastTurnIncome } : null,
+        },
+      },
+      visibility: {
+        byOwner: {
+          player: this.getPlayerVisibilityPayload(),
+        },
+      },
       projectedIncome,
       projectedNetIncome,
       selectedInfo: this.buildSelectedInfo(selectedUnit, selectedCity),
@@ -2172,6 +2319,10 @@ export class WorldScene extends Phaser.Scene {
       mapWorldBounds,
       cameraFocusHex: this.cameraFocusHex,
       lastCombatEvent: this.lastCombatEvent,
+      meta: {
+        mapRevision: this.mapRevision,
+        visibilityRevision: this.visibilityRevision,
+      },
     };
   }
 
@@ -2184,6 +2335,7 @@ export class WorldScene extends Phaser.Scene {
 
     this.mapOrigin.x = (viewportWidth - mapWidth) / 2 + hexWidth / 2;
     this.mapOrigin.y = (viewportHeight - mapHeight) / 2 + HEX_SIZE;
+    this.cachedMapWorldBoundsDirty = true;
   }
 
   hexToWorld(q, r) {
@@ -2205,11 +2357,13 @@ export class WorldScene extends Phaser.Scene {
   renderMap() {
     this.mapGraphics.clear();
     const revealAll = isPlayerDevVisionEnabled(this.gameState);
+    const mapWidth = Math.max(1, this.gameState.map.width ?? 1);
 
     for (const tile of this.gameState.map.tiles) {
       const center = this.hexToWorld(tile.q, tile.r);
-      const visible = revealAll || isHexVisibleToOwner(this.gameState, "player", tile.q, tile.r);
-      const explored = revealAll || isHexExploredByOwner(this.gameState, "player", tile.q, tile.r);
+      const tileIndex = tile.r * mapWidth + tile.q;
+      const visible = revealAll || this.playerVisibleMask[tileIndex] === 1;
+      const explored = revealAll || this.playerExploredMask[tileIndex] === 1;
       const terrainKey = getTerrainTextureKey(tile.terrainType, this.gameState.map.seed, tile.q, tile.r);
       const terrainSprite = this.getOrCreateTerrainSprite(tile, terrainKey);
       terrainSprite.setPosition(center.x, center.y);
@@ -2522,17 +2676,7 @@ export class WorldScene extends Phaser.Scene {
     const uiTurnForecast = this.getTurnForecastPayload(projectedNetIncome, uiTurnAssistant);
     const mapWorldBounds = this.getMapWorldBounds();
     const cameraViewportWorld = this.getCameraViewportWorld();
-    const uiSurface = deriveUiSurface(
-      this.gameState,
-      selectedUnit,
-      selectedCity,
-      this.attackableTargets,
-      this.attackableCities,
-      {
-        restartConfirmOpen: !!uiRuntime.restartConfirmOpen,
-        pendingCityResolution: this.gameState.pendingCityResolution,
-      }
-    );
+    const uiSurface = this.getUiSurface(selectedUnit, selectedCity);
     const terrainSummary = this.gameState.map.tiles.reduce(
       (summary, tile) => {
         summary[tile.terrainType] = (summary[tile.terrainType] ?? 0) + 1;
@@ -2703,6 +2847,20 @@ export class WorldScene extends Phaser.Scene {
   }
 
   getProjectedPlayerIncome() {
+    this.recomputeProjectedEconomyCacheIfNeeded();
+    return { ...this.cachedProjectedIncome };
+  }
+
+  getProjectedPlayerNetIncome() {
+    this.recomputeProjectedEconomyCacheIfNeeded();
+    return { ...this.cachedProjectedNetIncome };
+  }
+
+  recomputeProjectedEconomyCacheIfNeeded() {
+    if (!this.projectedEconomyDirty) {
+      return;
+    }
+
     const playerOwner = this.gameState.factions?.playerOwner ?? "player";
     const projected = {
       food: 0,
@@ -2718,15 +2876,13 @@ export class WorldScene extends Phaser.Scene {
       projected.production += cityYield.production;
       projected.science += cityYield.science;
     }
-    return projected;
-  }
-
-  getProjectedPlayerNetIncome() {
-    const playerOwner = this.gameState.factions?.playerOwner ?? "player";
     const simulation = cloneGameState(this.gameState);
     const before = simulation.economy[playerOwner];
     if (!before) {
-      return { food: 0, production: 0, science: 0 };
+      this.cachedProjectedIncome = projected;
+      this.cachedProjectedNetIncome = { food: 0, production: 0, science: 0 };
+      this.projectedEconomyDirty = false;
+      return;
     }
     const beforeFood = before.foodStock;
     const beforeProduction = before.productionStock;
@@ -2736,11 +2892,13 @@ export class WorldScene extends Phaser.Scene {
     consumeScienceStock(simulation, playerOwner, 1);
 
     const after = simulation.economy[playerOwner] ?? before;
-    return {
+    this.cachedProjectedIncome = projected;
+    this.cachedProjectedNetIncome = {
       food: after.foodStock - beforeFood,
       production: after.productionStock - beforeProduction,
       science: after.scienceStock - beforeScience,
     };
+    this.projectedEconomyDirty = false;
   }
 
   getTurnForecastPayload(projectedNetIncome, uiTurnAssistant) {
@@ -2847,6 +3005,172 @@ export class WorldScene extends Phaser.Scene {
       };
     }
     return { type: "none" };
+  }
+
+  getUiSurface(selectedUnit, selectedCity) {
+    if (!this.uiSurfaceDirty && this.cachedUiSurface) {
+      return this.cachedUiSurface;
+    }
+    this.cachedUiSurface = deriveUiSurface(
+      this.gameState,
+      selectedUnit,
+      selectedCity,
+      this.attackableTargets,
+      this.attackableCities,
+      {
+        restartConfirmOpen: this.uiModalOpen,
+        pendingCityResolution: this.gameState.pendingCityResolution,
+      }
+    );
+    this.uiSurfaceDirty = false;
+    return this.cachedUiSurface;
+  }
+
+  getUiMapPayload() {
+    if (this.cachedUiMapPayloadRevision === this.mapRevision && this.cachedUiMapPayload) {
+      return this.cachedUiMapPayload;
+    }
+    const map = this.gameState.map ?? { width: 0, height: 0, seed: 0, tiles: [] };
+    this.cachedUiMapPayload = {
+      width: map.width ?? 0,
+      height: map.height ?? 0,
+      seed: map.seed ?? 0,
+      terrainHash: this.computeTerrainHash(map.tiles ?? []),
+      tiles: (map.tiles ?? []).map((tile) => ({
+        q: tile.q,
+        r: tile.r,
+        terrainType: tile.terrainType,
+      })),
+    };
+    this.cachedUiMapPayloadRevision = this.mapRevision;
+    return this.cachedUiMapPayload;
+  }
+
+  getPlayerVisibilityPayload() {
+    if (this.cachedVisibilityPayloadRevision === this.visibilityRevision && this.cachedPlayerVisibilityPayload) {
+      return this.cachedPlayerVisibilityPayload;
+    }
+    this.cachedPlayerVisibilityPayload = {
+      visibleHexes: [...this.playerVisibleHexSet],
+      exploredHexes: [...this.playerExploredHexSet],
+    };
+    this.cachedVisibilityPayloadRevision = this.visibilityRevision;
+    return this.cachedPlayerVisibilityPayload;
+  }
+
+  refreshVisibilityCaches() {
+    const playerOwner = this.gameState.factions?.playerOwner ?? "player";
+    const playerVisibility = this.gameState.visibility?.byOwner?.[playerOwner] ?? { visibleHexes: [], exploredHexes: [] };
+    const nextVisibleSet = new Set(playerVisibility.visibleHexes ?? []);
+    const nextExploredSet = new Set(playerVisibility.exploredHexes ?? []);
+    const visibleChanged = !areSetContentsEqual(this.playerVisibleHexSet, nextVisibleSet);
+    const exploredChanged = !areSetContentsEqual(this.playerExploredHexSet, nextExploredSet);
+    this.playerVisibleHexSet = nextVisibleSet;
+    this.playerExploredHexSet = nextExploredSet;
+
+    const mapWidth = Math.max(0, this.gameState.map?.width ?? 0);
+    const mapHeight = Math.max(0, this.gameState.map?.height ?? 0);
+    const cellCount = mapWidth * mapHeight;
+    if (this.playerVisibleMask.length !== cellCount) {
+      this.playerVisibleMask = new Uint8Array(cellCount);
+    } else {
+      this.playerVisibleMask.fill(0);
+    }
+    if (this.playerExploredMask.length !== cellCount) {
+      this.playerExploredMask = new Uint8Array(cellCount);
+    } else {
+      this.playerExploredMask.fill(0);
+    }
+
+    for (const key of this.playerVisibleHexSet) {
+      const index = parseHexKeyToIndex(key, mapWidth, mapHeight);
+      if (index !== -1) {
+        this.playerVisibleMask[index] = 1;
+      }
+    }
+    for (const key of this.playerExploredHexSet) {
+      const index = parseHexKeyToIndex(key, mapWidth, mapHeight);
+      if (index !== -1) {
+        this.playerExploredMask[index] = 1;
+      }
+    }
+
+    if (visibleChanged || exploredChanged) {
+      this.visibilityRevision += 1;
+    }
+  }
+
+  recordFrameSample(deltaMs) {
+    if (!Number.isFinite(deltaMs) || deltaMs <= 0) {
+      return;
+    }
+    const normalized = Phaser.Math.Clamp(deltaMs, 0, 1000);
+    this.perfFrameSamples.push(normalized);
+    if (this.perfFrameSamples.length > 720) {
+      this.perfFrameSamples.splice(0, this.perfFrameSamples.length - 720);
+    }
+  }
+
+  getPerfStats() {
+    const samples = this.perfFrameSamples.slice();
+    if (samples.length === 0) {
+      return {
+        sampleCount: 0,
+        frameMs: { avg: 0, p50: 0, p95: 0, max: 0 },
+        estimatedFps: 0,
+        longFrames: { over18ms: 0, over40ms: 0 },
+        publishCounters: { ...this.perfPublishCounters },
+        budgets: { targetP95Ms: 18, targetMaxMs: 40 },
+      };
+    }
+
+    let sum = 0;
+    let max = 0;
+    let over18 = 0;
+    let over40 = 0;
+    for (const sample of samples) {
+      sum += sample;
+      if (sample > max) {
+        max = sample;
+      }
+      if (sample > 18) {
+        over18 += 1;
+      }
+      if (sample > 40) {
+        over40 += 1;
+      }
+    }
+
+    const sorted = [...samples].sort((a, b) => a - b);
+    const avg = sum / samples.length;
+    const p50 = readPercentile(sorted, 50);
+    const p95 = readPercentile(sorted, 95);
+    return {
+      sampleCount: samples.length,
+      frameMs: {
+        avg: roundFrameMetric(avg),
+        p50: roundFrameMetric(p50),
+        p95: roundFrameMetric(p95),
+        max: roundFrameMetric(max),
+      },
+      estimatedFps: roundFrameMetric(1000 / Math.max(0.001, avg)),
+      longFrames: {
+        over18ms: over18,
+        over40ms: over40,
+      },
+      publishCounters: { ...this.perfPublishCounters },
+      budgets: { targetP95Ms: 18, targetMaxMs: 40 },
+      map: {
+        width: this.gameState.map?.width ?? 0,
+        height: this.gameState.map?.height ?? 0,
+        aiFactionCount: this.gameState.factions?.aiOwners?.length ?? 0,
+      },
+      revisions: {
+        mapRevision: this.mapRevision,
+        visibilityRevision: this.visibilityRevision,
+      },
+      sampledAtMs: Date.now(),
+    };
   }
 
   getUiRuntimeState() {
@@ -3023,7 +3347,18 @@ export class WorldScene extends Phaser.Scene {
     if (isPlayerDevVisionEnabled(this.gameState)) {
       return true;
     }
-    return isHexVisibleToOwner(this.gameState, "player", q, r);
+    if (!Number.isFinite(q) || !Number.isFinite(r)) {
+      return false;
+    }
+    const mapWidth = this.gameState.map?.width ?? 0;
+    const mapHeight = this.gameState.map?.height ?? 0;
+    const qIndex = Math.round(q);
+    const rIndex = Math.round(r);
+    if (qIndex < 0 || rIndex < 0 || qIndex >= mapWidth || rIndex >= mapHeight) {
+      return false;
+    }
+    const index = rIndex * mapWidth + qIndex;
+    return this.playerVisibleMask[index] === 1;
   }
 
   isUnitVisibleToPlayer(unit) {
@@ -3142,7 +3477,7 @@ export class WorldScene extends Phaser.Scene {
         this.pulseAttentionFocus(focus.q, focus.r, target.kind);
       }
       this.renderAll();
-      this.publishState();
+      this.emitCameraState("attention-focus");
     }
     return true;
   }
@@ -3205,12 +3540,11 @@ export class WorldScene extends Phaser.Scene {
 
   isHexThreatenedByEnemy(hex) {
     const aiOwners = new Set(this.getActiveAiOwners());
-    const playerOwner = this.gameState.factions?.playerOwner ?? "player";
     for (const enemyUnit of this.gameState.units) {
       if (!aiOwners.has(enemyUnit.owner) || enemyUnit.health <= 0) {
         continue;
       }
-      if (!isPlayerDevVisionEnabled(this.gameState) && !canOwnerSeeUnit(this.gameState, playerOwner, enemyUnit)) {
+      if (!isPlayerDevVisionEnabled(this.gameState) && !this.isHexVisibleToPlayer(enemyUnit.q, enemyUnit.r)) {
         continue;
       }
       const minRange = Math.max(1, enemyUnit.minAttackRange ?? 1);
@@ -3279,6 +3613,10 @@ export class WorldScene extends Phaser.Scene {
     return this.getSpriteLayerCounts();
   }
 
+  testGetPerfStats() {
+    return this.getPerfStats();
+  }
+
   testHoverHex(q, r) {
     if (!isInsideMap(this.gameState.map, q, r)) {
       return false;
@@ -3290,7 +3628,7 @@ export class WorldScene extends Phaser.Scene {
     const nextPreview = this.buildHoverPreview(selectedUnit, { q, r });
     this.setUiPreview(nextPreview);
     this.renderAll();
-    this.publishState();
+    this.emitPreviewState("test-hover");
     return true;
   }
 
@@ -3697,7 +4035,101 @@ function arePreviewsEqual(a, b) {
   if (!a || !b) {
     return false;
   }
-  return JSON.stringify(a) === JSON.stringify(b);
+  if (a.mode !== b.mode) {
+    return false;
+  }
+  const previewKeys = [
+    "attackerId",
+    "unitId",
+    "targetId",
+    "cityId",
+    "q",
+    "r",
+    "damage",
+    "targetRemainingHealth",
+    "cityRemainingHealth",
+    "moveCost",
+    "movementRemainingAfter",
+  ];
+  for (const key of previewKeys) {
+    if ((a[key] ?? null) !== (b[key] ?? null)) {
+      return false;
+    }
+  }
+
+  if (
+    !areObjectsEqualByKeys(a.counterattack, b.counterattack, ["triggered", "reason", "damage"]) ||
+    !areObjectsEqualByKeys(a.breakdown, b.breakdown, [
+      "baseAttack",
+      "roleBonus",
+      "terrainAttackBonus",
+      "defenderArmor",
+      "terrainDefenseBonus",
+    ])
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function areObjectsEqualByKeys(a, b, keys) {
+  if (!a && !b) {
+    return true;
+  }
+  if (!a || !b) {
+    return false;
+  }
+  for (const key of keys) {
+    if ((a[key] ?? null) !== (b[key] ?? null)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areSetContentsEqual(a, b) {
+  if (a.size !== b.size) {
+    return false;
+  }
+  for (const value of a) {
+    if (!b.has(value)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function parseHexKeyToIndex(key, mapWidth, mapHeight) {
+  if (typeof key !== "string" || mapWidth <= 0 || mapHeight <= 0) {
+    return -1;
+  }
+  const commaIndex = key.indexOf(",");
+  if (commaIndex <= 0 || commaIndex >= key.length - 1) {
+    return -1;
+  }
+  const q = Number.parseInt(key.slice(0, commaIndex), 10);
+  const r = Number.parseInt(key.slice(commaIndex + 1), 10);
+  if (!Number.isInteger(q) || !Number.isInteger(r) || q < 0 || r < 0 || q >= mapWidth || r >= mapHeight) {
+    return -1;
+  }
+  return r * mapWidth + q;
+}
+
+function readPercentile(sortedSamples, percentile) {
+  if (!Array.isArray(sortedSamples) || sortedSamples.length === 0) {
+    return 0;
+  }
+  const clampedPercentile = Phaser.Math.Clamp(percentile, 0, 100);
+  const position = Math.ceil((clampedPercentile / 100) * sortedSamples.length) - 1;
+  const index = Phaser.Math.Clamp(position, 0, sortedSamples.length - 1);
+  return sortedSamples[index] ?? 0;
+}
+
+function roundFrameMetric(value) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.round(value * 100) / 100;
 }
 
 function drawHex(graphics, x, y, size, fillColor, fillAlpha, strokeColor, strokeWidth) {

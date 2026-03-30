@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
@@ -10,6 +10,8 @@ const HOST = "127.0.0.1";
 const PORT = 4173;
 const URL = `http://${HOST}:${PORT}`;
 const ARTIFACT_DIR = "tests/e2e/artifacts";
+const PERF_ARTIFACT_PATH = `${ARTIFACT_DIR}/perf.json`;
+const PERF_TARGET_BUDGET = { p95Ms: 18, maxMs: 40 };
 
 async function waitForServer(url, timeoutMs = 30000) {
   const startedAt = Date.now();
@@ -25,6 +27,40 @@ async function waitForServer(url, timeoutMs = 30000) {
     await delay(300);
   }
   throw new Error(`Timed out waiting for dev server at ${url}`);
+}
+
+function normalizePerfStats(stats) {
+  if (!stats || typeof stats !== "object") {
+    return null;
+  }
+  const frameMs = stats.frameMs ?? {};
+  if (!Number.isFinite(frameMs.avg) || !Number.isFinite(frameMs.p50) || !Number.isFinite(frameMs.p95) || !Number.isFinite(frameMs.max)) {
+    return null;
+  }
+  return {
+    sampleCount: Number(stats.sampleCount ?? 0),
+    estimatedFps: Number(stats.estimatedFps ?? 0),
+    frameMs: {
+      avg: Number(frameMs.avg),
+      p50: Number(frameMs.p50),
+      p95: Number(frameMs.p95),
+      max: Number(frameMs.max),
+    },
+    longFrames: {
+      over18ms: Number(stats.longFrames?.over18ms ?? 0),
+      over40ms: Number(stats.longFrames?.over40ms ?? 0),
+    },
+    publishCounters: {
+      state: Number(stats.publishCounters?.state ?? 0),
+      camera: Number(stats.publishCounters?.camera ?? 0),
+      preview: Number(stats.publishCounters?.preview ?? 0),
+    },
+    map: {
+      width: Number(stats.map?.width ?? 0),
+      height: Number(stats.map?.height ?? 0),
+      aiFactionCount: Number(stats.map?.aiFactionCount ?? 0),
+    },
+  };
 }
 
 async function run() {
@@ -1222,6 +1258,107 @@ async function run() {
     assert.ok(
       cameraStateAfterDrag.cameraScroll.x !== dragBefore.x || cameraStateAfterDrag.cameraScroll.y !== dragBefore.y,
       "right-drag camera pan should move camera scroll"
+    );
+
+    const perfBeforeStress = normalizePerfStats(await page.evaluate(() => window.__hexfallTest.getPerfStats()));
+    assert.ok(perfBeforeStress, "perf probe failed: initial perf telemetry unavailable");
+
+    const stressSetup = await page.evaluate(async () => {
+      const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const getState = () => window.__hexfallTest.getState();
+      if (!window.__hexfallTest.openPauseMenu() || !window.__hexfallTest.openRestartConfirm()) {
+        return { ok: false, reason: "stress-setup-open-modal-failed" };
+      }
+      if (!window.__hexfallTest.setNewGameMapSize(24) || window.__hexfallTest.setNewGameAiFactionCount(6) !== 6) {
+        return { ok: false, reason: "stress-setup-config-controls-failed" };
+      }
+      if (!window.__hexfallTest.confirmRestartConfirm()) {
+        return { ok: false, reason: "stress-setup-confirm-failed" };
+      }
+      for (let i = 0; i < 90; i += 1) {
+        await pause(40);
+        const state = getState();
+        if (state.map?.width === 24 && state.map?.height === 24 && (state.factions?.aiOwners?.length ?? 0) === 6) {
+          return { ok: true, mapWidth: 24, mapHeight: 24, aiFactionCount: 6 };
+        }
+      }
+      return { ok: false, reason: "stress-setup-timeout" };
+    });
+
+    const stressPanKeys = ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp", "KeyD", "KeyS", "KeyA", "KeyW"];
+    for (const key of stressPanKeys) {
+      await page.keyboard.down(key);
+      await page.waitForTimeout(180);
+      await page.keyboard.up(key);
+      await page.waitForTimeout(30);
+    }
+
+    const stressBounds = await canvas.boundingBox();
+    assert.ok(stressBounds, "canvas bounds should be available for perf drag probe");
+    const stressStartX = stressBounds.x + Math.floor(stressBounds.width * 0.52);
+    const stressStartY = stressBounds.y + Math.floor(stressBounds.height * 0.48);
+    for (let i = 0; i < 6; i += 1) {
+      const deltaX = i % 2 === 0 ? 180 : -180;
+      const deltaY = i % 2 === 0 ? 84 : -84;
+      await page.mouse.move(stressStartX, stressStartY);
+      await page.mouse.down({ button: "right" });
+      await page.mouse.move(stressStartX + deltaX, stressStartY + deltaY, { steps: 10 });
+      await page.mouse.up({ button: "right" });
+      await page.waitForTimeout(55);
+    }
+
+    const stressTurnResult = await page.evaluate(async () => {
+      const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const getState = () => window.__hexfallTest.getState();
+      const startTurn = getState()?.turn ?? 0;
+      if (!window.__hexfallTest.requestEndTurn()) {
+        return { ok: false, reason: "stress-turn-request-failed", startTurn };
+      }
+      for (let i = 0; i < 160; i += 1) {
+        await pause(70);
+        const state = getState();
+        if (state?.phase === "player" && !state?.turnPlayback?.active && (state?.turn ?? 0) > startTurn) {
+          return { ok: true, startTurn, endTurn: state.turn };
+        }
+      }
+      return { ok: false, reason: "stress-turn-timeout", startTurn, endTurn: getState()?.turn ?? startTurn };
+    });
+
+    const perfAfterStress = normalizePerfStats(await page.evaluate(() => window.__hexfallTest.getPerfStats()));
+    assert.ok(perfAfterStress, "perf probe failed: final perf telemetry unavailable");
+
+    const perfArtifact = {
+      generatedAt: new Date().toISOString(),
+      targetBudgetMs: PERF_TARGET_BUDGET,
+      setup: {
+        stressSetup,
+        stressTurnResult,
+      },
+      perf: {
+        beforeStress: perfBeforeStress,
+        afterStress: perfAfterStress,
+        publishDelta: {
+          state: perfAfterStress.publishCounters.state - perfBeforeStress.publishCounters.state,
+          camera: perfAfterStress.publishCounters.camera - perfBeforeStress.publishCounters.camera,
+          preview: perfAfterStress.publishCounters.preview - perfBeforeStress.publishCounters.preview,
+        },
+        budgetCheck: {
+          p95WithinTarget: perfAfterStress.frameMs.p95 <= PERF_TARGET_BUDGET.p95Ms,
+          maxWithinTarget: perfAfterStress.frameMs.max <= PERF_TARGET_BUDGET.maxMs,
+        },
+      },
+      summary: {
+        fps: perfAfterStress.estimatedFps,
+        frameAvgMs: perfAfterStress.frameMs.avg,
+        frameP95Ms: perfAfterStress.frameMs.p95,
+        frameMaxMs: perfAfterStress.frameMs.max,
+        longFramesOver18ms: perfAfterStress.longFrames.over18ms,
+        longFramesOver40ms: perfAfterStress.longFrames.over40ms,
+      },
+    };
+    writeFileSync(PERF_ARTIFACT_PATH, `${JSON.stringify(perfArtifact, null, 2)}\n`, "utf8");
+    console.log(
+      `Perf probe summary: FPS ${perfAfterStress.estimatedFps}, p95 ${perfAfterStress.frameMs.p95}ms (target <= ${PERF_TARGET_BUDGET.p95Ms}ms), max ${perfAfterStress.frameMs.max}ms (target <= ${PERF_TARGET_BUDGET.maxMs}ms)`
     );
 
     await canvas.screenshot({ path: `${ARTIFACT_DIR}/smoke.png` });
