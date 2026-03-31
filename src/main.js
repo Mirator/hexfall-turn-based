@@ -152,6 +152,14 @@ window.__hexfallTest = {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testClosePauseMenu() : false;
   },
+  openHudMenu() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testOpenHudMenu() : false;
+  },
+  getTopHudControlsState() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testGetTopHudControlsState() : null;
+  },
   getNotificationCenterState() {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testGetNotificationCenterState() : null;

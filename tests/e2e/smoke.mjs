@@ -527,10 +527,28 @@ async function run() {
         return { ok: false, reason: "minimap-viewport-coverage-variance-too-high" };
       }
 
-      // Pause + New Game modal sanity check.
-      const pauseOpened = window.__hexfallTest.openPauseMenu();
+      // Top HUD controls + Pause + New Game modal sanity check.
+      const topHudControls = window.__hexfallTest.getTopHudControlsState();
+      if (
+        !topHudControls?.statsVisible ||
+        !topHudControls?.menuVisible ||
+        String(topHudControls?.statsLabel ?? "") !== "Stats" ||
+        String(topHudControls?.menuLabel ?? "") !== "Menu" ||
+        topHudControls?.hasHudSfxButton !== false
+      ) {
+        return { ok: false, reason: "top-hud-controls-invalid-for-menu-sfx-rework" };
+      }
+
+      const pauseOpened = window.__hexfallTest.openHudMenu();
       const pauseMenu = window.__hexfallTest.getPauseMenuState();
-      if (!pauseOpened || !pauseMenu?.open) {
+      if (
+        !pauseOpened ||
+        !pauseMenu?.open ||
+        !pauseMenu?.settingsVisible ||
+        !pauseMenu?.sfxVisible ||
+        !pauseMenu?.sfxEnabled ||
+        !String(pauseMenu?.sfxLabel ?? "").includes("SFX")
+      ) {
         return { ok: false, reason: "pause-menu-broken" };
       }
 

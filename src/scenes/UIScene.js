@@ -65,7 +65,15 @@ const PRODUCTION_TABS = ["units", "buildings"];
 const UNIT_PRODUCTION_TYPES = ["warrior", "settler", "spearman", "archer"];
 const BUILDING_PRODUCTION_TYPES = ["granary", "workshop", "monument"];
 const NOTIFICATION_FILTERS = ["All", "Combat", "City", "Research", "System"];
-const UI_SFX_ACTIONS = new Set(["endTurn", "pause-resume", "pause-restart", "restart-confirm", "restart-cancel", "resultRestart"]);
+const UI_SFX_ACTIONS = new Set([
+  "endTurn",
+  "pause-resume",
+  "pause-restart",
+  "pause-sfx",
+  "restart-confirm",
+  "restart-cancel",
+  "resultRestart",
+]);
 
 const SEMANTIC_COLORS = HUD_THEME.semanticColors;
 const PANEL_STROKE_WIDTH = HUD_THEME.panelStrokeWidth;
@@ -154,7 +162,7 @@ export class UIScene extends Phaser.Scene {
     this.scienceLabel = this.createLabel("", 24, 104, "19px", "#22170d", 10);
     this.scienceDeltaLabel = this.createLabel("", 24, 106, "16px", SEMANTIC_COLORS.textPositive, 10);
     this.devVisionLabel = this.createLabel("", 24, 132, "16px", "#46331e", 10);
-    this.sfxToggleButton = this.createButton("SFX ON", "toggle-sfx", () => this.toggleSfxMuted(), {
+    this.menuButton = this.createButton("Menu", "open-menu", () => this.openPauseMenu(), {
       variant: "chip",
       width: 96,
       height: 24,
@@ -166,8 +174,8 @@ export class UIScene extends Phaser.Scene {
       height: 24,
       fontSize: "11px",
     });
-    this.sfxToggleButton.rectangle.setDepth(10);
-    this.sfxToggleButton.label.setDepth(11);
+    this.menuButton.rectangle.setDepth(10);
+    this.menuButton.label.setDepth(11);
     this.statsToggleButton.rectangle.setDepth(10);
     this.statsToggleButton.label.setDepth(11);
     this.playbackPanel = this.add.rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelElevatedBg, 0.96).setDepth(11).setVisible(false);
@@ -478,7 +486,7 @@ export class UIScene extends Phaser.Scene {
       }
     });
 
-    this.pausePanel = this.add.rectangle(0, 0, 420, 178, SEMANTIC_COLORS.panelElevatedBg, 0.98).setDepth(40).setVisible(false);
+    this.pausePanel = this.add.rectangle(0, 0, 420, 216, SEMANTIC_COLORS.panelElevatedBg, 0.98).setDepth(40).setVisible(false);
     this.pausePanel.setStrokeStyle(3, SEMANTIC_COLORS.panelBorder, 1);
     this.pausePanel.setInteractive();
     this.pausePanel.on("pointerdown", (_pointer, _x, _y, event) => event.stopPropagation());
@@ -487,12 +495,23 @@ export class UIScene extends Phaser.Scene {
     this.pauseTitle.setOrigin(0.5).setVisible(false);
     this.pauseResumeButton = this.createButton("Resume", "pause-resume", () => this.closePauseMenu(), { variant: "primary" });
     this.pauseRestartButton = this.createButton("New Game", "pause-restart", () => this.openRestartConfirm(), { variant: "warning" });
+    this.pauseSettingsLabel = this.createLabel("Settings", 0, 0, "14px", "#5d4b34", 42).setOrigin(0.5).setVisible(false);
+    this.pauseSettingsLabel.setFontFamily(UI_FONTS.heading);
+    this.pauseSfxButton = this.createButton("SFX ON", "pause-sfx", () => this.toggleSfxMuted(), {
+      variant: "chip",
+      width: 132,
+      height: 28,
+      fontSize: "12px",
+    });
     this.pauseResumeButton.rectangle.setDepth(42);
     this.pauseResumeButton.label.setDepth(43);
     this.pauseRestartButton.rectangle.setDepth(42);
     this.pauseRestartButton.label.setDepth(43);
+    this.pauseSfxButton.rectangle.setDepth(42);
+    this.pauseSfxButton.label.setDepth(43);
     this.setCompositeVisible(this.pauseResumeButton, false);
     this.setCompositeVisible(this.pauseRestartButton, false);
+    this.setCompositeVisible(this.pauseSfxButton, false);
 
     this.restartConfirmPanel = this.add
       .rectangle(0, 0, NEW_GAME_MODAL_WIDTH, NEW_GAME_MODAL_HEIGHT, SEMANTIC_COLORS.panelElevatedBg, 0.98)
@@ -933,8 +952,10 @@ export class UIScene extends Phaser.Scene {
 
   setSfxMuted(muted) {
     this.uiSfxMuted = !!muted;
-    this.setButtonActive(this.sfxToggleButton, !this.uiSfxMuted);
-    this.setButtonLabel(this.sfxToggleButton, this.uiSfxMuted ? "SFX OFF" : "SFX ON");
+    if (this.pauseSfxButton) {
+      this.setButtonActive(this.pauseSfxButton, !this.uiSfxMuted);
+      this.setButtonLabel(this.pauseSfxButton, this.uiSfxMuted ? "SFX OFF" : "SFX ON");
+    }
     return this.uiSfxMuted;
   }
 
@@ -1086,13 +1107,13 @@ export class UIScene extends Phaser.Scene {
     this.topHudPanel.setSize(hudPanelWidth, hudPanelHeight);
     this.fitTextSizeToWidth(this.turnLabel, turnPreferredFontSize, isTabletLayout ? 17 : 19, hudPanelWidth - 24);
     this.turnLabel.setPosition(hudLeft, hudTop + 6);
-    const sfxX = edgePadding + hudPanelWidth - this.sfxToggleButton.width / 2 - 8;
-    const sfxY = hudTop + hudPanelHeight - this.sfxToggleButton.height / 2 - 8;
-    this.sfxToggleButton.rectangle.setPosition(sfxX, sfxY);
-    this.sfxToggleButton.label.setPosition(this.sfxToggleButton.rectangle.x, this.sfxToggleButton.rectangle.y);
-    const statsX = sfxX - this.sfxToggleButton.width / 2 - this.statsToggleButton.width / 2 - 6;
-    this.statsToggleButton.rectangle.setPosition(statsX, sfxY);
-    this.statsToggleButton.label.setPosition(statsX, sfxY);
+    const menuX = edgePadding + hudPanelWidth - this.menuButton.width / 2 - 8;
+    const menuY = hudTop + hudPanelHeight - this.menuButton.height / 2 - 8;
+    this.menuButton.rectangle.setPosition(menuX, menuY);
+    this.menuButton.label.setPosition(this.menuButton.rectangle.x, this.menuButton.rectangle.y);
+    const statsX = menuX - this.menuButton.width / 2 - this.statsToggleButton.width / 2 - 6;
+    this.statsToggleButton.rectangle.setPosition(statsX, menuY);
+    this.statsToggleButton.label.setPosition(statsX, menuY);
     const forecastWidth = isTabletLayout ? 248 : 300;
     const forecastHeight = isTabletLayout ? FORECAST_PANEL_HEIGHT_TABLET : FORECAST_PANEL_HEIGHT;
     const forecastLeft = edgePadding;
@@ -1361,12 +1382,17 @@ export class UIScene extends Phaser.Scene {
     this.modalBackdrop.setPosition(gameSize.width / 2, gameSize.height / 2);
     this.modalBackdrop.setSize(gameSize.width + 4, gameSize.height + 4);
 
-    this.pausePanel.setPosition(gameSize.width / 2, gameSize.height / 2 - 26);
-    this.pauseTitle.setPosition(gameSize.width / 2, gameSize.height / 2 - 66);
-    this.pauseResumeButton.rectangle.setPosition(gameSize.width / 2 - 90, gameSize.height / 2 + 10);
-    this.pauseResumeButton.label.setPosition(gameSize.width / 2 - 90, gameSize.height / 2 + 10);
-    this.pauseRestartButton.rectangle.setPosition(gameSize.width / 2 + 90, gameSize.height / 2 + 10);
-    this.pauseRestartButton.label.setPosition(gameSize.width / 2 + 90, gameSize.height / 2 + 10);
+    const pauseCenterX = gameSize.width / 2;
+    const pauseCenterY = gameSize.height / 2 - 20;
+    this.pausePanel.setPosition(pauseCenterX, pauseCenterY);
+    this.pauseTitle.setPosition(pauseCenterX, pauseCenterY - 78);
+    this.pauseResumeButton.rectangle.setPosition(pauseCenterX - 90, pauseCenterY - 4);
+    this.pauseResumeButton.label.setPosition(pauseCenterX - 90, pauseCenterY - 4);
+    this.pauseRestartButton.rectangle.setPosition(pauseCenterX + 90, pauseCenterY - 4);
+    this.pauseRestartButton.label.setPosition(pauseCenterX + 90, pauseCenterY - 4);
+    this.pauseSettingsLabel.setPosition(pauseCenterX, pauseCenterY + 36);
+    this.pauseSfxButton.rectangle.setPosition(pauseCenterX, pauseCenterY + 64);
+    this.pauseSfxButton.label.setPosition(pauseCenterX, pauseCenterY + 64);
 
     const newGameCenterX = gameSize.width / 2;
     const newGameCenterY = gameSize.height / 2 - 24;
@@ -2988,10 +3014,14 @@ export class UIScene extends Phaser.Scene {
     this.pauseMenuOpen = true;
     this.pausePanel.setVisible(true);
     this.pauseTitle.setVisible(true);
+    this.pauseSettingsLabel.setVisible(true);
     this.setCompositeVisible(this.pauseResumeButton, true);
     this.setCompositeVisible(this.pauseRestartButton, true);
+    this.setCompositeVisible(this.pauseSfxButton, true);
     this.setButtonEnabled(this.pauseResumeButton, true);
     this.setButtonEnabled(this.pauseRestartButton, true);
+    this.setButtonEnabled(this.pauseSfxButton, true);
+    this.setSfxMuted(this.uiSfxMuted);
     this.hoverHint = null;
     this.hideDisabledTooltip();
     this.updateContextualHint();
@@ -3006,8 +3036,10 @@ export class UIScene extends Phaser.Scene {
     this.pauseMenuOpen = false;
     this.pausePanel.setVisible(false);
     this.pauseTitle.setVisible(false);
+    this.pauseSettingsLabel.setVisible(false);
     this.setCompositeVisible(this.pauseResumeButton, false);
     this.setCompositeVisible(this.pauseRestartButton, false);
+    this.setCompositeVisible(this.pauseSfxButton, false);
     this.closeRestartConfirm();
     this.syncModalState();
     return true;
@@ -3239,6 +3271,7 @@ export class UIScene extends Phaser.Scene {
     return (
       actionId === "pause-resume" ||
       actionId === "pause-restart" ||
+      actionId === "pause-sfx" ||
       actionId === "restart-confirm" ||
       actionId === "restart-cancel" ||
       actionId.startsWith("new-game-map-") ||
@@ -3293,6 +3326,25 @@ export class UIScene extends Phaser.Scene {
       open: this.pauseMenuOpen,
       restartConfirmOpen: this.restartConfirmOpen,
       backdropVisible: this.modalBackdrop.visible,
+      settingsVisible: this.pauseSettingsLabel.visible,
+      sfxVisible: this.pauseSfxButton.rectangle.visible && this.pauseSfxButton.label.visible,
+      sfxEnabled: this.pauseSfxButton.enabled,
+      sfxLabel: this.pauseSfxButton.label.text,
+    };
+  }
+
+  testOpenHudMenu() {
+    this.handleButtonClick(this.menuButton);
+    return this.pauseMenuOpen;
+  }
+
+  testGetTopHudControlsState() {
+    return {
+      statsVisible: this.statsToggleButton.rectangle.visible && this.statsToggleButton.label.visible,
+      statsLabel: this.statsToggleButton.label.text,
+      menuVisible: this.menuButton.rectangle.visible && this.menuButton.label.visible,
+      menuLabel: this.menuButton.label.text,
+      hasHudSfxButton: false,
     };
   }
 
@@ -3593,7 +3645,7 @@ export class UIScene extends Phaser.Scene {
   testGetSfxState() {
     return {
       muted: this.uiSfxMuted,
-      label: this.sfxToggleButton.label.text,
+      label: this.pauseSfxButton.label.text,
     };
   }
 
