@@ -48,7 +48,7 @@ const RIGHT_RAIL_QUEUE_SLOT_OUTER_PADDING = 14;
 const RIGHT_RAIL_QUEUE_SLOT_ROW_GAP = 6;
 const RIGHT_RAIL_QUEUE_SLOT_INNER_GAP = 6;
 const NOTIFICATION_ROW_HEIGHT = 46;
-const NOTIFICATION_HEADER_HEIGHT = 34;
+const NOTIFICATION_HEADER_HEIGHT = 40;
 const NOTIFICATION_ROW_INSET = 8;
 const FORECAST_PANEL_HEIGHT = 74;
 const FORECAST_PANEL_HEIGHT_TABLET = 66;
@@ -164,13 +164,13 @@ export class UIScene extends Phaser.Scene {
     this.devVisionLabel = this.createLabel("", 24, 132, "16px", "#46331e", 10);
     this.menuButton = this.createButton("Menu", "open-menu", () => this.openPauseMenu(), {
       variant: "chip",
-      width: 96,
+      width: 88,
       height: 24,
       fontSize: "11px",
     });
     this.statsToggleButton = this.createButton("Stats", "toggle-stats", () => this.toggleStatsPanel(), {
       variant: "chip",
-      width: 74,
+      width: 88,
       height: 24,
       fontSize: "11px",
     });
@@ -449,8 +449,11 @@ export class UIScene extends Phaser.Scene {
     this.notificationAccent = this.add.rectangle(0, 0, 10, 4, SEMANTIC_COLORS.accentBlue, 0.88).setOrigin(0, 0).setDepth(17);
     this.notificationTitle = this.createLabel("Notifications", 0, 0, "18px", "#2a1d11", 17);
     this.notificationTitle.setFontFamily(UI_FONTS.heading);
-    this.notificationSubtitle = this.createLabel("", 0, 0, "11px", SEMANTIC_COLORS.textMuted, 17);
+    this.notificationSubtitle = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textStrong, 17);
     this.notificationSubtitle.setFontFamily(UI_FONTS.compact);
+    this.notificationEmptyLabel = this.createLabel("No notifications yet.", 0, 0, "13px", SEMANTIC_COLORS.textStrong, 18).setVisible(false);
+    this.notificationEmptyLabel.setOrigin(0.5);
+    this.notificationEmptyLabel.setFontFamily(UI_FONTS.compact);
     this.notificationFilterButtons = NOTIFICATION_FILTERS.map((filterName) =>
       this.createButton(filterName, `notif-filter-${filterName}`, () => this.setNotificationFilter(filterName), {
         variant: "chip",
@@ -1102,7 +1105,7 @@ export class UIScene extends Phaser.Scene {
     this.scienceLabel.setPosition(hudLeft, hudTop + 8 + hudLineGap * 3);
     this.devVisionLabel.setPosition(hudLeft, hudTop + 8 + hudLineGap * 4);
     const hudPanelWidth = isTabletLayout ? 244 : 286;
-    const hudPanelHeight = isTabletLayout ? 142 : 160;
+    const hudPanelHeight = isTabletLayout ? 156 : 180;
     this.topHudPanel.setPosition(edgePadding, hudTop);
     this.topHudPanel.setSize(hudPanelWidth, hudPanelHeight);
     this.fitTextSizeToWidth(this.turnLabel, turnPreferredFontSize, isTabletLayout ? 17 : 19, hudPanelWidth - 24);
@@ -1153,7 +1156,8 @@ export class UIScene extends Phaser.Scene {
 
     this.notificationVisibleRows = isTabletLayout ? 4 : 5;
     const notificationWidth = isTabletLayout ? Math.max(268, Math.floor(gameSize.width * 0.6)) : 356;
-    const visibleNotificationCount = Math.min(this.notificationVisibleRows, this.getDisplayNotifications().length);
+    const displayNotificationRows = this.getDisplayNotifications();
+    const visibleNotificationCount = Math.max(1, Math.min(this.notificationVisibleRows, displayNotificationRows.length || 1));
     const notificationFilterHeight = isTabletLayout ? 60 : 34;
     const notificationContentHeight = visibleNotificationCount > 0 ? visibleNotificationCount * NOTIFICATION_ROW_HEIGHT + 14 : 0;
     const notificationHeight = NOTIFICATION_HEADER_HEIGHT + notificationFilterHeight + notificationContentHeight;
@@ -1163,8 +1167,9 @@ export class UIScene extends Phaser.Scene {
     this.notificationPanel.setDisplaySize(notificationWidth, notificationHeight);
     this.notificationAccent.setPosition(notificationLeft + 6, edgePadding + 6);
     this.notificationAccent.setSize(notificationWidth - 12, 4);
-    this.notificationTitle.setPosition(notificationLeft + 12, edgePadding + 10);
-    this.notificationSubtitle.setPosition(notificationLeft + 12, edgePadding + 25);
+    this.notificationTitle.setPosition(notificationLeft + 12, edgePadding + 9);
+    this.notificationSubtitle.setPosition(notificationLeft + 12, edgePadding + 26);
+    const filterTop = edgePadding + NOTIFICATION_HEADER_HEIGHT;
     const filterGap = isTabletLayout ? 6 : 4;
 
     if (isTabletLayout) {
@@ -1172,11 +1177,11 @@ export class UIScene extends Phaser.Scene {
       const secondRow = this.notificationFilterButtons.slice(3);
       this.fitButtonRowWidths(firstRow, notificationWidth - 24, 58, 86, filterGap);
       this.fitButtonRowWidths(secondRow, notificationWidth - 24, 58, 86, filterGap);
-      this.layoutButtonRow(firstRow, notificationLeft + notificationWidth / 2, edgePadding + 44, filterGap);
-      this.layoutButtonRow(secondRow, notificationLeft + notificationWidth / 2, edgePadding + 70, filterGap);
+      this.layoutButtonRow(firstRow, notificationLeft + notificationWidth / 2, filterTop + 16, filterGap);
+      this.layoutButtonRow(secondRow, notificationLeft + notificationWidth / 2, filterTop + 42, filterGap);
     } else {
       this.fitButtonRowWidths(this.notificationFilterButtons, notificationWidth - 18, 50, 80, filterGap);
-      this.layoutButtonRow(this.notificationFilterButtons, notificationLeft + notificationWidth / 2, edgePadding + 47, filterGap);
+      this.layoutButtonRow(this.notificationFilterButtons, notificationLeft + notificationWidth / 2, filterTop + 13, filterGap);
     }
 
     const rowStartY = edgePadding + NOTIFICATION_HEADER_HEIGHT + notificationFilterHeight + 2;
@@ -2816,14 +2821,15 @@ export class UIScene extends Phaser.Scene {
     this.notificationVisibleDisplaySlice = slice;
     this.notificationVisibleSlice = slice.filter((row) => row.kind === "entry").map((row) => row.entry);
     const shownRows = slice.length;
+    const hasEmptyState = shownRows === 0;
     const filterHeight = this.scale.width < TABLET_LAYOUT_BREAKPOINT ? 60 : 34;
-    const contentHeight = shownRows > 0 ? shownRows * NOTIFICATION_ROW_HEIGHT + 14 : 0;
+    const contentHeight = (hasEmptyState ? 1 : shownRows) * NOTIFICATION_ROW_HEIGHT + 14;
     const panelHeight = NOTIFICATION_HEADER_HEIGHT + filterHeight + contentHeight;
     const bounds = this.notificationPanel.getBounds();
     this.notificationPanel.setSize(this.notificationPanel.displayWidth, panelHeight);
     this.notificationPanel.setDisplaySize(this.notificationPanel.displayWidth, panelHeight);
     this.notificationPanel.setPosition(bounds.centerX, bounds.top + panelHeight / 2);
-    this.notificationTitle.setPosition(bounds.left + 12, bounds.top + 10);
+    this.notificationTitle.setPosition(bounds.left + 12, bounds.top + 9);
     this.notificationAccent.setPosition(bounds.left + 6, bounds.top + 6);
     this.notificationAccent.setSize(this.notificationPanel.displayWidth - 12, 4);
     const totalRows = displayRows.length;
@@ -2834,7 +2840,18 @@ export class UIScene extends Phaser.Scene {
         ? `${this.notificationFilter} feed  ${startRow}-${endRow} / ${totalRows}`
         : `${this.notificationFilter} feed  no entries`;
     this.setTextWithinWidth(this.notificationSubtitle, subtitleText, Math.max(120, this.notificationPanel.displayWidth - 24));
-    this.notificationSubtitle.setPosition(bounds.left + 12, bounds.top + 25);
+    this.notificationSubtitle.setPosition(bounds.left + 12, bounds.top + 26);
+    const emptyLabelText =
+      this.notificationFilter === "All"
+        ? "No notifications yet."
+        : `No ${this.notificationFilter.toLowerCase()} notifications.`;
+    this.notificationEmptyLabel.setText(emptyLabelText);
+    this.notificationEmptyLabel.setPosition(
+      bounds.centerX,
+      bounds.top + NOTIFICATION_HEADER_HEIGHT + filterHeight + NOTIFICATION_ROW_HEIGHT / 2
+    );
+    this.notificationEmptyLabel.setWordWrapWidth(Math.max(120, this.notificationPanel.displayWidth - 18), true);
+    this.notificationEmptyLabel.setVisible(hasEmptyState);
 
     for (const filterButton of this.notificationFilterButtons) {
       const filterName = filterButton.actionId.replace("notif-filter-", "");
@@ -3339,11 +3356,19 @@ export class UIScene extends Phaser.Scene {
   }
 
   testGetTopHudControlsState() {
+    const statsBounds = this.statsToggleButton.rectangle.getBounds();
+    const menuBounds = this.menuButton.rectangle.getBounds();
+    const devVisionBounds = this.devVisionLabel.getBounds();
     return {
       statsVisible: this.statsToggleButton.rectangle.visible && this.statsToggleButton.label.visible,
       statsLabel: this.statsToggleButton.label.text,
+      statsWidth: this.statsToggleButton.width,
+      statsBounds,
       menuVisible: this.menuButton.rectangle.visible && this.menuButton.label.visible,
       menuLabel: this.menuButton.label.text,
+      menuWidth: this.menuButton.width,
+      menuBounds,
+      devVisionBounds,
       hasHudSfxButton: false,
     };
   }
@@ -3584,6 +3609,9 @@ export class UIScene extends Phaser.Scene {
       filteredCount: this.getFilteredNotifications().length,
       displayRowCount: this.getDisplayNotifications().length,
       unreadCount: this.notificationUnreadCount,
+      panelHeight: this.notificationPanel.displayHeight,
+      emptyStateVisible: this.notificationEmptyLabel.visible,
+      emptyStateText: this.notificationEmptyLabel.text,
       entries: this.notifications.slice(0, 20).map((entry) => ({ ...entry })),
       visibleRows: this.notificationVisibleDisplaySlice.map((row) =>
         row.kind === "entry"

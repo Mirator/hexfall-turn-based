@@ -538,6 +538,35 @@ async function run() {
       ) {
         return { ok: false, reason: "top-hud-controls-invalid-for-menu-sfx-rework" };
       }
+      if (Math.abs(Number(topHudControls?.statsWidth ?? 0) - Number(topHudControls?.menuWidth ?? 0)) > 0.1) {
+        return { ok: false, reason: "top-hud-controls-width-mismatch" };
+      }
+      const statsTop = Number(topHudControls?.statsBounds?.y);
+      const menuTop = Number(topHudControls?.menuBounds?.y);
+      const devVisionTop = Number(topHudControls?.devVisionBounds?.y);
+      const devVisionHeight = Number(topHudControls?.devVisionBounds?.height);
+      const devVisionBottom = devVisionTop + devVisionHeight;
+      if (
+        !Number.isFinite(statsTop) ||
+        !Number.isFinite(menuTop) ||
+        !Number.isFinite(devVisionBottom) ||
+        devVisionBottom > Math.min(statsTop, menuTop) - 1
+      ) {
+        return { ok: false, reason: "dev-vision-overlaps-top-hud-buttons" };
+      }
+      if (!window.__hexfallTest.setNotificationFilter("Combat")) {
+        return { ok: false, reason: "notification-filter-combat-empty-state-failed" };
+      }
+      const combatFeed = window.__hexfallTest.getNotificationCenterState();
+      if (
+        (combatFeed?.filteredCount ?? -1) !== 0 ||
+        !combatFeed?.emptyStateVisible ||
+        !String(combatFeed?.emptyStateText ?? "").toLowerCase().includes("no combat") ||
+        Number(combatFeed?.panelHeight ?? 0) < 120
+      ) {
+        return { ok: false, reason: "notification-empty-state-not-visible" };
+      }
+      window.__hexfallTest.setNotificationFilter("All");
 
       const pauseOpened = window.__hexfallTest.openHudMenu();
       const pauseMenu = window.__hexfallTest.getPauseMenuState();
