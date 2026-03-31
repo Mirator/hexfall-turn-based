@@ -247,18 +247,31 @@ function generateMatchLayout(width, height, seed, minFactionDistance, owners) {
 }
 
 function buildAttemptedLayout(tiles, width, height, attemptSeed, minFactionDistance, owners) {
-  const tileByKey = new Map(tiles.map((tile) => [axialKey(tile), tile]));
   const passableTiles = tiles.filter((tile) => !tile.blocksMovement);
   if (passableTiles.length < Math.floor(width * height * 0.52)) {
     return null;
   }
 
-  const anchorCandidates = passableTiles.filter((tile) => countPassableNeighbors(tile, tileByKey, width, height) >= 3);
+  const passableKeys = new Set(passableTiles.map((tile) => axialKey(tile)));
+  const passableNeighborCounts = new Map();
+  for (const tile of passableTiles) {
+    passableNeighborCounts.set(axialKey(tile), countPassableNeighbors(tile, passableKeys, width, height));
+  }
+
+  const anchorCandidates = passableTiles.filter((tile) => (passableNeighborCounts.get(axialKey(tile)) ?? 0) >= 3);
   if (anchorCandidates.length < owners.length) {
     return null;
   }
 
-  const anchorsByOwner = selectAnchorSet(anchorCandidates, tileByKey, width, height, attemptSeed, minFactionDistance, owners);
+  const anchorsByOwner = selectAnchorSet(
+    anchorCandidates,
+    width,
+    height,
+    attemptSeed,
+    minFactionDistance,
+    owners,
+    passableNeighborCounts
+  );
   if (!anchorsByOwner) {
     return null;
   }
@@ -275,7 +288,7 @@ function buildAttemptedLayout(tiles, width, height, attemptSeed, minFactionDista
     if (!spawn) {
       return null;
     }
-    if (countFreePassableNeighbors(spawn, tileByKey, width, height, occupiedKeys) < 1) {
+    if (countFreePassableNeighbors(spawn, passableKeys, width, height, occupiedKeys) < 1) {
       return null;
     }
   }
@@ -329,31 +342,40 @@ function buildFallbackSpawns(width, height, count) {
   return points.slice(0, Math.max(1, count));
 }
 
-function selectAnchorSet(candidates, tileByKey, width, height, seed, minFactionDistance, owners) {
+function selectAnchorSet(candidates, width, height, seed, minFactionDistance, owners, passableNeighborCounts) {
   const rng = createSeededRng(mixSeed(seed, "anchor-set"));
   const shuffled = shuffleInPlace([...candidates], rng);
   let bestSelection = null;
   let bestScore = -Infinity;
 
-  const sampleCount = Math.max(240, Math.min(1400, shuffled.length * 14));
+  const sampleCount = Math.max(80, Math.min(320, shuffled.length * 4));
   for (let sample = 0; sample < sampleCount; sample += 1) {
     const start = shuffled[Math.floor(rng() * shuffled.length)];
     if (!start) {
       continue;
     }
     const selected = [start];
+    const selectedKeys = new Set([axialKey(start)]);
     while (selected.length < owners.length) {
-      const next = chooseBestSeparatedAnchor(shuffled, selected, minFactionDistance, tileByKey, width, height, rng);
+      const next = chooseBestSeparatedAnchor(
+        shuffled,
+        selected,
+        selectedKeys,
+        minFactionDistance,
+        passableNeighborCounts,
+        rng
+      );
       if (!next) {
         break;
       }
       selected.push(next);
+      selectedKeys.add(axialKey(next));
     }
     if (selected.length !== owners.length) {
       continue;
     }
 
-    const score = scoreAnchorSelection(selected, tileByKey, width, height, rng);
+    const score = scoreAnchorSelection(selected, passableNeighborCounts, width, height, rng);
     if (score > bestScore) {
       bestScore = score;
       /** @type {Record<string, import("./types.js").Hex>} */
@@ -373,11 +395,19 @@ function selectAnchorSet(candidates, tileByKey, width, height, seed, minFactionD
   return buildDeterministicFallbackSelection(fallbackSlice, owners, minFactionDistance);
 }
 
-function chooseBestSeparatedAnchor(candidates, selected, minFactionDistance, tileByKey, width, height, rng) {
+function chooseBestSeparatedAnchor(
+  candidates,
+  selected,
+  selectedKeys,
+  minFactionDistance,
+  passableNeighborCounts,
+  rng
+) {
   let bestCandidate = null;
   let bestScore = -Infinity;
   for (const candidate of candidates) {
-    if (selected.some((existing) => existing.q === candidate.q && existing.r === candidate.r)) {
+    const candidateKey = axialKey(candidate);
+    if (selectedKeys.has(candidateKey)) {
       continue;
     }
     const minDistanceToSelection = selected.reduce(
@@ -387,8 +417,7 @@ function chooseBestSeparatedAnchor(candidates, selected, minFactionDistance, til
     if (minDistanceToSelection < minFactionDistance) {
       continue;
     }
-    const localScore =
-      minDistanceToSelection * 10 + countPassableNeighbors(candidate, tileByKey, width, height) + rng() * 0.001;
+    const localScore = minDistanceToSelection * 10 + (passableNeighborCounts.get(candidateKey) ?? 0) + rng() * 0.001;
     if (localScore > bestScore) {
       bestScore = localScore;
       bestCandidate = candidate;
@@ -445,7 +474,7 @@ function buildDeterministicFallbackSelection(candidates, owners, minFactionDista
   return mapped;
 }
 
-function scoreAnchorSelection(selected, tileByKey, width, height, rng) {
+function scoreAnchorSelection(selected, passableNeighborCounts, width, height, rng) {
   let separationScore = 0;
   for (let i = 0; i < selected.length; i += 1) {
     for (let j = i + 1; j < selected.length; j += 1) {
@@ -453,8 +482,8 @@ function scoreAnchorSelection(selected, tileByKey, width, height, rng) {
     }
   }
   const neighborScore =
-    tileByKey && width > 0 && height > 0
-      ? selected.reduce((sum, hex) => sum + countPassableNeighbors(hex, tileByKey, width, height), 0)
+    passableNeighborCounts && width > 0 && height > 0
+      ? selected.reduce((sum, hex) => sum + (passableNeighborCounts.get(axialKey(hex)) ?? 0), 0)
       : 0;
   return separationScore * 9 + neighborScore + rng();
 }
@@ -479,25 +508,24 @@ function applySafeSpawnTerrain(tiles, width, height, spawnsByOwner) {
   }
 }
 
-function countPassableNeighbors(hex, tileByKey, width, height) {
-  return neighbors(hex).filter((neighbor) => isHexPassable(neighbor, tileByKey, width, height)).length;
+function countPassableNeighbors(hex, passableKeys, width, height) {
+  return neighbors(hex).filter((neighbor) => isHexPassable(neighbor, passableKeys, width, height)).length;
 }
 
-function countFreePassableNeighbors(hex, tileByKey, width, height, occupiedKeys) {
+function countFreePassableNeighbors(hex, passableKeys, width, height, occupiedKeys) {
   return neighbors(hex).filter((neighbor) => {
-    if (!isHexPassable(neighbor, tileByKey, width, height)) {
+    if (!isHexPassable(neighbor, passableKeys, width, height)) {
       return false;
     }
     return !occupiedKeys.has(axialKey(neighbor));
   }).length;
 }
 
-function isHexPassable(hex, tileByKey, width, height) {
+function isHexPassable(hex, passableKeys, width, height) {
   if (!isHexInsideBounds(hex, width, height)) {
     return false;
   }
-  const tile = tileByKey.get(axialKey(hex));
-  return !!tile && !tile.blocksMovement;
+  return passableKeys.has(axialKey(hex));
 }
 
 function isHexInsideBounds(hex, width, height) {
