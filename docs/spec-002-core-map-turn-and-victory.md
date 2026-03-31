@@ -3,23 +3,31 @@
 ## Goal and scope
 
 - Define the core map, movement, turn flow, and win/loss session loop.
-- Keep map generation seeded and restart-safe.
+- Keep map generation seeded, restart-safe, and configurable by startup/new-game settings.
 - Keep victory rules explicit and domination-only.
 
 ## Decisions made (and alternatives rejected)
 
 - Chosen: axial hex coordinates (`q`,`r`) with six-direction movement.
-- Chosen: seeded `16x16` map generation with three-faction spawn metadata, pairwise distance constraints, and safe-terrain spawn normalization.
+- Chosen: seeded square map presets (`16`, `20`, `24`) with configurable AI faction count (`1..6`).
+- Chosen: dynamic faction roster from owner pool (`enemy`, `purple`, `amber`, `teal`, `crimson`, `onyx`) plus `player`.
+- Chosen: seeded spawn metadata stores per-owner anchors/spawns (`anchorsByOwner`, `spawnByOwner`), distance constraints, and safe-terrain spawn normalization.
 - Chosen: movement reachability uses path cost (Dijkstra-style), not flat distance.
 - Chosen: terrain model separates passable high-cost tiles from blocked tiles.
-- Chosen: explored-memory fog-of-war is owner-specific (`visible` + `explored` sets) and updated from unit/city sight ranges.
-- Chosen: turn flow remains `player -> enemy -> player`, where enemy phase is the combined AI phase (`enemy` then `purple`) with deterministic sequential playback.
-- Chosen: only domination victory (`eliminate all AI faction units and cities`); defeat is total player elimination.
-- Chosen: restart is available through pause menu + confirm path and produces a fresh seeded match.
+- Chosen: explored-memory fog-of-war is owner-specific (`visible`, `explored`, `seenOwners`) and updated from unit/city sight ranges.
+- Chosen: turn flow remains `player -> enemy -> player`, where enemy phase is combined AI playback over all active `factions.aiOwners` in deterministic order.
+- Chosen: only domination victory (`eliminate all AI faction units and cities` across active AI owners); defeat is total player elimination.
+- Chosen: restart/new-game flow from pause menu confirm path supports map size + AI count reconfiguration and produces a fresh seeded match.
 - Rejected for now: endurance/score victories and non-seeded/random tie-break session logic.
 
 ## Interfaces/types added
 
+- Match/faction configuration interfaces:
+  - `resolveMatchConfig({ mapWidth, mapHeight, aiFactionCount })`
+  - `buildAiOwners(aiFactionCount)`
+  - `createFactionMetadata(aiOwners?)`
+  - `GameState.matchConfig.{mapWidth,mapHeight,aiFactionCount}`
+  - `GameState.factions.{playerOwner,aiOwners,allOwners,labels}`
 - Hex/grid interfaces:
   - `neighbors(hex)`
   - `distance(a, b)`
@@ -30,10 +38,11 @@
   - `MovementSystem.getPathTo(unitId, destination, gameState)`
   - `MovementSystem.moveUnit(...)` returns `{ ok, cost, path }` on success
 - Match/map generation interfaces:
-  - `createInitialGameState({ seed, minFactionDistance, enemyPersonality?, purplePersonality?, aiPersonalities? })`
+  - `createInitialGameState({ seed, minFactionDistance, mapWidth?, mapHeight?, aiFactionCount?, matchConfig?, enemyPersonality?, purplePersonality?, aiPersonalities? })`
   - `map.seed`, `map.spawnMetadata`
-  - `map.spawnMetadata.anchors` (`player`, `enemy`, `purple`)
-  - `map.spawnMetadata.spawns` (`playerSettler`, `enemySettler`, `purpleSettler`)
+  - `map.spawnMetadata.anchorsByOwner`
+  - `map.spawnMetadata.spawnByOwner`
+  - legacy compatibility fields: `map.spawnMetadata.anchors`, `map.spawnMetadata.spawns`
   - `map.spawnMetadata.nearestFactionDistance` (nearest pairwise spawn distance)
 - Visibility interfaces:
   - `recomputeVisibility(gameState)`
@@ -41,6 +50,8 @@
   - `isHexExploredByOwner(gameState, owner, q, r)`
   - `canOwnerSeeUnit(gameState, owner, unit)`
   - `canOwnerSeeCity(gameState, owner, city)`
+  - `getSeenOwners(gameState, owner)`
+  - `getSeenHostileOwners(gameState, aiOwner)`
 - Turn/victory interfaces:
   - `beginEnemyTurn(gameState)`
   - `beginPlayerTurn(gameState)`
@@ -57,16 +68,22 @@
 - Player can select valid entities and move units to reachable hexes.
 - Reachable overlays reflect cumulative terrain movement cost.
 - Forest/hill are higher-cost passable terrain; mountain/water are blocked for current land units.
-- Ending turn enters AI phase, exposes active playback state, executes `enemy` then `purple` actions sequentially, and returns to player phase only after playback and AI post-processing complete.
+- Match generation honors startup/new-game config:
+  - map size preset (`16/20/24`)
+  - AI faction count (`1..6`)
+  - one settler spawn per owner in `factions.allOwners`
+  - spawn safety + minimum pairwise spawn distance constraints
+- Ending turn enters AI phase, exposes active playback state, executes each active AI owner sequentially, and returns to player phase only after playback and AI post-processing complete.
 - Fog rules:
   - unexplored tiles are shrouded,
   - explored but not currently visible tiles render dimmed,
-  - hostile units/cities are interactable only while currently visible (unless dev reveal is enabled for player).
-- Match state transitions to `won/lost` only through elimination checks (`player` vs all AI factions).
+  - hostile units/cities are interactable only while currently visible (unless dev reveal is enabled for player),
+  - encounter memory (`seenOwners`) persists after visibility is lost.
+- Match state transitions to `won/lost` only through elimination checks (`player` vs all active AI factions).
 - Restart flow:
   - Esc opens pause menu.
   - Restart action requires confirm/cancel.
-  - Confirm starts a fresh match with a new seed/layout.
+  - Confirm starts a fresh match with configured map size + AI count and new seed/layout.
   - Cancel preserves current state.
 - Modal states block world actions while open.
 
@@ -81,7 +98,7 @@
   - `tests/integration/victorySystem.test.js`
   - `tests/integration/enemyTurn.test.js`
 - E2E flow coverage:
-  - `tests/e2e/smoke.mjs` (real AI playback path + fog/dev-vision checks + return-to-player transition)
+  - `tests/e2e/smoke.mjs` (startup config, expanded roster `24x24` with `6` AI, real AI playback path, fog/dev-vision checks, and return-to-player transition)
 
 ## Known gaps and next steps
 

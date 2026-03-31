@@ -15,7 +15,7 @@
 - Chosen: cities have durability (`health/maxHealth`, default `12/12`) and are valid combat targets.
 - Chosen: city defeat resolution:
   - player attacker chooses `Capture`/`Raze` via modal,
-- AI attacker resolves deterministically by personality policy from `spec-008`.
+- AI attacker resolves deterministically by owner personality policy from `spec-008` (for any active AI owner).
 - Chosen: pure preview APIs mirror resolver math with no state mutation.
 - Chosen: combat presentation uses timeline clips over committed authoritative state (lunge/pulse/floating damage/defeat burst), with no simulation rewind.
 - Rejected for now: multi-retaliation chains, critical hits, flanking systems, city ranged strikes.
@@ -57,7 +57,7 @@
 - Attacks consume attacker action and movement for the turn.
 - Defeated units are removed immediately.
 - Defeated city opens/executes outcome resolution and triggers immediate victory re-evaluation.
-- Capture preserves city economy/identity/queue fields and resets HP to full; raze removes the city.
+- Capture preserves city economy/identity/queue fields with owner flip and resets HP to full; raze removes the city.
 - Preview outputs match resolver outcomes while not mutating game state.
 - Combat readability timeline acceptance:
   - unit attack clip shows attacker lunge + target hit pulse + floating damage
@@ -70,6 +70,7 @@
 - Integration:
   - `tests/integration/combat.test.js`
   - `tests/integration/enemyTurn.test.js`
+  - `tests/integration/enemyAi.test.js`
 - E2E:
   - `tests/e2e/smoke.mjs` (ranged attack path + city resolution flow)
 

@@ -3,85 +3,65 @@
 ## Goal and scope
 
 - Keep gameplay machine-readable for deterministic automation.
-- Preserve stable browser hooks while systems and UI complexity evolve.
-- Validate a multi-step civ-lite scenario in Playwright with robust teardown.
+- Preserve stable browser hooks while startup flow, HUD systems, and AI roster complexity evolve.
+- Validate a full Playwright smoke flow (including perf probe) with robust teardown.
 
 ## Decisions made (and alternatives rejected)
 
 - Chosen: keep automation hooks on `window` for low-friction e2e and local debugging.
-- Chosen: keep one self-contained smoke runner (`tests/e2e/smoke.mjs`) that starts Vite, drives gameplay, asserts, and captures artifacts.
-- Chosen: expose UI/runtime surfaces in `render_game_to_text` so tests do not depend on pixel scraping.
-- Chosen: enforce viewport support policy in runtime bootstrap (`>= 768px`) with explicit unsupported-screen contract for phone-sized widths.
+- Chosen: keep one self-contained smoke runner (`tests/e2e/smoke.mjs`) that starts Vite, drives gameplay, asserts runtime payloads, and captures artifacts.
+- Chosen: keep `render_game_to_text` as the authoritative test payload surface for game + UI state.
+- Chosen: enforce viewport support policy at bootstrap (`>= 768px`) with explicit unsupported payload/DOM contract.
+- Chosen: expose perf telemetry (`getPerfStats`) for non-visual performance assertions during smoke runs.
 - Chosen: harden e2e cleanup with signal-aware close and force-kill fallback for `chrome-headless-shell` on Windows.
-- Chosen: centralize testability as cross-spec authority for payload/hook contract, with gameplay authority remaining in domain specs (`spec-002`, `spec-004`, `spec-005`, `spec-006`, `spec-007`, `spec-008`, `spec-009`).
-- Rejected for now: replacing hooks with a heavier bespoke automation protocol.
+- Rejected for now: replacing browser hooks with a separate external automation protocol.
 
 ## Interfaces/types added
 
-- Browser hooks:
+- Browser globals:
   - `window.render_game_to_text(): string`
   - `window.advanceTime(ms: number): void`
+  - `window.__hexfallGame`
+- Core test hooks:
   - `window.__hexfallTest.getState()`
+  - `window.__hexfallTest.getPerfStats()`
   - `window.__hexfallTest.getBootstrapState()`
-  - `window.__hexfallTest.openMainMenuNewGame()`
-  - `window.__hexfallTest.openMainMenuAbout()`
-  - `window.__hexfallTest.closeAboutToMainMenu()`
-  - `window.__hexfallTest.setStartupNewGameMapSize(size)`
-  - `window.__hexfallTest.setStartupNewGameAiFactionCount(count)`
-  - `window.__hexfallTest.startStartupNewGame()`
-  - `window.__hexfallTest.backFromStartupNewGame()`
-  - `window.__hexfallTest.getStartupNewGameState()`
-  - `window.__hexfallTest.hexToWorld(q, r)`
-  - `window.__hexfallTest.getEndTurnButtonCenter()`
-  - `window.__hexfallTest.openPauseMenu()`
-  - `window.__hexfallTest.closePauseMenu()`
-  - `window.__hexfallTest.getPauseMenuState()`
-  - `window.__hexfallTest.openRestartConfirm()`
-  - `window.__hexfallTest.cancelRestartConfirm()`
-  - `window.__hexfallTest.confirmRestartConfirm()`
-  - `window.__hexfallTest.getRestartModalState()`
-  - `window.__hexfallTest.getNotificationCenterState()`
-  - `window.__hexfallTest.setNotificationFilter(filter)`
-  - `window.__hexfallTest.clickNotificationRow(index)`
-  - `window.__hexfallTest.focusNotification(index)`
-  - `window.__hexfallTest.getActionPreviewState()`
-  - `window.__hexfallTest.hoverHex(q, r)`
-  - `window.__hexfallTest.getTurnAssistantState()`
-  - `window.__hexfallTest.getSpriteLayerCounts()`
-  - `window.__hexfallTest.nextReadyUnit()`
-  - `window.__hexfallTest.setContextPanelPinned(bool)`
-  - `window.__hexfallTest.getCityResolutionModalState()`
-  - `window.__hexfallTest.getCityPanelState()`
-  - `window.__hexfallTest.showCityActionTooltip(actionId)`
-  - `window.__hexfallTest.hideCityActionTooltip()`
-  - `window.__hexfallTest.selectUnit(unitId)`
-  - `window.__hexfallTest.selectCity(cityId)`
-  - `window.__hexfallTest.moveSelected(q, r)`
-  - `window.__hexfallTest.attackTarget(unitId)`
-  - `window.__hexfallTest.attackCity(cityId)`
-  - `window.__hexfallTest.triggerUnitAction(actionId)`
-  - `window.__hexfallTest.foundCity()`
-  - `window.__hexfallTest.chooseCityOutcome(choice)`
-  - `window.__hexfallTest.setCityProductionTab(tab)`
-  - `window.__hexfallTest.enqueueCityProduction(unitType)`
-  - `window.__hexfallTest.enqueueCityBuilding(buildingId)`
-  - `window.__hexfallTest.removeCityQueueAt(index)`
-  - `window.__hexfallTest.moveCityQueue(index, direction)`
-  - `window.__hexfallTest.cycleResearch()`
-  - `window.__hexfallTest.selectResearch(techId)`
-  - `window.__hexfallTest.getAnimationState()`
-  - `window.__hexfallTest.endTurnImmediate()`
-  - `window.__hexfallTest.requestEndTurn()`
-  - `window.__hexfallTest.setUnitPosition(unitId, q, r)`
-  - `window.__hexfallTest.arrangeCombatSkirmish(playerUnitId, enemyUnitId)`
-  - `window.__hexfallTest.setEnemyPersonality(personality)`
-  - `window.__hexfallTest.setAiPersonality(owner, personality)`
-  - `window.__hexfallTest.getEnemyAiState()`
-  - `window.__hexfallTest.getAiState(owner)`
-  - `window.__hexfallTest.clearEnemyCityQueue(cityId?)`
-  - `window.__hexfallTest.clearAiCityQueue(owner, cityId?)`
-  - `window.__hexfallTest.toggleDevVision()`
-  - `window.__hexfallTest.setDevVision(enabled)`
+- Startup-scene hooks:
+  - `openMainMenuNewGame`, `openMainMenuAbout`, `closeAboutToMainMenu`
+  - `setStartupNewGameMapSize`, `setStartupNewGameAiFactionCount`
+  - `startStartupNewGame`, `backFromStartupNewGame`, `getStartupNewGameState`
+- World/camera hooks:
+  - `hexToWorld`, `focusHex`, `setUnitPosition`, `arrangeCombatSkirmish`
+  - `requestEndTurn`, `endTurnImmediate`
+- Gameplay action hooks:
+  - `selectUnit`, `selectCity`, `moveSelected`
+  - `attackTarget`, `attackCity`, `chooseCityOutcome`
+  - `triggerUnitAction`, `foundCity`
+  - `cycleResearch`, `selectResearch`
+  - `setCityProductionTab`, `enqueueCityProduction`, `enqueueCityBuilding`
+  - `removeCityQueueAt`, `moveCityQueue`
+- Pause/new-game modal hooks:
+  - `getPauseMenuState`, `openPauseMenu`, `closePauseMenu`, `openHudMenu`
+  - `openRestartConfirm`, `cancelRestartConfirm`, `confirmRestartConfirm`
+  - `setNewGameMapSize`, `setNewGameAiFactionCount`
+  - `getRestartModalState`, `getCityResolutionModalState`, `getTopHudControlsState`
+- HUD/notifications/polish hooks:
+  - `getCityPanelState`, `showCityActionTooltip`, `hideCityActionTooltip`
+  - `getNotificationCenterState`, `setNotificationFilter`, `clickNotificationRow`, `focusNotification`
+  - `getActionPreviewState`, `hoverHex`
+  - `getTurnAssistantState`, `nextReadyUnit`, `focusAttention`
+  - `setContextPanelPinned`
+  - `getHudPolishState`, `toggleStatsPanel`
+  - `clickMinimapNormalized`, `focusMinimapHex`
+  - `toggleSfxMute`, `getSfxState`
+- Animation/sprite diagnostics:
+  - `getAnimationState`, `getSpriteLayerCounts`
+- AI/personality hooks:
+  - `setEnemyPersonality`, `setAiPersonality`
+  - `getEnemyAiState`, `getAiState`
+  - `clearEnemyCityQueue`, `clearAiCityQueue`
+- Visibility hooks:
+  - `toggleDevVision`, `setDevVision`
 - Runtime DOM contract:
   - `#unsupported-viewport-banner` is visible for unsupported viewports (`< 768px`) and hidden otherwise.
 - E2E command:
@@ -90,66 +70,56 @@
 ## Behavior and acceptance criteria
 
 - `render_game_to_text` includes:
-  - unsupported bootstrap payload when runtime is blocked by viewport policy (`mode="unsupported"`, `viewportWidth`, `minSupportedViewportWidth`)
-  - pregame bootstrap payloads for startup scenes (`mode="menu"`, `mode="new-game"`, `mode="about"`)
-  - seed/hash/spawn metadata
-  - units/cities/combat/research/economy snapshots
-  - `uiPreview`, `uiTurnAssistant`, `uiContextPanel`, `uiNotificationFilter`
-  - `uiNotificationUnreadCount`
-  - `spriteLayers` (`terrain`, `units`, `cities`, `fx`)
-  - `animationState` (`busy`, `kind`, `queueLength`)
-  - `turnPlayback` (`active`, `actor`, `stepIndex`, `totalSteps`, `message`)
-  - `uiTurnAssistant.emptyQueueCityCount` plus split assistant fields (`readyUnits`, `emptyQueues`)
-  - `threatHexes`
-  - `cities[].health` + `cities[].maxHealth`
-  - `pendingCityResolution`
-  - top-left HUD resource payload (`current` + net `delta` + `grossDelta`)
-  - selected info payload and context menu payload
-  - pause/restart modal state
-  - `uiNotifications` feed payload with `category`, optional `focus`, and unread metadata (`turn`, `unread`)
-  - `cameraScroll` payload (`{ x, y }`) for deterministic camera movement assertions
-  - `cameraFocusHex` for notification jump verification
-  - `ai.enemy`, `ai.purple`, and `ai.byOwner` runtime payloads (`personality`, `lastGoal`, `lastTurnSummary`)
-  - `visibility` payload (per-owner `visibleHexes`, `exploredHexes`, `seenOwners`)
-  - `devVisionEnabled` payload for player debug reveal mode
-  - `lastCombatEvent` breakdown payload
-  - city production context details for units/buildings tabs, per-item disabled reasons, queue slot metadata, and typed queue items
-  - city panel runtime hook payload includes right-rail city queue card visibility/details/position plus production-button coordinates for layout assertions
-  - contextual `uiHints` + `uiActions`
+  - unsupported bootstrap payload (`mode="unsupported"`, `viewportWidth`, `minSupportedViewportWidth`) when runtime is blocked
+  - startup-scene payloads (`mode="menu"`, `mode="new-game"`, `mode="about"`)
+  - gameplay payload fields including:
+  - `matchConfig`
+  - `factions`
+  - `map` (`seed`, `terrainHash`, `terrainSummary`, `spawnMetadata`)
+  - `economy.byOwner` plus compatibility `economy.player|enemy|purple`
+  - `ai.byOwner` plus compatibility `ai.enemy|ai.purple`
+  - `visibility.byOwner` for active owners
+  - `uiPreview`, `uiTurnAssistant`, `uiTurnForecast`, `uiContextPanel`
+  - `uiNotificationFilter`, `uiNotificationUnreadCount`, `uiNotifications`
+  - `uiStatsPanelOpen`, `uiStats`, `uiSfxMuted`
+  - `animationState`, `spriteLayers`, `turnPlayback`
+  - `cameraScroll`, `cameraViewportWorld`, `mapWorldBounds`, `cameraFocusHex`
+  - `lastCombatEvent`, `pendingCityResolution`, `devVisionEnabled`
+- `getPerfStats()` returns deterministic perf telemetry:
+  - sample count
+  - frame metrics (`avg`, `p50`, `p95`, `max`)
+  - long-frame counters (`>18ms`, `>40ms`)
+  - publish counters (`state`, `camera`, `preview`)
+  - current map metadata (`width`, `height`, `aiFactionCount`)
 - `advanceTime` remains available for deterministic stepping.
-- `endTurnImmediate()` remains unchanged as deterministic fast-path bypass for smoke/integration flows that do not need playback assertions.
+- `endTurnImmediate()` remains available as deterministic fast path for tests that do not need playback assertions.
 - Smoke scenario validates:
-  - phone viewport bootstrap block (`390x844`) shows unsupported banner and does not initialize gameplay canvas
-  - tablet viewport bootstrap path (`768x1024`) initializes startup menu flow before gameplay
-  - startup menu `About` scene is reachable and returns to menu deterministically
-  - startup `New Game` config scene accepts map/AI settings and launches gameplay deterministically
-  - hover move and city-attack previews
-  - sprite layer payload reports populated terrain/unit visual layers
-  - turn readiness assistant and deterministic attention-cycle path (ready units + cities with empty queues)
-  - split readiness breakdown payload (`readyUnits`, `emptyQueues`)
-  - context panel expanded/pinned behavior
-  - notification filtering and notification-focus camera jump
-  - non-focus notification row click returns `false` without adding warning notification
-  - keyboard camera pan (`Arrow`/`WASD`) and right-drag camera pan both move `cameraScroll`
-  - manual pan clears prior `cameraFocusHex`
-  - real End Turn enters AI playback (`turnPlayback.active=true`), both AI actors (`enemy`,`purple`) produce summaries, and phase returns to player phase
-  - fog-of-war payload assertions (`visible` subset of map, hostile concealment) and keyboard `V` dev-vision toggle behavior
-  - founding, queue management (including queue reorder and unavailable-reason payload checks), research, combat, city resolution, restart/pause flows
-  - city production hover text uses full-word labels (`Production Cost`, `Estimated Turns`)
-  - city production list renders as a horizontal row in the bottom contextual panel
-  - right-rail city queue card stays between notifications and `Attention needed` when city is selected
-  - notification policy stays high-level: retain major outcomes + warnings/failures, suppress low-value city production success notifications (`Production tab`, queue add/move/remove success)
-  - no unexpected defeat during validated scenario flow
+  - phone viewport bootstrap block (`390x844`) and no gameplay canvas init
+  - tablet startup path (`768x1024`) and deterministic startup menu/new-game/about transitions
+  - default gameplay start (`16x16`, `2` AI factions)
+  - expanded roster restart path (`24x24`, `6` AI factions) and reset back to defaults
+  - HUD/context/preview/notification interactions
+  - turn assistant split controls (`ready`, `queue`) and focus helpers
+  - minimap visibility, click-focus behavior, and viewport-frame footprint constraints
+  - stats drawer toggle and forecast presence
+  - pause SFX mute toggle state contract
+  - AI playback lifecycle and return-to-player transition
+  - fog-of-war + dev vision behavior
+  - no unexpected defeat during validated scenario
   - zero console/page errors
+  - perf probe output persisted to `tests/e2e/artifacts/perf.json`
 - Smoke runner closes Playwright/browser/server reliably on success/failure/interrupt; Windows cleanup handles orphaned headless browser processes.
 
 ## Validation performed (tests/manual checks)
 
-  - `npm run test:e2e` passes and captures `tests/e2e/artifacts/smoke.png` and `tests/e2e/artifacts/smoke-tablet.png`.
-- `npm test` validates hook-consumed systems via unit/integration suites.
-- Post-run process checks confirm no lingering `chrome-headless-shell` process.
-- Manual artifact review confirms HUD/context panel/notification interaction surfaces are visible and aligned.
+- `npm run test:e2e` (smoke flow + perf artifact generation + screenshots).
+- `npm test` validates hook-consumed systems through unit/integration suites.
+- Artifact outputs include:
+  - `tests/e2e/artifacts/smoke.png`
+  - `tests/e2e/artifacts/smoke-tablet.png`
+  - `tests/e2e/artifacts/perf.json`
 
 ## Known gaps and next steps
 
 - Add a dedicated deterministic e2e branch for guaranteed full-domination finish.
+- Consider splitting smoke into focused suites (bootstrap/ui/perf) if runtime budget grows.

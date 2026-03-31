@@ -8,10 +8,10 @@
 
 ## Decisions made (and alternatives rejected)
 
-- Chosen: all factions (`player`, `enemy`, `purple`) start settler-only; no starting warriors.
+- Chosen: all configured owners (`player` + active AI owners) start settler-only; no starting warriors.
 - Chosen: only settlers can found cities; AI owners auto-found first valid city opportunities.
 - Chosen: successful city founding emits timeline presentation feedback (settlement pulse + city spawn pop) while game-state mutation remains authoritative.
-- Chosen: economy is empire-wide per owner (`food/production/science` stockpiles).
+- Chosen: economy is per-owner empire stockpile (`food/production/science`) with dynamic owner buckets.
 - Chosen: city yields are terrain-driven with ring-1 workable area and deterministic assignment.
 - Chosen: city worked tiles are assigned with a single deterministic balanced priority (best combined local yields).
 - Chosen: shared typed production queue (`unit`/`building`) with max length `3`.
@@ -31,7 +31,7 @@
 - Economy types/state:
   - `YieldBundle`
   - `EmpireEconomy`
-  - `GameState.economy.{player,enemy,purple,researchIncomeThisTurn}`
+  - `GameState.economy` by owner + `researchIncomeThisTurn`
 - City fields:
   - `workedHexes`, `yieldLastTurn`, `identity`, `growthProgress`
   - `productionTab`, `queue` (typed items), `buildings`, `specialization`
@@ -49,6 +49,8 @@
   - `enqueueCityQueueItem(cityId, queueItem, gameState)`
   - `removeCityQueueAt(cityId, index, gameState)`
   - `moveCityQueueItem(cityId, index, direction, gameState)`
+  - `getAvailableProductionUnits(gameState)`
+  - `getAvailableProductionBuildings(gameState)`
   - `processTurn(gameState, owner)`
 
 ## Behavior and acceptance criteria
@@ -87,6 +89,7 @@
   - `tests/integration/citySystem.test.js`
   - `tests/integration/uiSurface.test.js`
   - `tests/integration/enemyTurn.test.js`
+  - `tests/integration/matchGeneration.test.js`
   - `tests/integration/researchSystem.test.js` (science stock interaction)
 - E2E:
   - `tests/e2e/smoke.mjs` (founding clip visibility + queue/building interactions + economy progression)

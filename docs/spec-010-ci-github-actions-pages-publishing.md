@@ -10,6 +10,7 @@
 
 - Chosen: deploy on every push to `main`.
 - Chosen: gate deployment with `npm run lint`, `npm test`, and `npm run build`.
+- Chosen: run CI on Node `22` with npm cache in workflow setup.
 - Chosen: inject Vite base path only in CI (`--base=/<repo>/`) for Pages project-site compatibility.
 - Chosen: use official GitHub Pages deploy actions (`upload-pages-artifact` + `deploy-pages`).
 - Chosen: keep `test:e2e` outside deployment gating for now.

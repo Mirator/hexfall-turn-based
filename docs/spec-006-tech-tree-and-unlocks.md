@@ -8,13 +8,14 @@
 
 ## Decisions made (and alternatives rejected)
 
-- Chosen: compact tech set (`bronzeWorking`, `archery`, `masonry`) with prerequisite checks.
+- Chosen: compact tech set (`bronzeWorking`, `archery`, `masonry`) with explicit prerequisite checks.
 - Chosen: research consumes pooled empire science (`economy[owner].scienceStock`) plus baseline turn income.
 - Chosen: overflow can complete a tech and continue into the next selectable tech in the same turn.
 - Chosen: unlock mapping:
   - `bronzeWorking` -> `spearman`
   - `archery` (prereq `bronzeWorking`) -> `archer`
-  - `masonry` supports building unlock usage (`monument`) through city system rules.
+  - `masonry` (prereq `bronzeWorking`) supports building unlock usage (`monument`) through city system rules.
+- Chosen: AI personalities can select active tech deterministically (when none is active) through `spec-008` prelude behavior.
 - Rejected for now: full visual tech graph, diplomacy-based exchange, per-city research sliders.
 
 ## Interfaces/types added
@@ -39,7 +40,7 @@
 - Overflow/carryover behavior is deterministic and preserved.
 - Remaining science is retained when no further selectable tech exists.
 - Unlocks update production availability for city queue choices.
-- AI research uses the same selectable-tech constraints and personality priorities from `spec-008`.
+- AI research selection uses the same selectable-tech constraints and personality priorities from `spec-008`.
 
 ## Validation performed (tests/manual checks)
 
