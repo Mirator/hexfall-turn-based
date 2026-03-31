@@ -9,6 +9,7 @@ import {
   normalizeMapSize,
   resolveMatchConfig,
 } from "../core/matchConfig.js";
+import { STARTUP_THEME, UI_FONTS, resolveStartupButtonPalette } from "../ui/theme.js";
 import { createStartupBackdrop } from "./startupBackdrop.js";
 
 const TITLE_SIZE = "56px";
@@ -34,14 +35,14 @@ export class NewGameScene extends Phaser.Scene {
 
     this.backdrop = createStartupBackdrop(this);
 
-    const panel = this.add.rectangle(0, 0, 10, 10, 0x111723, 0.72).setDepth(4);
-    panel.setStrokeStyle(4, 0xdcc691, 0.72);
+    const panel = this.add.rectangle(0, 0, 10, 10, STARTUP_THEME.panelFill, STARTUP_THEME.panelAlpha).setDepth(4);
+    panel.setStrokeStyle(4, STARTUP_THEME.panelStroke, STARTUP_THEME.panelStrokeAlpha);
 
     const title = this.add
       .text(0, 0, "New Campaign", {
-        fontFamily: "Georgia, Times New Roman, serif",
+        fontFamily: UI_FONTS.display,
         fontSize: TITLE_SIZE,
-        color: "#f2dfb1",
+        color: STARTUP_THEME.titleColor,
         fontStyle: "bold",
         stroke: "#16140f",
         strokeThickness: 6,
@@ -50,9 +51,9 @@ export class NewGameScene extends Phaser.Scene {
       .setOrigin(0.5);
     const subtitle = this.add
       .text(0, 0, "Prepare your realm before the first turn.", {
-        fontFamily: "Trebuchet MS, Verdana, sans-serif",
+        fontFamily: UI_FONTS.body,
         fontSize: "20px",
-        color: "#cedced",
+        color: STARTUP_THEME.subtitleColor,
       })
       .setDepth(5)
       .setOrigin(0.5);
@@ -67,16 +68,8 @@ export class NewGameScene extends Phaser.Scene {
     const aiMinus = this.createStepperButton("-", () => this.stepAiFactionCount(-1));
     const aiPlus = this.createStepperButton("+", () => this.stepAiFactionCount(1));
 
-    const startButton = this.createActionButton("Start Match", () => this.startConfiguredMatch(), {
-      baseFill: 0x2f7f6a,
-      hoverFill: 0x3f9780,
-      downFill: 0x26695a,
-    });
-    const backButton = this.createActionButton("Back", () => this.backToMainMenu(), {
-      baseFill: 0x7f6041,
-      hoverFill: 0x966f4a,
-      downFill: 0x684e35,
-    });
+    const startButton = this.createActionButton("Start Match", () => this.startConfiguredMatch(), "primary");
+    const backButton = this.createActionButton("Back", () => this.backToMainMenu(), "secondary");
 
     this.layoutNodes = {
       panel,
@@ -106,9 +99,9 @@ export class NewGameScene extends Phaser.Scene {
   createLabel(text, size) {
     return this.add
       .text(0, 0, text, {
-        fontFamily: "Trebuchet MS, Verdana, sans-serif",
+        fontFamily: UI_FONTS.heading,
         fontSize: size,
-        color: "#e6d6b5",
+        color: "#e5d5b3",
         fontStyle: "bold",
       })
       .setDepth(5)
@@ -118,9 +111,9 @@ export class NewGameScene extends Phaser.Scene {
   createValue(text) {
     return this.add
       .text(0, 0, text, {
-        fontFamily: "Trebuchet MS, Verdana, sans-serif",
+        fontFamily: UI_FONTS.compact,
         fontSize: VALUE_SIZE,
-        color: "#9fd4ff",
+        color: "#a9d2f2",
         fontStyle: "bold",
       })
       .setDepth(5)
@@ -128,41 +121,43 @@ export class NewGameScene extends Phaser.Scene {
   }
 
   createStepperButton(label, onClick) {
+    const palette = resolveStartupButtonPalette("neutral");
     const rectangle = this.add
-      .rectangle(0, 0, 58, 46, 0x6d5a3e, 1)
+      .rectangle(0, 0, 58, 46, palette.baseFill, 1)
       .setDepth(6)
-      .setStrokeStyle(2, 0xf0e0c0, 0.95)
+      .setStrokeStyle(2, palette.stroke, 0.95)
       .setInteractive({ useHandCursor: true });
     const text = this.add
       .text(0, 0, label, {
-        fontFamily: "Trebuchet MS, Verdana, sans-serif",
+        fontFamily: UI_FONTS.compact,
         fontSize: "30px",
-        color: "#f6efd9",
+        color: palette.textColor,
         fontStyle: "bold",
       })
       .setDepth(7)
       .setOrigin(0.5);
-    rectangle.on("pointerover", () => rectangle.setFillStyle(0x86714f, 1));
-    rectangle.on("pointerout", () => rectangle.setFillStyle(0x6d5a3e, 1));
-    rectangle.on("pointerdown", () => rectangle.setFillStyle(0x584a33, 1));
+    rectangle.on("pointerover", () => rectangle.setFillStyle(palette.hoverFill, 1));
+    rectangle.on("pointerout", () => rectangle.setFillStyle(palette.baseFill, 1));
+    rectangle.on("pointerdown", () => rectangle.setFillStyle(palette.downFill, 1));
     rectangle.on("pointerup", () => {
-      rectangle.setFillStyle(0x86714f, 1);
+      rectangle.setFillStyle(palette.hoverFill, 1);
       onClick();
     });
     return { rectangle, label: text };
   }
 
-  createActionButton(label, onClick, palette) {
+  createActionButton(label, onClick, variant) {
+    const palette = resolveStartupButtonPalette(variant);
     const rectangle = this.add
       .rectangle(0, 0, 210, 54, palette.baseFill, 1)
       .setDepth(6)
-      .setStrokeStyle(3, 0xf0e0c0, 0.95)
+      .setStrokeStyle(3, palette.stroke, 0.95)
       .setInteractive({ useHandCursor: true });
     const text = this.add
       .text(0, 0, label, {
-        fontFamily: "Trebuchet MS, Verdana, sans-serif",
+        fontFamily: UI_FONTS.compact,
         fontSize: BUTTON_LABEL_SIZE,
-        color: "#f9f2df",
+        color: palette.textColor,
         fontStyle: "bold",
       })
       .setDepth(7)

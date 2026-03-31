@@ -1,4 +1,5 @@
 import Phaser from "../core/phaserRuntime.js";
+import { STARTUP_THEME, UI_FONTS, resolveStartupButtonPalette } from "../ui/theme.js";
 import { createStartupBackdrop } from "./startupBackdrop.js";
 
 export class AboutScene extends Phaser.Scene {
@@ -12,14 +13,14 @@ export class AboutScene extends Phaser.Scene {
   create() {
     this.backdrop = createStartupBackdrop(this);
 
-    const panel = this.add.rectangle(0, 0, 10, 10, 0x111723, 0.72).setDepth(4);
-    panel.setStrokeStyle(4, 0xdcc691, 0.72);
+    const panel = this.add.rectangle(0, 0, 10, 10, STARTUP_THEME.panelFill, STARTUP_THEME.panelAlpha).setDepth(4);
+    panel.setStrokeStyle(4, STARTUP_THEME.panelStroke, STARTUP_THEME.panelStrokeAlpha);
 
     const title = this.add
       .text(0, 0, "About Hexfall", {
-        fontFamily: "Georgia, Times New Roman, serif",
+        fontFamily: UI_FONTS.display,
         fontSize: "54px",
-        color: "#f2dfb1",
+        color: STARTUP_THEME.titleColor,
         fontStyle: "bold",
         stroke: "#16140f",
         strokeThickness: 6,
@@ -29,9 +30,9 @@ export class AboutScene extends Phaser.Scene {
 
     const body = this.add
       .text(0, 0, "", {
-        fontFamily: "Trebuchet MS, Verdana, sans-serif",
+        fontFamily: UI_FONTS.body,
         fontSize: "21px",
-        color: "#d7e6f5",
+        color: STARTUP_THEME.bodyColor,
         align: "left",
         lineSpacing: 7,
       })
@@ -65,31 +66,32 @@ export class AboutScene extends Phaser.Scene {
   }
 
   createButton(label, onClick) {
+    const palette = resolveStartupButtonPalette("secondary");
     const rectangle = this.add
-      .rectangle(0, 0, 208, 54, 0x7f6041, 1)
+      .rectangle(0, 0, 208, 54, palette.baseFill, 1)
       .setDepth(6)
-      .setStrokeStyle(3, 0xf0e0c0, 0.95)
+      .setStrokeStyle(3, palette.stroke, 0.95)
       .setInteractive({ useHandCursor: true });
     const text = this.add
       .text(0, 0, label, {
-        fontFamily: "Trebuchet MS, Verdana, sans-serif",
+        fontFamily: UI_FONTS.compact,
         fontSize: "24px",
-        color: "#f9f2df",
+        color: palette.textColor,
         fontStyle: "bold",
       })
       .setDepth(7)
       .setOrigin(0.5);
     rectangle.on("pointerover", () => {
-      rectangle.setFillStyle(0x966f4a, 1);
+      rectangle.setFillStyle(palette.hoverFill, 1);
       text.setScale(1.03);
     });
     rectangle.on("pointerout", () => {
-      rectangle.setFillStyle(0x7f6041, 1);
+      rectangle.setFillStyle(palette.baseFill, 1);
       text.setScale(1);
     });
-    rectangle.on("pointerdown", () => rectangle.setFillStyle(0x684e35, 1));
+    rectangle.on("pointerdown", () => rectangle.setFillStyle(palette.downFill, 1));
     rectangle.on("pointerup", () => {
-      rectangle.setFillStyle(0x966f4a, 1);
+      rectangle.setFillStyle(palette.hoverFill, 1);
       onClick();
     });
     return { rectangle, label: text };

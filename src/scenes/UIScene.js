@@ -1,12 +1,26 @@
 import Phaser from "../core/phaserRuntime.js";
 import { gameEvents } from "../core/eventBus.js";
 import { HEX_SIZE } from "../core/constants.js";
-import { worldToAxial } from "../core/hexGrid.js";
+import { axialToWorld, worldToAxial } from "../core/hexGrid.js";
+import { HUD_THEME, UI_FONTS, resolveButtonPalette } from "../ui/theme.js";
 
 const BUTTON_WIDTH = 180;
 const BUTTON_HEIGHT = 40;
 const TABLET_LAYOUT_BREAKPOINT = 900;
 const SQRT_3 = Math.sqrt(3);
+const MINIMAP_HEX_CORNERS = Array.from({ length: 6 }, (_, index) => {
+  const angle = Phaser.Math.DegToRad(60 * index - 30);
+  return { x: Math.cos(angle), y: Math.sin(angle) };
+});
+const AXIAL_DIRECTIONS = [
+  { q: 1, r: 0 },
+  { q: 1, r: -1 },
+  { q: 0, r: -1 },
+  { q: -1, r: 0 },
+  { q: -1, r: 1 },
+  { q: 0, r: 1 },
+];
+const DIRECTION_TO_EDGE_INDEX = [0, 5, 4, 3, 2, 1];
 const CITY_PANEL_TAB_WIDTH = 102;
 const CITY_PANEL_ACTION_WIDTH = 100;
 const CITY_PANEL_QUEUE_ITEM_WIDTH = 126;
@@ -34,6 +48,8 @@ const RIGHT_RAIL_QUEUE_SLOT_OUTER_PADDING = 14;
 const RIGHT_RAIL_QUEUE_SLOT_ROW_GAP = 6;
 const RIGHT_RAIL_QUEUE_SLOT_INNER_GAP = 6;
 const NOTIFICATION_ROW_HEIGHT = 46;
+const NOTIFICATION_HEADER_HEIGHT = 34;
+const NOTIFICATION_ROW_INSET = 8;
 const FORECAST_PANEL_HEIGHT = 74;
 const FORECAST_PANEL_HEIGHT_TABLET = 66;
 const STATS_PANEL_HEIGHT = 120;
@@ -43,23 +59,17 @@ const MINIMAP_PANEL_HEIGHT = 166;
 const MINIMAP_PANEL_WIDTH_TABLET = 186;
 const MINIMAP_PANEL_HEIGHT_TABLET = 146;
 const MINIMAP_INSET = 10;
+const MINIMAP_TITLE_HEIGHT = 24;
+const MINIMAP_CAPTION_HEIGHT = 14;
 const PRODUCTION_TABS = ["units", "buildings"];
 const UNIT_PRODUCTION_TYPES = ["warrior", "settler", "spearman", "archer"];
 const BUILDING_PRODUCTION_TYPES = ["granary", "workshop", "monument"];
 const NOTIFICATION_FILTERS = ["All", "Combat", "City", "Research", "System"];
 const UI_SFX_ACTIONS = new Set(["endTurn", "pause-resume", "pause-restart", "restart-confirm", "restart-cancel", "resultRestart"]);
 
-const SEMANTIC_COLORS = {
-  textStrong: "#2f2213",
-  textMuted: "#655239",
-  textInfo: "#2d5f8f",
-  textPositive: "#2f7a41",
-  textWarning: "#8f3a2a",
-  panelBg: 0xefe2c7,
-  panelBorder: 0x7d5a2f,
-  panelActiveBg: 0xf3e9d4,
-  panelSoftBg: 0xe8dbc2,
-};
+const SEMANTIC_COLORS = HUD_THEME.semanticColors;
+const PANEL_STROKE_WIDTH = HUD_THEME.panelStrokeWidth;
+const BUTTON_STROKE_WIDTH = HUD_THEME.buttonStrokeWidth;
 
 const UNIT_LABELS = {
   warrior: "Warrior",
@@ -120,6 +130,10 @@ export class UIScene extends Phaser.Scene {
     this.minimapContentBounds = { x: 0, y: 0, width: 1, height: 1 };
     this.minimapVisible = false;
     this.minimapTerrainKey = "";
+    this.minimapViewportKey = "";
+    this.minimapViewportBoundarySegments = 0;
+    this.minimapViewportFootprint = null;
+    this.turnAssistantPulseTween = null;
     this.lastLayoutKey = "";
     this.uiSfxMuted = false;
     this.uiSfxContext = null;
@@ -128,62 +142,73 @@ export class UIScene extends Phaser.Scene {
   }
 
   create() {
-    this.topHudPanel = this.add.rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelBg, 0.94).setOrigin(0, 0).setDepth(9);
-    this.topHudPanel.setStrokeStyle(2, SEMANTIC_COLORS.panelBorder, 0.88);
-    this.turnLabel = this.createLabel("", 24, 16, "26px", "#1f1810", 10, "#f5ecdc", 3);
-    this.foodLabel = this.createLabel("", 24, 48, "19px", "#1f1810", 10);
-    this.foodDeltaLabel = this.createLabel("", 24, 50, "16px", "#2f7a41", 10);
-    this.productionLabel = this.createLabel("", 24, 76, "19px", "#1f1810", 10);
-    this.productionDeltaLabel = this.createLabel("", 24, 78, "16px", "#2f7a41", 10);
-    this.scienceLabel = this.createLabel("", 24, 104, "19px", "#1f1810", 10);
-    this.scienceDeltaLabel = this.createLabel("", 24, 106, "16px", "#2f7a41", 10);
-    this.devVisionLabel = this.createLabel("", 24, 132, "16px", "#4a361f", 10);
+    this.topHudPanel = this.add.rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelBg, 0.95).setOrigin(0, 0).setDepth(9);
+    this.topHudPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.9);
+    this.turnLabel = this.createLabel("", 24, 16, "26px", "#22170d", 10, "#f7eedf", 3);
+    this.turnLabel.setFontFamily(UI_FONTS.heading);
+    this.turnLabel.setLetterSpacing(0.4);
+    this.foodLabel = this.createLabel("", 24, 48, "19px", "#22170d", 10);
+    this.foodDeltaLabel = this.createLabel("", 24, 50, "16px", SEMANTIC_COLORS.textPositive, 10);
+    this.productionLabel = this.createLabel("", 24, 76, "19px", "#22170d", 10);
+    this.productionDeltaLabel = this.createLabel("", 24, 78, "16px", SEMANTIC_COLORS.textPositive, 10);
+    this.scienceLabel = this.createLabel("", 24, 104, "19px", "#22170d", 10);
+    this.scienceDeltaLabel = this.createLabel("", 24, 106, "16px", SEMANTIC_COLORS.textPositive, 10);
+    this.devVisionLabel = this.createLabel("", 24, 132, "16px", "#46331e", 10);
     this.sfxToggleButton = this.createButton("SFX ON", "toggle-sfx", () => this.toggleSfxMuted(), {
+      variant: "chip",
       width: 96,
       height: 24,
       fontSize: "11px",
-      enabledFill: 0x5a6654,
-      hoverFill: 0x6b795f,
-      activeFill: 0x355e94,
-      stroke: 0xe8dcc4,
     });
     this.statsToggleButton = this.createButton("Stats", "toggle-stats", () => this.toggleStatsPanel(), {
+      variant: "chip",
       width: 74,
       height: 24,
       fontSize: "11px",
-      enabledFill: 0x6d6d73,
-      hoverFill: 0x7f8088,
-      activeFill: 0x355e94,
-      stroke: 0xe8dcc4,
     });
     this.sfxToggleButton.rectangle.setDepth(10);
     this.sfxToggleButton.label.setDepth(11);
     this.statsToggleButton.rectangle.setDepth(10);
     this.statsToggleButton.label.setDepth(11);
-    this.playbackPanel = this.add.rectangle(0, 0, 10, 10, 0xe9dcc1, 0.96).setDepth(11).setVisible(false);
-    this.playbackPanel.setStrokeStyle(2, 0x7d5a2f, 0.86);
-    this.playbackLabel = this.createLabel("", 0, 0, "15px", "#3f2d18", 12).setOrigin(0.5).setVisible(false);
-    this.forecastPanel = this.add.rectangle(0, 0, 10, 10, 0xe9dcc1, 0.95).setOrigin(0, 0).setDepth(10);
-    this.forecastPanel.setStrokeStyle(2, 0x7d5a2f, 0.85);
-    this.forecastTitle = this.createLabel("Next Turn", 0, 0, "14px", "#3f2d18", 11);
+    this.playbackPanel = this.add.rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelElevatedBg, 0.96).setDepth(11).setVisible(false);
+    this.playbackPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.88);
+    this.playbackLabel = this.createLabel("", 0, 0, "15px", "#3b2a16", 12).setOrigin(0.5).setVisible(false);
+    this.forecastPanel = this.add.rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelElevatedBg, 0.95).setOrigin(0, 0).setDepth(10);
+    this.forecastPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.88);
+    this.forecastTitle = this.createLabel("Next Turn", 0, 0, "14px", "#3b2a16", 11);
+    this.forecastTitle.setFontFamily(UI_FONTS.heading);
     this.forecastLinePrimary = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textStrong, 11);
     this.forecastLineSecondary = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textMuted, 11);
     this.forecastLineTertiary = this.createLabel("", 0, 0, "11px", SEMANTIC_COLORS.textMuted, 11);
-    this.statsPanel = this.add.rectangle(0, 0, 10, 10, 0xe8dbc2, 0.96).setOrigin(0, 0).setDepth(10).setVisible(false);
-    this.statsPanel.setStrokeStyle(2, 0x7d5a2f, 0.85);
-    this.statsTitle = this.createLabel("Progress Stats", 0, 0, "14px", "#3f2d18", 11).setVisible(false);
+    this.statsPanel = this.add.rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelSoftBg, 0.96).setOrigin(0, 0).setDepth(10).setVisible(false);
+    this.statsPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.86);
+    this.statsTitle = this.createLabel("Progress Stats", 0, 0, "14px", "#3b2a16", 11).setVisible(false);
+    this.statsTitle.setFontFamily(UI_FONTS.heading);
     this.statsCitiesLabel = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textStrong, 11).setVisible(false);
     this.statsUnitsLabel = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textStrong, 11).setVisible(false);
     this.statsTechLabel = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textInfo, 11).setVisible(false);
     this.statsExploreLabel = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textPositive, 11).setVisible(false);
-    this.minimapPanel = this.add.rectangle(0, 0, MINIMAP_PANEL_WIDTH, MINIMAP_PANEL_HEIGHT, 0xe8dbc2, 0.97).setOrigin(0, 0).setDepth(16);
-    this.minimapPanel.setStrokeStyle(2, 0x7d5a2f, 0.85);
-    this.minimapTitle = this.createLabel("Minimap", 0, 0, "14px", "#3f2d18", 17);
+    this.minimapPanel = this.add
+      .rectangle(0, 0, MINIMAP_PANEL_WIDTH, MINIMAP_PANEL_HEIGHT, SEMANTIC_COLORS.panelSoftBg, 0.97)
+      .setOrigin(0, 0)
+      .setDepth(16);
+    this.minimapPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.86);
+    this.minimapInsetPanel = this.add
+      .rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelDarkBg, 0.62)
+      .setOrigin(0, 0)
+      .setDepth(16)
+      .setVisible(false);
+    this.minimapInsetPanel.setStrokeStyle(1, 0xcfc1a2, 0.54);
+    this.minimapTitle = this.createLabel("Minimap", 0, 0, "14px", "#3b2a16", 17);
+    this.minimapTitle.setFontFamily(UI_FONTS.heading);
+    this.minimapCaption = this.createLabel("Click to focus", 0, 0, "11px", SEMANTIC_COLORS.textMuted, 17).setVisible(false);
+    this.minimapCaption.setFontFamily(UI_FONTS.compact);
     this.minimapGraphics = this.add.graphics().setDepth(17);
     this.minimapMarkerGraphics = this.add.graphics().setDepth(17);
+    this.minimapViewportGraphics = this.add.graphics().setDepth(18);
     this.minimapViewportFrame = this.add.rectangle(0, 0, 12, 12).setDepth(18).setOrigin(0, 0).setVisible(false);
-    this.minimapViewportFrame.setStrokeStyle(2, 0x1f4f93, 0.92);
-    this.minimapViewportFrame.setFillStyle(0x1f4f93, 0.12);
+    this.minimapViewportFrame.setStrokeStyle(2, SEMANTIC_COLORS.accentBlue, 0.92);
+    this.minimapViewportFrame.setFillStyle(SEMANTIC_COLORS.accentBlue, 0.14);
     this.minimapHitArea = this.add
       .rectangle(0, 0, 10, 10, 0x000000, 0)
       .setOrigin(0, 0)
@@ -192,71 +217,59 @@ export class UIScene extends Phaser.Scene {
     this.minimapHitArea.on("pointerdown", (pointer) => this.handleMinimapPointerDown(pointer));
 
     this.selectedPanel = this.add.rectangle(24, 0, 460, 92, SEMANTIC_COLORS.panelBg, 0.96).setOrigin(0, 0).setDepth(10);
-    this.selectedPanel.setStrokeStyle(2, SEMANTIC_COLORS.panelBorder, 0.86);
-    this.selectedTitle = this.createLabel("Selected", 38, 0, "16px", "#4a3318", 11);
-    this.selectedDetails = this.createLabel("No selection", 38, 0, "15px", "#3f2d18", 11);
+    this.selectedPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.86);
+    this.selectedTitle = this.createLabel("Selected", 38, 0, "16px", "#442f19", 11);
+    this.selectedTitle.setFontFamily(UI_FONTS.heading);
+    this.selectedDetails = this.createLabel("No selection", 38, 0, "15px", "#3b2a16", 11);
 
-    this.endTurnButton = this.createButton("End Turn", "endTurn", () => gameEvents.emit("end-turn-requested"));
+    this.endTurnButton = this.createButton("End Turn", "endTurn", () => gameEvents.emit("end-turn-requested"), { variant: "warning" });
     this.turnAssistantPanel = this.add.rectangle(0, 0, 220, 72, SEMANTIC_COLORS.panelBg, 0.95).setDepth(12);
-    this.turnAssistantPanel.setStrokeStyle(2, SEMANTIC_COLORS.panelBorder, 0.86);
+    this.turnAssistantPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.88);
+    this.turnAssistantAccent = this.add.rectangle(0, 0, 10, 6, SEMANTIC_COLORS.accentAmber, 0.86).setDepth(13);
+    this.turnAssistantStatusDot = this.add.circle(0, 0, 4, SEMANTIC_COLORS.accentAmber, 0.94).setDepth(13);
     this.turnAssistantLabel = this.createLabel("Attention", 0, 0, "14px", SEMANTIC_COLORS.textStrong, 13).setOrigin(0.5);
+    this.turnAssistantLabel.setFontFamily(UI_FONTS.heading);
     this.turnAssistantSecondaryLabel = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textMuted, 13).setOrigin(0.5);
     this.attentionReadyButton = this.createButton("Units 0", "attention-ready", () => gameEvents.emit("attention-ready-unit-requested"), {
+      variant: "success",
       width: 94,
       height: 24,
       fontSize: "12px",
-      enabledFill: 0x4f6b4a,
-      hoverFill: 0x5d8156,
-      activeFill: 0x3a7f4e,
-      disabledFill: 0x6f776d,
-      stroke: 0xe6dbbf,
     });
     this.attentionQueueButton = this.createButton("Queues 0", "attention-queue", () => gameEvents.emit("attention-empty-queue-requested"), {
+      variant: "warning",
       width: 94,
       height: 24,
       fontSize: "12px",
-      enabledFill: 0x6a5c3e,
-      hoverFill: 0x7a6d4d,
-      activeFill: 0x8a5b2f,
-      disabledFill: 0x6f6b62,
-      stroke: 0xe6dbbf,
     });
     this.attentionReadyButton.rectangle.setDepth(14);
     this.attentionReadyButton.label.setDepth(15);
     this.attentionQueueButton.rectangle.setDepth(14);
     this.attentionQueueButton.label.setDepth(15);
     this.nextUnitButton = this.createButton("Next Unit", "nextUnit", () => gameEvents.emit("next-ready-unit-requested"), {
+      variant: "success",
       width: 130,
       height: 30,
       fontSize: "14px",
-      enabledFill: 0x4f6b4a,
-      hoverFill: 0x5d8156,
-      disabledFill: 0x6f776d,
-      stroke: 0xe6dbbf,
     });
 
-    this.contextPanel = this.add.rectangle(0, 0, 10, 10, 0xead7b1, 0.95).setDepth(12).setVisible(false);
-    this.contextPanel.setStrokeStyle(2, 0x7d5a2f, 0.9);
+    this.contextPanel = this.add.rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelElevatedBg, 0.95).setDepth(12).setVisible(false);
+    this.contextPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.9);
     this.contextPanelTitle = this.createLabel("", 0, 0, "16px", "#3d2a14", 13);
+    this.contextPanelTitle.setFontFamily(UI_FONTS.heading);
     this.contextPanelTitle.setOrigin(0.5);
     this.contextPanelTitle.setVisible(false);
     this.contextPanelExpandButton = this.createButton("^", "context-expand-toggle", () => this.toggleContextPanelExpanded(), {
+      variant: "secondary",
       width: 36,
       height: 26,
       fontSize: "16px",
-      enabledFill: 0x6f6d63,
-      hoverFill: 0x848175,
-      activeFill: 0x4d7e56,
-      stroke: 0xe9d9b4,
     });
     this.contextPanelPinButton = this.createButton("Pin", "context-pin-toggle", () => this.toggleContextPanelPinned(), {
+      variant: "secondary",
       width: 62,
       height: 26,
       fontSize: "13px",
-      enabledFill: 0x6f6d63,
-      hoverFill: 0x848175,
-      activeFill: 0x2f7a41,
-      stroke: 0xe9d9b4,
     });
     this.contextPanelMetaPrimary = this.createLabel("", 0, 0, "14px", "#3f2d18", 13).setOrigin(0.5).setVisible(false);
     this.contextPanelMetaSecondary = this.createLabel("", 0, 0, "13px", "#5a4224", 13).setOrigin(0.5).setVisible(false);
@@ -268,14 +281,10 @@ export class UIScene extends Phaser.Scene {
         `city-production-tab-${tab}`,
         () => gameEvents.emit("city-production-tab-set-requested", { tab }),
         {
+          variant: "chip",
           width: CITY_PANEL_TAB_WIDTH,
           height: CITY_PANEL_BUTTON_HEIGHT,
           fontSize: "14px",
-          enabledFill: 0x6d6d73,
-          hoverFill: 0x7f8088,
-          activeFill: 0x355e94,
-          disabledFill: 0x74757a,
-          stroke: 0xe9d9b4,
         }
       )
     );
@@ -289,14 +298,10 @@ export class UIScene extends Phaser.Scene {
             queueItem: { kind: "unit", id: unitType },
           }),
         {
+          variant: "primary",
           width: CITY_PANEL_ACTION_WIDTH,
           height: CITY_PANEL_BUTTON_HEIGHT,
           fontSize: "11px",
-          enabledFill: 0x355e94,
-          hoverFill: 0x4a76ae,
-          activeFill: 0x355e94,
-          disabledFill: 0x6d747e,
-          stroke: 0xe9d9b4,
         }
       )
     );
@@ -310,14 +315,10 @@ export class UIScene extends Phaser.Scene {
             queueItem: { kind: "building", id: buildingId },
           }),
         {
+          variant: "success",
           width: CITY_PANEL_ACTION_WIDTH,
           height: CITY_PANEL_BUTTON_HEIGHT,
           fontSize: "11px",
-          enabledFill: 0x3d6e58,
-          hoverFill: 0x4d866b,
-          activeFill: 0x3d6e58,
-          disabledFill: 0x707a72,
-          stroke: 0xe6dbbf,
         }
       )
     );
@@ -332,14 +333,10 @@ export class UIScene extends Phaser.Scene {
         `city-queue-slot-${index}`,
         () => {},
         {
+          variant: "secondary",
           width: CITY_PANEL_QUEUE_ITEM_WIDTH,
           height: CITY_PANEL_BUTTON_HEIGHT,
           fontSize: "10px",
-          enabledFill: 0x5f5a4a,
-          hoverFill: 0x6d6755,
-          activeFill: 0x5f5a4a,
-          disabledFill: 0x7f7568,
-          stroke: 0xf2debb,
         }
       )
     );
@@ -349,13 +346,10 @@ export class UIScene extends Phaser.Scene {
         `city-queue-move-up-${index}`,
         () => gameEvents.emit("city-queue-move-requested", { index, direction: "up" }),
         {
+          variant: "primary",
           width: CITY_PANEL_QUEUE_MOVE_WIDTH,
           height: CITY_PANEL_BUTTON_HEIGHT,
           fontSize: "11px",
-          enabledFill: 0x44617d,
-          hoverFill: 0x537496,
-          disabledFill: 0x6b6f75,
-          stroke: 0xd9d0bf,
         }
       )
     );
@@ -365,13 +359,10 @@ export class UIScene extends Phaser.Scene {
         `city-queue-move-down-${index}`,
         () => gameEvents.emit("city-queue-move-requested", { index, direction: "down" }),
         {
+          variant: "primary",
           width: CITY_PANEL_QUEUE_MOVE_WIDTH,
           height: CITY_PANEL_BUTTON_HEIGHT,
           fontSize: "11px",
-          enabledFill: 0x44617d,
-          hoverFill: 0x537496,
-          disabledFill: 0x6b6f75,
-          stroke: 0xd9d0bf,
         }
       )
     );
@@ -381,14 +372,10 @@ export class UIScene extends Phaser.Scene {
         `city-queue-remove-${index}`,
         () => gameEvents.emit("city-queue-remove-requested", { index }),
         {
+          variant: "danger",
           width: CITY_PANEL_QUEUE_REMOVE_WIDTH,
           height: CITY_PANEL_BUTTON_HEIGHT,
           fontSize: "11px",
-          enabledFill: 0x7c4e2b,
-          hoverFill: 0x956039,
-          activeFill: 0x7c4e2b,
-          disabledFill: 0x7f7568,
-          stroke: 0xf2debb,
         }
       )
     );
@@ -406,6 +393,7 @@ export class UIScene extends Phaser.Scene {
     this.unitFoundCityButton = this.createButton("Found City", "unit-found-city", () =>
       gameEvents.emit("unit-action-requested", { actionId: "foundCity" }),
       {
+        variant: "primary",
         width: UNIT_PANEL_ACTION_WIDTH,
         height: BUTTON_HEIGHT - 6,
       }
@@ -413,6 +401,7 @@ export class UIScene extends Phaser.Scene {
     this.unitSkipButton = this.createButton("Skip Unit", "unit-skip", () =>
       gameEvents.emit("unit-action-requested", { actionId: "skipUnit" }),
       {
+        variant: "secondary",
         width: UNIT_PANEL_ACTION_WIDTH,
         height: BUTTON_HEIGHT - 6,
       }
@@ -431,35 +420,35 @@ export class UIScene extends Phaser.Scene {
     this.contextPanelDisabledReason.setVisible(false);
     this.setStatsPanelVisible(false);
 
-    this.hintPanel = this.add.rectangle(0, 0, 440, 74, 0xf0e4cb, 0.95).setDepth(20).setVisible(false);
-    this.hintPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
-    this.hintPrimary = this.createLabel("", 0, 0, "16px", "#3f2d18", 21);
+    this.hintPanel = this.add.rectangle(0, 0, 440, 74, SEMANTIC_COLORS.panelElevatedBg, 0.95).setDepth(20).setVisible(false);
+    this.hintPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.84);
+    this.hintPrimary = this.createLabel("", 0, 0, "16px", "#3b2a16", 21);
     this.hintPrimary.setOrigin(0.5).setVisible(false);
-    this.hintSecondary = this.createLabel("", 0, 0, "14px", "#5a4224", 21);
+    this.hintSecondary = this.createLabel("", 0, 0, "14px", "#5d4b34", 21);
     this.hintSecondary.setOrigin(0.5).setVisible(false);
-    this.previewPanel = this.add.rectangle(0, 0, 360, 66, 0xf0e4cb, 0.95).setDepth(22).setVisible(false);
-    this.previewPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
-    this.previewTitle = this.createLabel("", 0, 0, "15px", "#3f2d18", 23);
+    this.previewPanel = this.add.rectangle(0, 0, 360, 66, SEMANTIC_COLORS.panelElevatedBg, 0.95).setDepth(22).setVisible(false);
+    this.previewPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.84);
+    this.previewTitle = this.createLabel("", 0, 0, "15px", "#3b2a16", 23);
     this.previewTitle.setOrigin(0.5).setVisible(false);
-    this.previewDetails = this.createLabel("", 0, 0, "13px", "#5a4224", 23);
+    this.previewDetails = this.createLabel("", 0, 0, "13px", "#5d4b34", 23);
     this.previewDetails.setOrigin(0.5).setVisible(false);
-    this.disabledTooltipPanel = this.add.rectangle(0, 0, 10, 10, 0x2f271c, 0.94).setDepth(31).setVisible(false);
-    this.disabledTooltipPanel.setStrokeStyle(1, 0xd7c8a4, 0.95);
+    this.disabledTooltipPanel = this.add.rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelDarkBg, 0.94).setDepth(31).setVisible(false);
+    this.disabledTooltipPanel.setStrokeStyle(1, 0xe3d4b2, 0.95);
     this.disabledTooltipLabel = this.createLabel("", 0, 0, "12px", "#f5e8ca", 32).setVisible(false);
 
     this.notificationPanel = this.add.rectangle(0, 0, 360, 236, SEMANTIC_COLORS.panelSoftBg, 0.97).setDepth(16);
-    this.notificationPanel.setStrokeStyle(2, 0x6d502a, 0.92);
-    this.notificationTitle = this.createLabel("Notifications", 0, 0, "18px", "#2f2010", 17);
+    this.notificationPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.9);
+    this.notificationAccent = this.add.rectangle(0, 0, 10, 4, SEMANTIC_COLORS.accentBlue, 0.88).setOrigin(0, 0).setDepth(17);
+    this.notificationTitle = this.createLabel("Notifications", 0, 0, "18px", "#2a1d11", 17);
+    this.notificationTitle.setFontFamily(UI_FONTS.heading);
+    this.notificationSubtitle = this.createLabel("", 0, 0, "11px", SEMANTIC_COLORS.textMuted, 17);
+    this.notificationSubtitle.setFontFamily(UI_FONTS.compact);
     this.notificationFilterButtons = NOTIFICATION_FILTERS.map((filterName) =>
       this.createButton(filterName, `notif-filter-${filterName}`, () => this.setNotificationFilter(filterName), {
-        width: filterName === "Research" ? 78 : 66,
-        height: 24,
-        fontSize: "12px",
-        enabledFill: 0x6f6d63,
-        hoverFill: 0x848175,
-        activeFill: 0x355e94,
-        disabledFill: 0x6f6d63,
-        stroke: 0xe9d9b4,
+        variant: "chip",
+        width: filterName === "Research" ? 70 : filterName === "Combat" ? 64 : 56,
+        height: 25,
+        fontSize: "11px",
       })
     );
     for (const filterButton of this.notificationFilterButtons) {
@@ -468,12 +457,13 @@ export class UIScene extends Phaser.Scene {
     }
     this.notificationRows = Array.from({ length: 8 }, (_unused, index) => this.createNotificationRow(index));
 
-    this.cityQueueRailPanel = this.add.rectangle(0, 0, 10, 10, 0xeadcc0, 0.95).setDepth(16).setVisible(false);
-    this.cityQueueRailPanel.setStrokeStyle(2, 0x7d5a2f, 0.8);
-    this.cityQueueRailTitle = this.createLabel("City Queue", 0, 0, "17px", "#4a3318", 17).setVisible(false);
-    this.cityQueueRailDetailsPrimary = this.createLabel("", 0, 0, "13px", "#3f2d18", 17).setVisible(false);
-    this.cityQueueRailDetailsSecondary = this.createLabel("", 0, 0, "13px", "#5a4224", 17).setVisible(false);
-    this.cityQueueRailDetailsTertiary = this.createLabel("", 0, 0, "12px", "#5a4224", 17).setVisible(false);
+    this.cityQueueRailPanel = this.add.rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelElevatedBg, 0.95).setDepth(16).setVisible(false);
+    this.cityQueueRailPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.84);
+    this.cityQueueRailTitle = this.createLabel("City Queue", 0, 0, "17px", "#422d18", 17).setVisible(false);
+    this.cityQueueRailTitle.setFontFamily(UI_FONTS.heading);
+    this.cityQueueRailDetailsPrimary = this.createLabel("", 0, 0, "13px", "#3b2a16", 17).setVisible(false);
+    this.cityQueueRailDetailsSecondary = this.createLabel("", 0, 0, "13px", "#5d4b34", 17).setVisible(false);
+    this.cityQueueRailDetailsTertiary = this.createLabel("", 0, 0, "12px", "#5d4b34", 17).setVisible(false);
 
     this.modalBackdrop = this.add
       .rectangle(0, 0, 10, 10, 0x2a1b10, 0.34)
@@ -488,21 +478,15 @@ export class UIScene extends Phaser.Scene {
       }
     });
 
-    this.pausePanel = this.add.rectangle(0, 0, 420, 178, 0xf2e6cc, 0.98).setDepth(40).setVisible(false);
-    this.pausePanel.setStrokeStyle(3, 0x6e4a22, 1);
+    this.pausePanel = this.add.rectangle(0, 0, 420, 178, SEMANTIC_COLORS.panelElevatedBg, 0.98).setDepth(40).setVisible(false);
+    this.pausePanel.setStrokeStyle(3, SEMANTIC_COLORS.panelBorder, 1);
     this.pausePanel.setInteractive();
     this.pausePanel.on("pointerdown", (_pointer, _x, _y, event) => event.stopPropagation());
-    this.pauseTitle = this.createLabel("Paused", 0, 0, "34px", "#4a2e12", 41);
+    this.pauseTitle = this.createLabel("Paused", 0, 0, "34px", "#472f17", 41);
+    this.pauseTitle.setFontFamily(UI_FONTS.display);
     this.pauseTitle.setOrigin(0.5).setVisible(false);
-    this.pauseResumeButton = this.createButton("Resume", "pause-resume", () => this.closePauseMenu(), {
-      enabledFill: 0x355e94,
-      hoverFill: 0x4a76ae,
-    });
-    this.pauseRestartButton = this.createButton("New Game", "pause-restart", () => this.openRestartConfirm(), {
-      enabledFill: 0x7c4e2b,
-      hoverFill: 0x956039,
-      stroke: 0xf2debb,
-    });
+    this.pauseResumeButton = this.createButton("Resume", "pause-resume", () => this.closePauseMenu(), { variant: "primary" });
+    this.pauseRestartButton = this.createButton("New Game", "pause-restart", () => this.openRestartConfirm(), { variant: "warning" });
     this.pauseResumeButton.rectangle.setDepth(42);
     this.pauseResumeButton.label.setDepth(43);
     this.pauseRestartButton.rectangle.setDepth(42);
@@ -510,58 +494,42 @@ export class UIScene extends Phaser.Scene {
     this.setCompositeVisible(this.pauseResumeButton, false);
     this.setCompositeVisible(this.pauseRestartButton, false);
 
-    this.restartConfirmPanel = this.add.rectangle(0, 0, NEW_GAME_MODAL_WIDTH, NEW_GAME_MODAL_HEIGHT, 0xf2e6cc, 0.98).setDepth(44).setVisible(false);
-    this.restartConfirmPanel.setStrokeStyle(3, 0x6e4a22, 1);
+    this.restartConfirmPanel = this.add
+      .rectangle(0, 0, NEW_GAME_MODAL_WIDTH, NEW_GAME_MODAL_HEIGHT, SEMANTIC_COLORS.panelElevatedBg, 0.98)
+      .setDepth(44)
+      .setVisible(false);
+    this.restartConfirmPanel.setStrokeStyle(3, SEMANTIC_COLORS.panelBorder, 1);
     this.restartConfirmPanel.setInteractive();
     this.restartConfirmPanel.on("pointerdown", (_pointer, _x, _y, event) => event.stopPropagation());
-    this.restartConfirmTitle = this.createLabel("New Game", 0, 0, "30px", "#4a2e12", 45);
+    this.restartConfirmTitle = this.createLabel("New Game", 0, 0, "30px", "#472f17", 45);
+    this.restartConfirmTitle.setFontFamily(UI_FONTS.display);
     this.restartConfirmTitle.setOrigin(0.5).setVisible(false);
-    this.restartConfirmSubtitle = this.createLabel("Configure map size and enemy factions.", 0, 0, "16px", "#4a2e12", 45);
+    this.restartConfirmSubtitle = this.createLabel("Configure map size and enemy factions.", 0, 0, "16px", "#472f17", 45);
     this.restartConfirmSubtitle.setOrigin(0.5).setVisible(false);
     this.newGameMapPresetButtons = NEW_GAME_MAP_PRESETS.map((size) =>
       this.createButton(`${size}x${size}`, `new-game-map-${size}`, () => this.setNewGameMapSize(size), {
+        variant: "primary",
         width: 92,
         height: 30,
         fontSize: "13px",
-        enabledFill: 0x44617d,
-        hoverFill: 0x537496,
-        activeFill: 0x2f6c3d,
-        disabledFill: 0x6b6f75,
-        stroke: 0xd9d0bf,
       })
     );
-    this.newGameAiLabel = this.createLabel("Enemies", 0, 0, "15px", "#4a2e12", 45).setOrigin(0.5).setVisible(false);
-    this.newGameAiValueLabel = this.createLabel("2", 0, 0, "20px", "#2f2010", 45).setOrigin(0.5).setVisible(false);
+    this.newGameAiLabel = this.createLabel("Enemies", 0, 0, "15px", "#472f17", 45).setOrigin(0.5).setVisible(false);
+    this.newGameAiValueLabel = this.createLabel("2", 0, 0, "20px", "#2a1d11", 45).setOrigin(0.5).setVisible(false);
     this.newGameAiMinusButton = this.createButton("-", "new-game-ai-minus", () => this.adjustNewGameAiCount(-1), {
+      variant: "chip",
       width: 36,
       height: 30,
       fontSize: "20px",
-      enabledFill: 0x6f6d63,
-      hoverFill: 0x848175,
-      disabledFill: 0x7c7065,
-      stroke: 0xf2debb,
     });
     this.newGameAiPlusButton = this.createButton("+", "new-game-ai-plus", () => this.adjustNewGameAiCount(1), {
+      variant: "chip",
       width: 36,
       height: 30,
       fontSize: "20px",
-      enabledFill: 0x6f6d63,
-      hoverFill: 0x848175,
-      disabledFill: 0x7c7065,
-      stroke: 0xf2debb,
     });
-    this.restartConfirmButton = this.createButton("Start New Game", "restart-confirm", () => this.confirmRestart(), {
-      enabledFill: 0x2f6c3d,
-      hoverFill: 0x3f8450,
-      disabledFill: 0x617965,
-      stroke: 0xe5f0dc,
-    });
-    this.restartCancelButton = this.createButton("Cancel", "restart-cancel", () => this.closeRestartConfirm(), {
-      enabledFill: 0x7c4e2b,
-      hoverFill: 0x956039,
-      disabledFill: 0x7c7065,
-      stroke: 0xf2debb,
-    });
+    this.restartConfirmButton = this.createButton("Start New Game", "restart-confirm", () => this.confirmRestart(), { variant: "success" });
+    this.restartCancelButton = this.createButton("Cancel", "restart-cancel", () => this.closeRestartConfirm(), { variant: "warning" });
     this.restartConfirmButton.rectangle.setDepth(46);
     this.restartConfirmButton.label.setDepth(47);
     this.restartCancelButton.rectangle.setDepth(46);
@@ -584,25 +552,24 @@ export class UIScene extends Phaser.Scene {
     this.setCompositeVisible(this.restartConfirmButton, false);
     this.setCompositeVisible(this.restartCancelButton, false);
 
-    this.cityOutcomePanel = this.add.rectangle(0, 0, 420, 160, 0xf2e6cc, 0.98).setDepth(48).setVisible(false);
-    this.cityOutcomePanel.setStrokeStyle(3, 0x6e4a22, 1);
+    this.cityOutcomePanel = this.add.rectangle(0, 0, 420, 160, SEMANTIC_COLORS.panelElevatedBg, 0.98).setDepth(48).setVisible(false);
+    this.cityOutcomePanel.setStrokeStyle(3, SEMANTIC_COLORS.panelBorder, 1);
     this.cityOutcomePanel.setInteractive();
     this.cityOutcomePanel.on("pointerdown", (_pointer, _x, _y, event) => event.stopPropagation());
-    this.cityOutcomeTitle = this.createLabel("City conquered", 0, 0, "30px", "#4a2e12", 49);
+    this.cityOutcomeTitle = this.createLabel("City conquered", 0, 0, "30px", "#472f17", 49);
+    this.cityOutcomeTitle.setFontFamily(UI_FONTS.display);
     this.cityOutcomeTitle.setOrigin(0.5).setVisible(false);
-    this.cityOutcomeSubtitle = this.createLabel("Capture it or raze it.", 0, 0, "17px", "#4a2e12", 49);
+    this.cityOutcomeSubtitle = this.createLabel("Capture it or raze it.", 0, 0, "17px", "#472f17", 49);
     this.cityOutcomeSubtitle.setOrigin(0.5).setVisible(false);
-    this.cityCaptureButton = this.createButton("Capture", "cityCapture", () =>
-      gameEvents.emit("city-outcome-requested", { choice: "capture" })
+    this.cityCaptureButton = this.createButton(
+      "Capture",
+      "cityCapture",
+      () => gameEvents.emit("city-outcome-requested", { choice: "capture" }),
+      { variant: "success" }
     );
     this.cityRazeButton = this.createButton("Raze", "cityRaze", () =>
       gameEvents.emit("city-outcome-requested", { choice: "raze" }),
-      {
-        enabledFill: 0x8a422f,
-        hoverFill: 0xa34f38,
-        disabledFill: 0x7e6f64,
-        stroke: 0xf2debb,
-      }
+      { variant: "danger" }
     );
     this.cityCaptureButton.rectangle.setDepth(50);
     this.cityCaptureButton.label.setDepth(51);
@@ -611,13 +578,14 @@ export class UIScene extends Phaser.Scene {
     this.setCompositeVisible(this.cityCaptureButton, false);
     this.setCompositeVisible(this.cityRazeButton, false);
 
-    this.resultPanel = this.add.rectangle(0, 0, 460, 170, 0xf2e6cc, 0.98).setDepth(52).setVisible(false);
-    this.resultPanel.setStrokeStyle(3, 0x6e4a22, 1);
-    this.resultTitle = this.createLabel("", 0, 0, "36px", "#4a2e12", 53);
+    this.resultPanel = this.add.rectangle(0, 0, 460, 170, SEMANTIC_COLORS.panelElevatedBg, 0.98).setDepth(52).setVisible(false);
+    this.resultPanel.setStrokeStyle(3, SEMANTIC_COLORS.panelBorder, 1);
+    this.resultTitle = this.createLabel("", 0, 0, "36px", "#472f17", 53);
+    this.resultTitle.setFontFamily(UI_FONTS.display);
     this.resultTitle.setOrigin(0.5).setVisible(false);
-    this.resultSubtitle = this.createLabel("", 0, 0, "19px", "#4a2e12", 53);
+    this.resultSubtitle = this.createLabel("", 0, 0, "19px", "#472f17", 53);
     this.resultSubtitle.setOrigin(0.5).setVisible(false);
-    this.resultRestartButton = this.createButton("New Game", "resultRestart", () => this.openRestartConfirm());
+    this.resultRestartButton = this.createButton("New Game", "resultRestart", () => this.openRestartConfirm(), { variant: "warning" });
     this.resultRestartButton.rectangle.setDepth(54);
     this.resultRestartButton.label.setDepth(55);
     this.setCompositeVisible(this.resultRestartButton, false);
@@ -645,6 +613,7 @@ export class UIScene extends Phaser.Scene {
       gameEvents.off("ui-toast-requested", this.handleNotificationRequested, this);
       gameEvents.off("ui-notifications-reset-requested", this.handleNotificationsReset, this);
       gameEvents.off("ui-sfx-requested", this.handleUiSfxRequested, this);
+      this.setTurnAssistantPulse(false);
       gameEvents.emit("ui-modal-state-changed", false);
     });
 
@@ -660,7 +629,7 @@ export class UIScene extends Phaser.Scene {
 
   createLabel(text, x, y, size, color, depth, stroke, strokeThickness = 0) {
     const config = {
-      fontFamily: "Trebuchet MS",
+      fontFamily: UI_FONTS.body,
       fontSize: normalizeFontSize(size, 13),
       color,
       ...(stroke ? { stroke, strokeThickness } : {}),
@@ -669,40 +638,49 @@ export class UIScene extends Phaser.Scene {
   }
 
   createButton(label, actionId, onClick, options = {}) {
-    const resolvedPalette = {
-      enabledFill: options.enabledFill ?? 0x355e94,
-      hoverFill: options.hoverFill ?? 0x4a76ae,
-      activeFill: options.activeFill ?? options.enabledFill ?? 0x355e94,
-      warningFill: options.warningFill ?? 0x8a5b2f,
-      disabledFill: options.disabledFill ?? 0x6d747e,
-      stroke: options.stroke ?? 0xe9d9b4,
-      textColor: options.textColor ?? "#fff8e8",
-      enabledAlpha: options.enabledAlpha ?? 0.96,
-      hoverAlpha: options.hoverAlpha ?? 1,
-      activeAlpha: options.activeAlpha ?? 0.98,
-      warningAlpha: options.warningAlpha ?? 0.98,
-      disabledAlpha: options.disabledAlpha ?? 0.85,
-    };
+    const variant = typeof options.variant === "string" ? options.variant : "primary";
+    const paletteOverrides = Object.fromEntries(
+      Object.entries({
+        enabledFill: options.enabledFill,
+        hoverFill: options.hoverFill,
+        activeFill: options.activeFill,
+        warningFill: options.warningFill,
+        disabledFill: options.disabledFill,
+        stroke: options.stroke,
+        textColor: options.textColor,
+        enabledAlpha: options.enabledAlpha,
+        hoverAlpha: options.hoverAlpha,
+        activeAlpha: options.activeAlpha,
+        warningAlpha: options.warningAlpha,
+        disabledAlpha: options.disabledAlpha,
+      }).filter(([, value]) => value !== undefined)
+    );
+    const resolvedPalette = resolveButtonPalette(variant, paletteOverrides);
 
     const width = options.width ?? BUTTON_WIDTH;
     const height = options.height ?? BUTTON_HEIGHT;
+    const strokeWidth = options.strokeWidth ?? BUTTON_STROKE_WIDTH;
 
     const rectangle = this.add
       .rectangle(0, 0, width, height, resolvedPalette.enabledFill, resolvedPalette.enabledAlpha)
-      .setStrokeStyle(2, resolvedPalette.stroke)
+      .setStrokeStyle(strokeWidth, resolvedPalette.stroke)
       .setInteractive({ useHandCursor: true })
       .setDepth(14);
     const text = this.createLabel(label, 0, 0, options.fontSize ?? "18px", resolvedPalette.textColor, 15).setOrigin(0.5);
+    text.setFontFamily(UI_FONTS.compact);
+    text.setLetterSpacing(0.2);
 
     const button = {
       rectangle,
       label: text,
+      defaultLabel: label,
       actionId,
       enabled: true,
       isActive: false,
       warning: false,
       onClick,
       palette: resolvedPalette,
+      variant,
       width,
       height,
     };
@@ -715,18 +693,20 @@ export class UIScene extends Phaser.Scene {
 
   createNotificationRow(index) {
     const panel = this.add
-      .rectangle(0, 0, 10, 10, 0xf3e8d1, 0.78)
+      .rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelElevatedBg, 0.8)
       .setOrigin(0, 0)
       .setDepth(17)
       .setVisible(false)
       .setInteractive({ useHandCursor: true });
-    panel.setStrokeStyle(1, 0x7d5a2f, 0.64);
-    const badge = this.add.rectangle(0, 0, 10, 10, 0x6f6d63, 0.9).setOrigin(0, 0).setDepth(18).setVisible(false);
+    panel.setStrokeStyle(1, SEMANTIC_COLORS.panelBorder, 0.68);
+    const stripe = this.add.rectangle(0, 0, 3, 10, SEMANTIC_COLORS.panelBorder, 0.8).setOrigin(0, 0).setDepth(18).setVisible(false);
+    const badge = this.add.rectangle(0, 0, 10, 10, 0x62635f, 0.9).setOrigin(0, 0).setDepth(18).setVisible(false);
     const badgeLabel = this.createLabel("", 0, 0, "10px", "#f8f0dd", 19).setVisible(false);
     const header = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textMuted, 19).setVisible(false);
     const message = this.createLabel("", 0, 0, "14px", SEMANTIC_COLORS.textStrong, 19).setVisible(false);
-    const jump = this.createLabel("Jump", 0, 0, "11px", SEMANTIC_COLORS.textInfo, 19).setVisible(false);
-    const entry = { panel, badge, badgeLabel, header, message, jump };
+    const unreadDot = this.add.circle(0, 0, 3, SEMANTIC_COLORS.accentBlue, 0.92).setDepth(19).setVisible(false);
+    const jump = this.createLabel("Focus", 0, 0, "11px", SEMANTIC_COLORS.textInfo, 19).setVisible(false);
+    const entry = { panel, stripe, badge, badgeLabel, header, message, unreadDot, jump };
     const clickHandler = () => this.focusNotificationByRow(index);
     panel.on("pointerdown", clickHandler);
     header.on("pointerdown", clickHandler);
@@ -737,10 +717,12 @@ export class UIScene extends Phaser.Scene {
 
   setNotificationRowVisible(row, visible) {
     row.panel.setVisible(visible);
+    row.stripe.setVisible(visible);
     row.badge.setVisible(visible);
     row.badgeLabel.setVisible(visible);
     row.header.setVisible(visible);
     row.message.setVisible(visible);
+    row.unreadDot.setVisible(false);
     row.jump.setVisible(false);
   }
 
@@ -862,7 +844,7 @@ export class UIScene extends Phaser.Scene {
   }
 
   animateButtonHover(button, isEntering) {
-    const scale = isEntering ? 1.015 : 1;
+    const scale = isEntering ? HUD_THEME.buttonHoverScale : 1;
     this.tweens.killTweensOf(button.rectangle);
     this.tweens.killTweensOf(button.label);
     this.tweens.add({
@@ -886,8 +868,8 @@ export class UIScene extends Phaser.Scene {
     this.tweens.killTweensOf(button.label);
     this.tweens.add({
       targets: [button.rectangle, button.label],
-      scaleX: 0.96,
-      scaleY: 0.96,
+      scaleX: HUD_THEME.buttonPressScale,
+      scaleY: HUD_THEME.buttonPressScale,
       yoyo: true,
       duration: 55,
       ease: "Quad.Out",
@@ -1073,7 +1055,7 @@ export class UIScene extends Phaser.Scene {
 
   layout(gameSize) {
     const isTabletLayout = gameSize.width < TABLET_LAYOUT_BREAKPOINT;
-    const edgePadding = isTabletLayout ? 10 : 24;
+    const edgePadding = isTabletLayout ? 12 : 20;
     const menuType = this.latestState?.uiActions?.contextMenuType ?? null;
     const selectedCity = this.latestState?.cities?.find((city) => city.id === this.latestState?.selectedCityId) ?? null;
     const isCityMenu = menuType === "city";
@@ -1082,10 +1064,11 @@ export class UIScene extends Phaser.Scene {
     const contextExpanded = contextVisible ? this.contextPanelExpanded : false;
     const showCityQueueRail = this.shouldShowCityQueueRail(this.latestState, menuType, selectedCity);
 
-    const hudTop = isTabletLayout ? 10 : 14;
+    const hudTop = isTabletLayout ? 12 : 16;
     const hudLeft = edgePadding + 12;
-    const hudLineGap = isTabletLayout ? 24 : 28;
-    this.turnLabel.setFontSize(isTabletLayout ? 21 : 25);
+    const hudLineGap = isTabletLayout ? 24 : 27;
+    const turnPreferredFontSize = isTabletLayout ? 21 : 25;
+    this.turnLabel.setFontSize(turnPreferredFontSize);
     this.foodLabel.setFontSize(isTabletLayout ? 17 : 19);
     this.productionLabel.setFontSize(isTabletLayout ? 17 : 19);
     this.scienceLabel.setFontSize(isTabletLayout ? 17 : 19);
@@ -1093,15 +1076,16 @@ export class UIScene extends Phaser.Scene {
     this.foodDeltaLabel.setFontSize(isTabletLayout ? 14 : 16);
     this.productionDeltaLabel.setFontSize(isTabletLayout ? 14 : 16);
     this.scienceDeltaLabel.setFontSize(isTabletLayout ? 14 : 16);
-    this.turnLabel.setPosition(hudLeft, hudTop + 6);
     this.foodLabel.setPosition(hudLeft, hudTop + 8 + hudLineGap);
     this.productionLabel.setPosition(hudLeft, hudTop + 8 + hudLineGap * 2);
     this.scienceLabel.setPosition(hudLeft, hudTop + 8 + hudLineGap * 3);
     this.devVisionLabel.setPosition(hudLeft, hudTop + 8 + hudLineGap * 4);
-    const hudPanelWidth = isTabletLayout ? 230 : 260;
-    const hudPanelHeight = isTabletLayout ? 138 : 156;
+    const hudPanelWidth = isTabletLayout ? 244 : 286;
+    const hudPanelHeight = isTabletLayout ? 142 : 160;
     this.topHudPanel.setPosition(edgePadding, hudTop);
     this.topHudPanel.setSize(hudPanelWidth, hudPanelHeight);
+    this.fitTextSizeToWidth(this.turnLabel, turnPreferredFontSize, isTabletLayout ? 17 : 19, hudPanelWidth - 24);
+    this.turnLabel.setPosition(hudLeft, hudTop + 6);
     const sfxX = edgePadding + hudPanelWidth - this.sfxToggleButton.width / 2 - 8;
     const sfxY = hudTop + hudPanelHeight - this.sfxToggleButton.height / 2 - 8;
     this.sfxToggleButton.rectangle.setPosition(sfxX, sfxY);
@@ -1109,7 +1093,7 @@ export class UIScene extends Phaser.Scene {
     const statsX = sfxX - this.sfxToggleButton.width / 2 - this.statsToggleButton.width / 2 - 6;
     this.statsToggleButton.rectangle.setPosition(statsX, sfxY);
     this.statsToggleButton.label.setPosition(statsX, sfxY);
-    const forecastWidth = isTabletLayout ? 240 : 282;
+    const forecastWidth = isTabletLayout ? 248 : 300;
     const forecastHeight = isTabletLayout ? FORECAST_PANEL_HEIGHT_TABLET : FORECAST_PANEL_HEIGHT;
     const forecastLeft = edgePadding;
     const forecastTop = hudTop + hudPanelHeight + 8;
@@ -1147,33 +1131,45 @@ export class UIScene extends Phaser.Scene {
     this.playbackLabel.setWordWrapWidth(Math.max(160, playbackWidth - 20), true);
 
     this.notificationVisibleRows = isTabletLayout ? 4 : 5;
-    const notificationWidth = isTabletLayout ? Math.max(250, Math.floor(gameSize.width * 0.62)) : 380;
+    const notificationWidth = isTabletLayout ? Math.max(268, Math.floor(gameSize.width * 0.6)) : 356;
     const visibleNotificationCount = Math.min(this.notificationVisibleRows, this.getDisplayNotifications().length);
     const notificationFilterHeight = isTabletLayout ? 60 : 34;
     const notificationContentHeight = visibleNotificationCount > 0 ? visibleNotificationCount * NOTIFICATION_ROW_HEIGHT + 14 : 0;
-    const notificationHeight = 34 + notificationFilterHeight + notificationContentHeight;
+    const notificationHeight = NOTIFICATION_HEADER_HEIGHT + notificationFilterHeight + notificationContentHeight;
     const notificationLeft = gameSize.width - edgePadding - notificationWidth;
     this.notificationPanel.setPosition(notificationLeft + notificationWidth / 2, edgePadding + notificationHeight / 2);
     this.notificationPanel.setSize(notificationWidth, notificationHeight);
     this.notificationPanel.setDisplaySize(notificationWidth, notificationHeight);
+    this.notificationAccent.setPosition(notificationLeft + 6, edgePadding + 6);
+    this.notificationAccent.setSize(notificationWidth - 12, 4);
     this.notificationTitle.setPosition(notificationLeft + 12, edgePadding + 10);
+    this.notificationSubtitle.setPosition(notificationLeft + 12, edgePadding + 25);
+    const filterGap = isTabletLayout ? 6 : 4;
 
     if (isTabletLayout) {
-      this.layoutButtonRow(this.notificationFilterButtons.slice(0, 3), notificationLeft + notificationWidth / 2, edgePadding + 38, 4);
-      this.layoutButtonRow(this.notificationFilterButtons.slice(3), notificationLeft + notificationWidth / 2, edgePadding + 64, 6);
+      const firstRow = this.notificationFilterButtons.slice(0, 3);
+      const secondRow = this.notificationFilterButtons.slice(3);
+      this.fitButtonRowWidths(firstRow, notificationWidth - 24, 58, 86, filterGap);
+      this.fitButtonRowWidths(secondRow, notificationWidth - 24, 58, 86, filterGap);
+      this.layoutButtonRow(firstRow, notificationLeft + notificationWidth / 2, edgePadding + 44, filterGap);
+      this.layoutButtonRow(secondRow, notificationLeft + notificationWidth / 2, edgePadding + 70, filterGap);
     } else {
-      this.layoutButtonRow(this.notificationFilterButtons, notificationLeft + notificationWidth / 2, edgePadding + 40, 6);
+      this.fitButtonRowWidths(this.notificationFilterButtons, notificationWidth - 18, 50, 80, filterGap);
+      this.layoutButtonRow(this.notificationFilterButtons, notificationLeft + notificationWidth / 2, edgePadding + 47, filterGap);
     }
 
-    const rowStartY = edgePadding + (isTabletLayout ? 94 : 68);
+    const rowStartY = edgePadding + NOTIFICATION_HEADER_HEIGHT + notificationFilterHeight + 2;
     for (let i = 0; i < this.notificationRows.length; i += 1) {
       const row = this.notificationRows[i];
       const rowTop = rowStartY + i * NOTIFICATION_ROW_HEIGHT;
-      row.panel.setPosition(notificationLeft + 8, rowTop);
-      row.panel.setSize(notificationWidth - 16, NOTIFICATION_ROW_HEIGHT - 4);
-      row.badge.setPosition(notificationLeft + 14, rowTop + 8);
-      row.header.setPosition(notificationLeft + 72, rowTop + 7);
-      row.message.setPosition(notificationLeft + 16, rowTop + 24);
+      row.panel.setPosition(notificationLeft + NOTIFICATION_ROW_INSET, rowTop);
+      row.panel.setSize(notificationWidth - NOTIFICATION_ROW_INSET * 2, NOTIFICATION_ROW_HEIGHT - 4);
+      row.stripe.setPosition(notificationLeft + NOTIFICATION_ROW_INSET, rowTop);
+      row.stripe.setSize(3, NOTIFICATION_ROW_HEIGHT - 4);
+      row.badge.setPosition(notificationLeft + 16, rowTop + 8);
+      row.header.setPosition(notificationLeft + 78, rowTop + 7);
+      row.message.setPosition(notificationLeft + 20, rowTop + 24);
+      row.unreadDot.setPosition(notificationLeft + notificationWidth - 62, rowTop + 14);
       row.jump.setPosition(notificationLeft + notificationWidth - 48, rowTop + 7);
       row.badgeLabel.setPosition(row.badge.x + 5, row.badge.y + 2);
       if (i >= this.notificationVisibleRows) {
@@ -1197,7 +1193,7 @@ export class UIScene extends Phaser.Scene {
           Math.min(780, gameSize.width - CONTEXT_PANEL_WIDTH_PADDING)
         );
     const contextX = gameSize.width / 2;
-    const contextY = gameSize.height - contextHeight / 2 - (isTabletLayout ? 8 : 12);
+    const contextY = gameSize.height - contextHeight / 2 - (isTabletLayout ? 10 : 14);
     const contextTop = contextY - contextHeight / 2;
     const titleOffset = contextExpanded ? (isTabletLayout ? (isCityMenu ? 124 : 90) : isCityMenu ? 96 : 58) : 4;
     const metaPrimaryOffset = isTabletLayout ? (isCityMenu ? 96 : 62) : isCityMenu ? 70 : 34;
@@ -1241,7 +1237,7 @@ export class UIScene extends Phaser.Scene {
       this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 36, 16);
     }
 
-    const selectedPanelWidth = isTabletLayout ? Math.max(150, Math.min(230, Math.floor(gameSize.width * 0.5))) : 460;
+    const selectedPanelWidth = isTabletLayout ? Math.max(154, Math.min(236, Math.floor(gameSize.width * 0.5))) : 432;
     const selectedPanelHeight = isTabletLayout ? 88 : 92;
     const selectedPanelY =
       isTabletLayout && contextVisible ? contextTop - selectedPanelHeight - 8 : gameSize.height - selectedPanelHeight - 14;
@@ -1263,18 +1259,25 @@ export class UIScene extends Phaser.Scene {
     this.minimapPanel.setSize(minimapWidth, minimapHeight);
     this.minimapPanel.setDisplaySize(minimapWidth, minimapHeight);
     this.minimapTitle.setPosition(minimapPosition.x + 10, minimapPosition.y + 8);
+    this.minimapCaption.setPosition(minimapPosition.x + minimapWidth - 10, minimapPosition.y + minimapHeight - 14);
+    this.minimapCaption.setOrigin(1, 0);
     this.minimapContentBounds = {
       x: minimapPosition.x + MINIMAP_INSET,
-      y: minimapPosition.y + 24,
+      y: minimapPosition.y + MINIMAP_TITLE_HEIGHT,
       width: Math.max(32, minimapWidth - MINIMAP_INSET * 2),
-      height: Math.max(32, minimapHeight - 32),
+      height: Math.max(32, minimapHeight - MINIMAP_TITLE_HEIGHT - MINIMAP_CAPTION_HEIGHT - 6),
     };
+    this.minimapInsetPanel.setPosition(this.minimapContentBounds.x, this.minimapContentBounds.y);
+    this.minimapInsetPanel.setSize(this.minimapContentBounds.width, this.minimapContentBounds.height);
+    this.minimapInsetPanel.setDisplaySize(this.minimapContentBounds.width, this.minimapContentBounds.height);
     this.minimapHitArea.setPosition(this.minimapContentBounds.x, this.minimapContentBounds.y);
     this.minimapHitArea.setSize(this.minimapContentBounds.width, this.minimapContentBounds.height);
     this.minimapHitArea.setDisplaySize(this.minimapContentBounds.width, this.minimapContentBounds.height);
     this.minimapVisible = minimapHasRoom && this.latestState?.match?.status === "ongoing";
     this.minimapPanel.setVisible(this.minimapVisible);
+    this.minimapInsetPanel.setVisible(this.minimapVisible);
     this.minimapTitle.setVisible(this.minimapVisible);
+    this.minimapCaption.setVisible(this.minimapVisible);
     this.minimapHitArea.setVisible(this.minimapVisible);
     this.minimapViewportFrame.setVisible(this.minimapVisible);
     if (this.minimapVisible) {
@@ -1283,7 +1286,7 @@ export class UIScene extends Phaser.Scene {
       this.minimapHitArea.disableInteractive();
     }
 
-    const endTurnWidth = isTabletLayout ? 146 : BUTTON_WIDTH;
+    const endTurnWidth = isTabletLayout ? 146 : 172;
     this.endTurnButton.width = endTurnWidth;
     this.endTurnButton.rectangle.setSize(endTurnWidth, BUTTON_HEIGHT);
     this.endTurnButton.rectangle.setDisplaySize(endTurnWidth, BUTTON_HEIGHT);
@@ -1295,12 +1298,15 @@ export class UIScene extends Phaser.Scene {
     this.endTurnButton.label.setPosition(endTurnX, endTurnY);
 
     const statusWidth = endTurnWidth;
-    const statusHeight = isTabletLayout ? 72 : 76;
+    const statusHeight = isTabletLayout ? 72 : 74;
     const statusY = endTurnY - BUTTON_HEIGHT / 2 - statusHeight / 2 - (isTabletLayout ? 10 : 12);
 
     this.turnAssistantPanel.setPosition(endTurnX, statusY);
     this.turnAssistantPanel.setSize(statusWidth, statusHeight);
     this.turnAssistantPanel.setDisplaySize(statusWidth, statusHeight);
+    this.turnAssistantAccent.setPosition(endTurnX, statusY - statusHeight / 2 + 4);
+    this.turnAssistantAccent.setSize(statusWidth - 10, 4);
+    this.turnAssistantStatusDot.setPosition(endTurnX - statusWidth / 2 + 10, statusY - statusHeight / 2 + 11);
     this.turnAssistantLabel.setPosition(endTurnX, statusY - statusHeight / 2 + 11);
     this.turnAssistantSecondaryLabel.setPosition(endTurnX, statusY + statusHeight / 2 - 12);
     const chipGap = isTabletLayout ? 4 : 6;
@@ -1332,8 +1338,8 @@ export class UIScene extends Phaser.Scene {
       visible: showCityQueueRail,
     });
 
-    const hintWidth = isTabletLayout ? gameSize.width - edgePadding * 2 : 440;
-    const hintHeight = isTabletLayout ? 82 : 74;
+    const hintWidth = isTabletLayout ? gameSize.width - edgePadding * 2 : 420;
+    const hintHeight = isTabletLayout ? 82 : 72;
     const hintY = isTabletLayout ? Math.max(178, notificationHeight + edgePadding + hintHeight / 2 + 16) : 56;
     this.hintPanel.setPosition(gameSize.width / 2, hintY);
     this.hintPanel.setSize(hintWidth, hintHeight);
@@ -1342,7 +1348,7 @@ export class UIScene extends Phaser.Scene {
     this.hintPrimary.setWordWrapWidth(Math.max(140, hintWidth - 20), true);
     this.hintSecondary.setWordWrapWidth(Math.max(120, hintWidth - 20), true);
 
-    const previewWidth = isTabletLayout ? Math.max(190, gameSize.width - edgePadding * 2) : 360;
+    const previewWidth = isTabletLayout ? Math.max(198, gameSize.width - edgePadding * 2) : 344;
     const previewHeight = 66;
     const previewY = hintY + (isTabletLayout ? 82 : 74);
     this.previewPanel.setPosition(gameSize.width / 2, previewY);
@@ -1393,6 +1399,7 @@ export class UIScene extends Phaser.Scene {
     this.resultRestartButton.rectangle.setPosition(gameSize.width / 2, gameSize.height / 2 + 74);
     this.resultRestartButton.label.setPosition(gameSize.width / 2, gameSize.height / 2 + 74);
     this.minimapTerrainKey = "";
+    this.minimapViewportKey = "";
     this.renderMinimap();
   }
 
@@ -1436,11 +1443,17 @@ export class UIScene extends Phaser.Scene {
     }
     const mapWidth = Math.max(1, Number(this.latestState.map?.width ?? 0));
     const mapHeight = Math.max(1, Number(this.latestState.map?.height ?? 0));
-    const bounds = this.minimapContentBounds;
-    const normalizedX = Phaser.Math.Clamp((pointer.x - bounds.x) / Math.max(1, bounds.width), 0, 1);
-    const normalizedY = Phaser.Math.Clamp((pointer.y - bounds.y) / Math.max(1, bounds.height), 0, 1);
-    const q = Phaser.Math.Clamp(Math.round(normalizedX * (mapWidth - 1)), 0, mapWidth - 1);
-    const r = Phaser.Math.Clamp(Math.round(normalizedY * (mapHeight - 1)), 0, mapHeight - 1);
+    const projection = this.getMinimapProjectionState(mapWidth, mapHeight);
+    const projected = worldToAxial(pointer.x, pointer.y, projection.hexRadius, projection.minimapOriginX, projection.minimapOriginY);
+    let q = Phaser.Math.Clamp(Math.round(projected.q), 0, mapWidth - 1);
+    let r = Phaser.Math.Clamp(Math.round(projected.r), 0, mapHeight - 1);
+    const primaryCenter = this.projectHexToMinimap(q, r, projection);
+    const isPrimaryHit = this.isPointInsideHex(pointer.x, pointer.y, primaryCenter.x, primaryCenter.y, projection.hexRadius * 0.92);
+    if (!isPrimaryHit) {
+      const fallback = this.findNearestMinimapHex(pointer.x, pointer.y, mapWidth, mapHeight, projection, q, r);
+      q = fallback.q;
+      r = fallback.r;
+    }
     gameEvents.emit("minimap-focus-requested", { q, r });
     this.playUiSfx("select");
     return true;
@@ -1450,7 +1463,11 @@ export class UIScene extends Phaser.Scene {
     if (!this.latestState || !this.minimapVisible) {
       this.minimapGraphics.clear();
       this.minimapMarkerGraphics.clear();
+      this.minimapViewportGraphics.clear();
       this.minimapTerrainKey = "";
+      this.minimapViewportKey = "";
+      this.minimapViewportBoundarySegments = 0;
+      this.minimapViewportFootprint = null;
       this.minimapViewportFrame.setVisible(false);
       return;
     }
@@ -1459,39 +1476,42 @@ export class UIScene extends Phaser.Scene {
     if (!map || !Array.isArray(map.tiles) || map.tiles.length === 0) {
       this.minimapGraphics.clear();
       this.minimapMarkerGraphics.clear();
+      this.minimapViewportGraphics.clear();
       this.minimapTerrainKey = "";
+      this.minimapViewportKey = "";
+      this.minimapViewportBoundarySegments = 0;
+      this.minimapViewportFootprint = null;
       this.minimapViewportFrame.setVisible(false);
       return;
     }
     const bounds = this.minimapContentBounds;
     const mapWidth = Math.max(1, map.width ?? 1);
     const mapHeight = Math.max(1, map.height ?? 1);
-    const cellWidth = bounds.width / mapWidth;
-    const cellHeight = bounds.height / mapHeight;
+    const projection = this.getMinimapProjectionState(mapWidth, mapHeight, bounds);
     const playerVisibility = this.latestState.visibility?.byOwner?.player ?? { visibleHexes: [], exploredHexes: [] };
     const visibleSet = new Set(playerVisibility.visibleHexes ?? []);
     const exploredSet = new Set(playerVisibility.exploredHexes ?? []);
     const terrainKey = `${this.latestState.meta?.mapRevision ?? map.width}:${this.latestState.meta?.visibilityRevision ?? exploredSet.size}:${
       this.latestState.devVisionEnabled ? 1 : 0
-    }`;
+    }:${Math.round(projection.hexRadius * 100)}:${Math.round(bounds.width)}:${Math.round(bounds.height)}`;
+    const tileRadius = Math.max(1, projection.hexRadius * 0.88);
 
     if (terrainKey !== this.minimapTerrainKey) {
       this.minimapGraphics.clear();
-      this.minimapGraphics.fillStyle(0x3f3c37, 0.88);
+      this.minimapGraphics.fillStyle(SEMANTIC_COLORS.minimapFog, 0.82);
       this.minimapGraphics.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
       for (const tile of map.tiles) {
         const q = Phaser.Math.Clamp(Math.round(tile.q), 0, mapWidth - 1);
         const r = Phaser.Math.Clamp(Math.round(tile.r), 0, mapHeight - 1);
         const key = `${q},${r}`;
         const color = resolveMinimapTileColor(tile.terrainType, exploredSet.has(key), visibleSet.has(key));
-        this.minimapGraphics.fillStyle(color, 0.96);
-        this.minimapGraphics.fillRect(
-          bounds.x + q * cellWidth,
-          bounds.y + r * cellHeight,
-          Math.max(1, cellWidth - 0.35),
-          Math.max(1, cellHeight - 0.35)
-        );
+        const center = this.projectHexToMinimap(q, r, projection);
+        this.minimapGraphics.lineStyle(1, 0x2c2924, 0.14);
+        this.minimapGraphics.fillStyle(color, 0.9);
+        this.drawMinimapHex(this.minimapGraphics, center.x, center.y, tileRadius);
       }
+      this.minimapGraphics.lineStyle(1, 0xd8c9ab, 0.36);
+      this.minimapGraphics.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
       this.minimapTerrainKey = terrainKey;
     }
 
@@ -1500,12 +1520,9 @@ export class UIScene extends Phaser.Scene {
       if (!exploredSet.has(key) && !this.latestState.devVisionEnabled) {
         continue;
       }
-      this.minimapMarkerGraphics.fillStyle(resolveMinimapOwnerColor(city.owner), 0.98);
-      this.minimapMarkerGraphics.fillCircle(
-        bounds.x + (city.q + 0.5) * cellWidth,
-        bounds.y + (city.r + 0.5) * cellHeight,
-        Math.max(1.4, Math.min(cellWidth, cellHeight) * 0.42)
-      );
+      const center = this.projectHexToMinimap(city.q, city.r, projection);
+      this.minimapMarkerGraphics.fillStyle(resolveMinimapOwnerColor(city.owner), 0.72);
+      this.minimapMarkerGraphics.fillCircle(center.x, center.y, Math.max(1.2, projection.hexRadius * 0.3));
     }
 
     for (const unit of this.latestState.units ?? []) {
@@ -1513,11 +1530,12 @@ export class UIScene extends Phaser.Scene {
       if (!visibleSet.has(key) && !this.latestState.devVisionEnabled) {
         continue;
       }
-      this.minimapMarkerGraphics.fillStyle(resolveMinimapOwnerColor(unit.owner), 0.92);
-      const markerSize = Math.max(1, Math.min(cellWidth, cellHeight) * 0.38);
+      const center = this.projectHexToMinimap(unit.q, unit.r, projection);
+      this.minimapMarkerGraphics.fillStyle(resolveMinimapOwnerColor(unit.owner), 0.62);
+      const markerSize = Math.max(1, projection.hexRadius * 0.26);
       this.minimapMarkerGraphics.fillRect(
-        bounds.x + (unit.q + 0.5) * cellWidth - markerSize / 2,
-        bounds.y + (unit.r + 0.5) * cellHeight - markerSize / 2,
+        center.x - markerSize / 2,
+        center.y - markerSize / 2,
         markerSize,
         markerSize
       );
@@ -1528,50 +1546,346 @@ export class UIScene extends Phaser.Scene {
 
   renderMinimapViewportFrame() {
     if (!this.minimapVisible || !this.latestState) {
+      this.minimapViewportGraphics.clear();
+      this.minimapViewportBoundarySegments = 0;
+      this.minimapViewportFootprint = null;
+      this.minimapViewportKey = "";
       this.minimapViewportFrame.setVisible(false);
       return;
     }
     const mapWidth = Math.max(1, this.latestState.map?.width ?? 1);
     const mapHeight = Math.max(1, this.latestState.map?.height ?? 1);
-    const bounds = this.minimapContentBounds;
-    const cellWidth = bounds.width / mapWidth;
-    const cellHeight = bounds.height / mapHeight;
-    const frame = this.projectCameraFrameToMinimap(mapWidth, mapHeight, cellWidth, cellHeight, bounds);
-    if (!frame) {
+    const projection = this.getMinimapProjectionState(mapWidth, mapHeight);
+    const focusHex = this.latestState.cameraFocusHex;
+    const hasFocusTarget = !!focusHex && Number.isFinite(focusHex.q) && Number.isFinite(focusHex.r);
+    const viewportKey = this.buildMinimapViewportCacheKey(projection, hasFocusTarget);
+    if (viewportKey === this.minimapViewportKey) {
+      return;
+    }
+
+    const viewportHexes = this.getViewportMinimapHexes(mapWidth, mapHeight, projection);
+    const boundarySegments = this.buildViewportBoundarySegments(viewportHexes, projection);
+    const frame = this.projectCameraFrameToMinimap(boundarySegments, viewportHexes, projection);
+    this.minimapViewportGraphics.clear();
+    if (boundarySegments.length === 0 || !frame) {
+      this.minimapViewportBoundarySegments = 0;
+      this.minimapViewportFootprint = null;
+      this.minimapViewportKey = viewportKey;
+      this.minimapViewportGraphics.clear();
       this.minimapViewportFrame.setVisible(false);
       return;
     }
-    this.minimapViewportFrame.setVisible(true);
-    this.minimapViewportFrame.setPosition(frame.x, frame.y);
-    this.minimapViewportFrame.setSize(frame.width, frame.height);
-    this.minimapViewportFrame.setDisplaySize(frame.width, frame.height);
+
+    const viewportColor = hasFocusTarget ? 0x7f9fc2 : 0xb7ac95;
+    this.minimapViewportGraphics.lineStyle(hasFocusTarget ? 1.3 : 1, viewportColor, hasFocusTarget ? 0.72 : 0.52);
+    for (const segment of boundarySegments) {
+      this.minimapViewportGraphics.lineBetween(segment.startX, segment.startY, segment.endX, segment.endY);
+    }
+    this.minimapViewportBoundarySegments = boundarySegments.length;
+    this.minimapViewportFootprint = frame;
+    this.minimapViewportKey = viewportKey;
+    this.minimapViewportFrame.setVisible(false);
   }
 
-  projectCameraFrameToMinimap(mapWidth, mapHeight, cellWidth, cellHeight, bounds) {
-    const scroll = this.latestState?.cameraScroll;
-    if (!scroll || !Number.isFinite(scroll.x) || !Number.isFinite(scroll.y)) {
+  getViewportMinimapHexes(mapWidth, mapHeight, projection) {
+    const viewport = this.latestState?.cameraViewportWorld;
+    if (
+      !viewport ||
+      !Number.isFinite(viewport.left) ||
+      !Number.isFinite(viewport.top) ||
+      !Number.isFinite(viewport.right) ||
+      !Number.isFinite(viewport.bottom)
+    ) {
+      return [];
+    }
+    const visibleHexes = [];
+
+    for (let r = 0; r < mapHeight; r += 1) {
+      for (let q = 0; q < mapWidth; q += 1) {
+        const world = axialToWorld({ q, r }, HEX_SIZE, projection.worldOriginX, projection.worldOriginY);
+        if (!this.isHexIntersectingViewport(world.x, world.y, viewport, projection.worldHalfHexWidth)) {
+          continue;
+        }
+        const minimap = this.projectHexToMinimap(q, r, projection);
+        visibleHexes.push({ q, r, key: `${q},${r}`, x: minimap.x, y: minimap.y });
+      }
+    }
+    return visibleHexes;
+  }
+
+  buildViewportBoundarySegments(viewportHexes, projection) {
+    if (!Array.isArray(viewportHexes) || viewportHexes.length === 0) {
+      return [];
+    }
+    const visibleKeySet = new Set(viewportHexes.map((hex) => hex.key));
+    const segmentByKey = new Map();
+    const edgeRadius = Math.max(1, projection.hexRadius * 0.86);
+    for (const hex of viewportHexes) {
+      for (let directionIndex = 0; directionIndex < AXIAL_DIRECTIONS.length; directionIndex += 1) {
+        const direction = AXIAL_DIRECTIONS[directionIndex];
+        const neighborKey = `${hex.q + direction.q},${hex.r + direction.r}`;
+        if (visibleKeySet.has(neighborKey)) {
+          continue;
+        }
+        const edgeIndex = DIRECTION_TO_EDGE_INDEX[directionIndex];
+        const nextEdgeIndex = (edgeIndex + 1) % MINIMAP_HEX_CORNERS.length;
+        const startX = hex.x + MINIMAP_HEX_CORNERS[edgeIndex].x * edgeRadius;
+        const startY = hex.y + MINIMAP_HEX_CORNERS[edgeIndex].y * edgeRadius;
+        const endX = hex.x + MINIMAP_HEX_CORNERS[nextEdgeIndex].x * edgeRadius;
+        const endY = hex.y + MINIMAP_HEX_CORNERS[nextEdgeIndex].y * edgeRadius;
+        const canonicalKey = this.buildCanonicalSegmentKey(startX, startY, endX, endY);
+        segmentByKey.set(canonicalKey, { startX, startY, endX, endY });
+      }
+    }
+    return [...segmentByKey.values()];
+  }
+
+  projectCameraFrameToMinimap(boundarySegments, viewportHexes, projection) {
+    if ((!Array.isArray(boundarySegments) || boundarySegments.length === 0) && (!Array.isArray(viewportHexes) || viewportHexes.length === 0)) {
       return null;
     }
-    const hexWidth = SQRT_3 * HEX_SIZE;
-    const mapPixelWidth = hexWidth * mapWidth + hexWidth * 0.5 * (mapHeight - 1);
-    const mapPixelHeight = HEX_SIZE * 1.5 * (mapHeight - 1) + HEX_SIZE * 2;
-    const originX = (this.scale.width - mapPixelWidth) / 2 + hexWidth / 2;
-    const originY = (this.scale.height - mapPixelHeight) / 2 + HEX_SIZE;
-    const viewportLeft = scroll.x;
-    const viewportTop = scroll.y;
-    const viewportRight = viewportLeft + this.scale.width;
-    const viewportBottom = viewportTop + this.scale.height;
-    const topLeft = worldToAxial(viewportLeft, viewportTop, HEX_SIZE, originX, originY);
-    const bottomRight = worldToAxial(viewportRight, viewportBottom, HEX_SIZE, originX, originY);
-    const qMin = Phaser.Math.Clamp(Math.min(topLeft.q, bottomRight.q) - 1, 0, mapWidth - 1);
-    const qMax = Phaser.Math.Clamp(Math.max(topLeft.q, bottomRight.q) + 1, 0, mapWidth - 1);
-    const rMin = Phaser.Math.Clamp(Math.min(topLeft.r, bottomRight.r) - 1, 0, mapHeight - 1);
-    const rMax = Phaser.Math.Clamp(Math.max(topLeft.r, bottomRight.r) + 1, 0, mapHeight - 1);
-    const x = Phaser.Math.Clamp(bounds.x + qMin * cellWidth, bounds.x, bounds.x + bounds.width - 2);
-    const y = Phaser.Math.Clamp(bounds.y + rMin * cellHeight, bounds.y, bounds.y + bounds.height - 2);
-    const width = Phaser.Math.Clamp((qMax - qMin + 1) * cellWidth, 2, bounds.width);
-    const height = Phaser.Math.Clamp((rMax - rMin + 1) * cellHeight, 2, bounds.height);
+    const bounds = projection.bounds;
+    let frameLeft = Number.POSITIVE_INFINITY;
+    let frameTop = Number.POSITIVE_INFINITY;
+    let frameRight = Number.NEGATIVE_INFINITY;
+    let frameBottom = Number.NEGATIVE_INFINITY;
+    if (Array.isArray(boundarySegments) && boundarySegments.length > 0) {
+      for (const segment of boundarySegments) {
+        frameLeft = Math.min(frameLeft, segment.startX, segment.endX);
+        frameTop = Math.min(frameTop, segment.startY, segment.endY);
+        frameRight = Math.max(frameRight, segment.startX, segment.endX);
+        frameBottom = Math.max(frameBottom, segment.startY, segment.endY);
+      }
+    } else {
+      const halfFrameHexWidth = projection.halfHexWidth * 0.65;
+      const halfFrameHexHeight = projection.hexRadius * 0.65;
+      for (const hex of viewportHexes) {
+        frameLeft = Math.min(frameLeft, hex.x - halfFrameHexWidth);
+        frameTop = Math.min(frameTop, hex.y - halfFrameHexHeight);
+        frameRight = Math.max(frameRight, hex.x + halfFrameHexWidth);
+        frameBottom = Math.max(frameBottom, hex.y + halfFrameHexHeight);
+      }
+    }
+    if (!Number.isFinite(frameLeft) || !Number.isFinite(frameTop) || !Number.isFinite(frameRight) || !Number.isFinite(frameBottom)) {
+      return null;
+    }
+    const x = Phaser.Math.Clamp(frameLeft, bounds.x, bounds.x + bounds.width - 2);
+    const y = Phaser.Math.Clamp(frameTop, bounds.y, bounds.y + bounds.height - 2);
+    const clampedRight = Phaser.Math.Clamp(frameRight, x + 2, bounds.x + bounds.width);
+    const clampedBottom = Phaser.Math.Clamp(frameBottom, y + 2, bounds.y + bounds.height);
+    const width = Math.max(2, clampedRight - x);
+    const height = Math.max(2, clampedBottom - y);
     return { x, y, width, height };
+  }
+
+  buildMinimapViewportCacheKey(projection, hasFocusTarget) {
+    const viewport = this.latestState?.cameraViewportWorld;
+    const mapWorldBounds = this.latestState?.mapWorldBounds;
+    const mapRevision = this.latestState?.meta?.mapRevision ?? 0;
+    const viewportKey = viewport
+      ? `${Math.round(viewport.left * 10)}:${Math.round(viewport.top * 10)}:${Math.round(viewport.right * 10)}:${Math.round(viewport.bottom * 10)}`
+      : "noviewport";
+    const worldKey = mapWorldBounds
+      ? `${Math.round(mapWorldBounds.left * 10)}:${Math.round(mapWorldBounds.top * 10)}:${Math.round(mapWorldBounds.right * 10)}:${Math.round(mapWorldBounds.bottom * 10)}`
+      : "nomapbounds";
+    const bounds = projection.bounds;
+    return [
+      mapRevision,
+      projection.mapWidth,
+      projection.mapHeight,
+      Math.round(projection.hexRadius * 1000),
+      Math.round(bounds.x),
+      Math.round(bounds.y),
+      Math.round(bounds.width),
+      Math.round(bounds.height),
+      viewportKey,
+      worldKey,
+      hasFocusTarget ? 1 : 0,
+    ].join("|");
+  }
+
+  getMinimapProjectionState(mapWidth, mapHeight, bounds = this.minimapContentBounds) {
+    const widthFactor = SQRT_3 * (mapWidth + (mapHeight - 1) * 0.5);
+    const heightFactor = mapHeight * 1.5 + 0.5;
+    const hexRadius = Math.max(1, Math.min(bounds.width / Math.max(1, widthFactor), bounds.height / Math.max(1, heightFactor)));
+    const drawWidth = widthFactor * hexRadius;
+    const drawHeight = heightFactor * hexRadius;
+    const drawLeft = bounds.x + (bounds.width - drawWidth) / 2;
+    const drawTop = bounds.y + (bounds.height - drawHeight) / 2;
+    const mapWorldBounds = this.latestState?.mapWorldBounds;
+    const worldHalfHexWidth = (SQRT_3 * HEX_SIZE) / 2;
+    const worldOriginX = Number.isFinite(mapWorldBounds?.left) ? mapWorldBounds.left + worldHalfHexWidth : worldHalfHexWidth;
+    const worldOriginY = Number.isFinite(mapWorldBounds?.top) ? mapWorldBounds.top + HEX_SIZE : HEX_SIZE;
+    return {
+      bounds,
+      mapWidth,
+      mapHeight,
+      hexRadius,
+      halfHexWidth: SQRT_3 * 0.5 * hexRadius,
+      minimapOriginX: drawLeft + SQRT_3 * 0.5 * hexRadius,
+      minimapOriginY: drawTop + hexRadius,
+      worldHalfHexWidth,
+      worldOriginX,
+      worldOriginY,
+    };
+  }
+
+  isHexIntersectingViewport(centerX, centerY, viewport, worldHalfHexWidth) {
+    const boundsOverlap =
+      centerX + worldHalfHexWidth >= viewport.left &&
+      centerX - worldHalfHexWidth <= viewport.right &&
+      centerY + HEX_SIZE >= viewport.top &&
+      centerY - HEX_SIZE <= viewport.bottom;
+    if (!boundsOverlap) {
+      return false;
+    }
+    if (centerX >= viewport.left && centerX <= viewport.right && centerY >= viewport.top && centerY <= viewport.bottom) {
+      return true;
+    }
+    for (const corner of MINIMAP_HEX_CORNERS) {
+      const cornerX = centerX + corner.x * HEX_SIZE;
+      const cornerY = centerY + corner.y * HEX_SIZE;
+      if (cornerX >= viewport.left && cornerX <= viewport.right && cornerY >= viewport.top && cornerY <= viewport.bottom) {
+        return true;
+      }
+    }
+    const viewportCorners = [
+      [viewport.left, viewport.top],
+      [viewport.right, viewport.top],
+      [viewport.right, viewport.bottom],
+      [viewport.left, viewport.bottom],
+    ];
+    for (const [x, y] of viewportCorners) {
+      if (this.isPointInsideHex(x, y, centerX, centerY, HEX_SIZE)) {
+        return true;
+      }
+    }
+    const hexPoints = MINIMAP_HEX_CORNERS.map((corner) => ({
+      x: centerX + corner.x * HEX_SIZE,
+      y: centerY + corner.y * HEX_SIZE,
+    }));
+    const rectEdges = [
+      { startX: viewport.left, startY: viewport.top, endX: viewport.right, endY: viewport.top },
+      { startX: viewport.right, startY: viewport.top, endX: viewport.right, endY: viewport.bottom },
+      { startX: viewport.right, startY: viewport.bottom, endX: viewport.left, endY: viewport.bottom },
+      { startX: viewport.left, startY: viewport.bottom, endX: viewport.left, endY: viewport.top },
+    ];
+    for (let i = 0; i < hexPoints.length; i += 1) {
+      const start = hexPoints[i];
+      const end = hexPoints[(i + 1) % hexPoints.length];
+      for (const rectEdge of rectEdges) {
+        if (this.segmentsIntersect(start.x, start.y, end.x, end.y, rectEdge.startX, rectEdge.startY, rectEdge.endX, rectEdge.endY)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  isPointInsideHex(pointX, pointY, centerX, centerY, radius) {
+    let hasPositive = false;
+    let hasNegative = false;
+    for (let i = 0; i < MINIMAP_HEX_CORNERS.length; i += 1) {
+      const current = MINIMAP_HEX_CORNERS[i];
+      const next = MINIMAP_HEX_CORNERS[(i + 1) % MINIMAP_HEX_CORNERS.length];
+      const ax = centerX + current.x * radius;
+      const ay = centerY + current.y * radius;
+      const bx = centerX + next.x * radius;
+      const by = centerY + next.y * radius;
+      const cross = (bx - ax) * (pointY - ay) - (by - ay) * (pointX - ax);
+      if (cross > 0) {
+        hasPositive = true;
+      } else if (cross < 0) {
+        hasNegative = true;
+      }
+      if (hasPositive && hasNegative) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  findNearestMinimapHex(pointX, pointY, mapWidth, mapHeight, projection, hintQ = 0, hintR = 0) {
+    let q = Phaser.Math.Clamp(Math.round(hintQ), 0, mapWidth - 1);
+    let r = Phaser.Math.Clamp(Math.round(hintR), 0, mapHeight - 1);
+    let bestDistanceSq = Number.POSITIVE_INFINITY;
+    for (let row = 0; row < mapHeight; row += 1) {
+      for (let col = 0; col < mapWidth; col += 1) {
+        const center = this.projectHexToMinimap(col, row, projection);
+        const dx = pointX - center.x;
+        const dy = pointY - center.y;
+        const distanceSq = dx * dx + dy * dy;
+        if (distanceSq < bestDistanceSq) {
+          bestDistanceSq = distanceSq;
+          q = col;
+          r = row;
+        }
+      }
+    }
+    return { q, r };
+  }
+
+  buildCanonicalSegmentKey(startX, startY, endX, endY) {
+    const sx = Math.round(startX * 10);
+    const sy = Math.round(startY * 10);
+    const ex = Math.round(endX * 10);
+    const ey = Math.round(endY * 10);
+    if (sx < ex || (sx === ex && sy <= ey)) {
+      return `${sx}:${sy}:${ex}:${ey}`;
+    }
+    return `${ex}:${ey}:${sx}:${sy}`;
+  }
+
+  segmentsIntersect(ax, ay, bx, by, cx, cy, dx, dy) {
+    const orientation = (px, py, qx, qy, rx, ry) => {
+      const value = (qy - py) * (rx - qx) - (qx - px) * (ry - qy);
+      if (Math.abs(value) <= 0.0001) {
+        return 0;
+      }
+      return value > 0 ? 1 : 2;
+    };
+    const onSegment = (px, py, qx, qy, rx, ry) =>
+      qx >= Math.min(px, rx) - 0.0001 &&
+      qx <= Math.max(px, rx) + 0.0001 &&
+      qy >= Math.min(py, ry) - 0.0001 &&
+      qy <= Math.max(py, ry) + 0.0001;
+
+    const o1 = orientation(ax, ay, bx, by, cx, cy);
+    const o2 = orientation(ax, ay, bx, by, dx, dy);
+    const o3 = orientation(cx, cy, dx, dy, ax, ay);
+    const o4 = orientation(cx, cy, dx, dy, bx, by);
+
+    if (o1 !== o2 && o3 !== o4) {
+      return true;
+    }
+    if (o1 === 0 && onSegment(ax, ay, cx, cy, bx, by)) {
+      return true;
+    }
+    if (o2 === 0 && onSegment(ax, ay, dx, dy, bx, by)) {
+      return true;
+    }
+    if (o3 === 0 && onSegment(cx, cy, ax, ay, dx, dy)) {
+      return true;
+    }
+    if (o4 === 0 && onSegment(cx, cy, bx, by, dx, dy)) {
+      return true;
+    }
+    return false;
+  }
+
+  projectHexToMinimap(q, r, projection) {
+    return axialToWorld({ q, r }, projection.hexRadius, projection.minimapOriginX, projection.minimapOriginY);
+  }
+
+  drawMinimapHex(graphics, centerX, centerY, radius) {
+    graphics.beginPath();
+    graphics.moveTo(centerX + MINIMAP_HEX_CORNERS[0].x * radius, centerY + MINIMAP_HEX_CORNERS[0].y * radius);
+    for (let i = 1; i < MINIMAP_HEX_CORNERS.length; i += 1) {
+      graphics.lineTo(centerX + MINIMAP_HEX_CORNERS[i].x * radius, centerY + MINIMAP_HEX_CORNERS[i].y * radius);
+    }
+    graphics.closePath();
+    graphics.fillPath();
+    graphics.strokePath();
   }
 
   layoutButtonRow(buttons, centerX, y, gap) {
@@ -1583,6 +1897,52 @@ export class UIScene extends Phaser.Scene {
       button.label.setPosition(x, y);
       cursor += button.width + gap;
     }
+  }
+
+  fitButtonRowWidths(buttons, availableWidth, minWidth, maxWidth, gap) {
+    if (!buttons.length) {
+      return;
+    }
+    const usableWidth = Math.max(minWidth * buttons.length, availableWidth - Math.max(0, buttons.length - 1) * gap);
+    const width = Phaser.Math.Clamp(Math.floor(usableWidth / buttons.length), minWidth, maxWidth);
+    for (const button of buttons) {
+      this.resizeButton(button, width, button.height);
+      this.setTextWithinWidth(button.label, button.defaultLabel ?? button.label.text, Math.max(30, width - 10));
+    }
+  }
+
+  fitTextSizeToWidth(label, preferredSize, minSize, maxWidth) {
+    let fontSize = preferredSize;
+    label.setFontSize(fontSize);
+    while (fontSize > minSize && label.width > maxWidth) {
+      fontSize -= 1;
+      label.setFontSize(fontSize);
+    }
+  }
+
+  setTextWithinWidth(label, value, maxWidth) {
+    const source = typeof value === "string" ? value : String(value ?? "");
+    label.setText(source);
+    if (!Number.isFinite(maxWidth) || maxWidth <= 0 || label.width <= maxWidth || source.length <= 3) {
+      return source;
+    }
+    let low = 1;
+    let high = source.length;
+    let best = "...";
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const prefix = source.slice(0, mid).trimEnd();
+      const candidate = `${prefix}...`;
+      label.setText(candidate);
+      if (label.width <= maxWidth) {
+        best = candidate;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    label.setText(best);
+    return best;
   }
 
   layoutQueueVerticalStack(centerX, startY, innerGap, rowGap) {
@@ -1777,6 +2137,10 @@ export class UIScene extends Phaser.Scene {
     this.lastContextSelectionKey = selectionKey;
 
     this.turnLabel.setText(`Turn ${gameState.turnState.turn} - ${phaseText}`);
+    const turnPreferredFontSize = this.scale.width < TABLET_LAYOUT_BREAKPOINT ? 21 : 25;
+    const turnMinFontSize = this.scale.width < TABLET_LAYOUT_BREAKPOINT ? 17 : 19;
+    const turnMaxWidth = Math.max(140, this.topHudPanel.displayWidth - 24);
+    this.fitTextSizeToWidth(this.turnLabel, turnPreferredFontSize, turnMinFontSize, turnMaxWidth);
     this.foodLabel.setText(`Food: ${economy.foodStock}`);
     this.foodDeltaLabel.setText(`(${formatSigned(projected.food)})`);
     this.foodDeltaLabel.setColor(getDeltaColor(projected.food));
@@ -1802,8 +2166,8 @@ export class UIScene extends Phaser.Scene {
     this.forecastLineSecondary.setText(`Pending: Units ${readyUnits}, Queues ${pendingQueues}`);
     this.forecastLineTertiary.setText(`Status: ${forecastStatus}`);
     const forecastWarning = pendingOrders > 0 || projected.food < 0 || projected.production < 0 || projected.science < 0;
-    this.forecastPanel.setFillStyle(forecastWarning ? 0xf3e2c8 : 0xe9dcc1, 0.95);
-    this.forecastPanel.setStrokeStyle(2, forecastWarning ? 0x8f3a2a : 0x7d5a2f, 0.86);
+    this.forecastPanel.setFillStyle(forecastWarning ? 0xf2e1c8 : SEMANTIC_COLORS.panelElevatedBg, 0.95);
+    this.forecastPanel.setStrokeStyle(PANEL_STROKE_WIDTH, forecastWarning ? 0x8f3a2a : SEMANTIC_COLORS.panelBorder, 0.86);
     this.forecastLineTertiary.setColor(
       hasPendingCityResolution || pendingOrders > 0
         ? SEMANTIC_COLORS.textWarning
@@ -1864,6 +2228,8 @@ export class UIScene extends Phaser.Scene {
     this.setButtonWarning(this.endTurnButton, canIssueOrders && pendingOrders > 0);
 
     this.turnAssistantPanel.setVisible(gameState.match.status === "ongoing");
+    this.turnAssistantAccent.setVisible(gameState.match.status === "ongoing");
+    this.turnAssistantStatusDot.setVisible(gameState.match.status === "ongoing");
     this.turnAssistantLabel.setVisible(gameState.match.status === "ongoing");
     this.turnAssistantSecondaryLabel.setVisible(gameState.match.status === "ongoing");
     this.turnAssistantLabel.setText("Attention");
@@ -1882,14 +2248,27 @@ export class UIScene extends Phaser.Scene {
     this.setButtonEnabled(this.nextUnitButton, false);
     if (gameState.match.status === "ongoing" && canIssueOrders && pendingOrders > 0) {
       this.turnAssistantPanel.setFillStyle(SEMANTIC_COLORS.panelActiveBg, 0.98);
-      this.turnAssistantPanel.setStrokeStyle(2, SEMANTIC_COLORS.panelBorder, 0.95);
+      this.turnAssistantPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.95);
+      this.turnAssistantAccent.setFillStyle(SEMANTIC_COLORS.accentAmber, 0.9);
+      this.turnAssistantStatusDot.setFillStyle(SEMANTIC_COLORS.accentAmber, 0.95);
       this.turnAssistantLabel.setColor(SEMANTIC_COLORS.textStrong);
       this.turnAssistantSecondaryLabel.setColor(SEMANTIC_COLORS.textMuted);
+      this.setTurnAssistantPulse(false);
     } else {
       this.turnAssistantPanel.setFillStyle(SEMANTIC_COLORS.panelSoftBg, 0.95);
-      this.turnAssistantPanel.setStrokeStyle(2, 0x8b7a5e, 0.85);
-      this.turnAssistantLabel.setColor("#64533d");
-      this.turnAssistantSecondaryLabel.setColor("#786650");
+      this.turnAssistantPanel.setStrokeStyle(PANEL_STROKE_WIDTH, 0x8b7a5e, 0.85);
+      if (gameState.match.status === "ongoing" && canIssueOrders) {
+        this.turnAssistantAccent.setFillStyle(SEMANTIC_COLORS.accentGreen, 0.86);
+        this.turnAssistantStatusDot.setFillStyle(SEMANTIC_COLORS.accentGreen, 0.94);
+        this.turnAssistantLabel.setColor("#5b4b35");
+        this.turnAssistantSecondaryLabel.setColor("#6e5d45");
+      } else {
+        this.turnAssistantAccent.setFillStyle(SEMANTIC_COLORS.accentBlue, 0.76);
+        this.turnAssistantStatusDot.setFillStyle(SEMANTIC_COLORS.accentBlue, 0.82);
+        this.turnAssistantLabel.setColor("#64533d");
+        this.turnAssistantSecondaryLabel.setColor("#786650");
+      }
+      this.setTurnAssistantPulse(false);
     }
 
     this.syncContextMenu(gameState, selectedUnit, selectedCity, canIssueOrders);
@@ -1903,6 +2282,14 @@ export class UIScene extends Phaser.Scene {
       this.lastLayoutKey = nextLayoutKey;
     } else {
       this.renderMinimap();
+    }
+    if (this.minimapVisible) {
+      const focusHex = gameState.cameraFocusHex;
+      this.minimapCaption.setText(
+        focusHex && Number.isFinite(focusHex.q) && Number.isFinite(focusHex.r)
+          ? `Focus ${Math.round(focusHex.q)},${Math.round(focusHex.r)}`
+          : "Click to focus"
+      );
     }
 
     const turnChanged = previousTurn > 0 && this.currentTurn !== previousTurn;
@@ -2247,12 +2634,12 @@ export class UIScene extends Phaser.Scene {
     this.hintSecondary.setText(secondary ?? "");
     if (level === "warning") {
       this.hintPanel.setFillStyle(0xf5dfd8, 0.95);
-      this.hintPanel.setStrokeStyle(2, 0x9a3a2b, 0.9);
+      this.hintPanel.setStrokeStyle(PANEL_STROKE_WIDTH, 0x9a3a2b, 0.9);
       this.hintPrimary.setColor("#6f241a");
       this.hintSecondary.setColor(SEMANTIC_COLORS.textWarning);
     } else {
       this.hintPanel.setFillStyle(SEMANTIC_COLORS.panelActiveBg, 0.95);
-      this.hintPanel.setStrokeStyle(2, SEMANTIC_COLORS.panelBorder, 0.8);
+      this.hintPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.8);
       this.hintPrimary.setColor(SEMANTIC_COLORS.textStrong);
       this.hintSecondary.setColor(SEMANTIC_COLORS.textMuted);
     }
@@ -2405,12 +2792,23 @@ export class UIScene extends Phaser.Scene {
     const shownRows = slice.length;
     const filterHeight = this.scale.width < TABLET_LAYOUT_BREAKPOINT ? 60 : 34;
     const contentHeight = shownRows > 0 ? shownRows * NOTIFICATION_ROW_HEIGHT + 14 : 0;
-    const panelHeight = 34 + filterHeight + contentHeight;
+    const panelHeight = NOTIFICATION_HEADER_HEIGHT + filterHeight + contentHeight;
     const bounds = this.notificationPanel.getBounds();
     this.notificationPanel.setSize(this.notificationPanel.displayWidth, panelHeight);
     this.notificationPanel.setDisplaySize(this.notificationPanel.displayWidth, panelHeight);
     this.notificationPanel.setPosition(bounds.centerX, bounds.top + panelHeight / 2);
     this.notificationTitle.setPosition(bounds.left + 12, bounds.top + 10);
+    this.notificationAccent.setPosition(bounds.left + 6, bounds.top + 6);
+    this.notificationAccent.setSize(this.notificationPanel.displayWidth - 12, 4);
+    const totalRows = displayRows.length;
+    const startRow = shownRows > 0 ? this.notificationScroll + 1 : 0;
+    const endRow = shownRows > 0 ? this.notificationScroll + shownRows : 0;
+    const subtitleText =
+      totalRows > 0
+        ? `${this.notificationFilter} feed  ${startRow}-${endRow} / ${totalRows}`
+        : `${this.notificationFilter} feed  no entries`;
+    this.setTextWithinWidth(this.notificationSubtitle, subtitleText, Math.max(120, this.notificationPanel.displayWidth - 24));
+    this.notificationSubtitle.setPosition(bounds.left + 12, bounds.top + 25);
 
     for (const filterButton of this.notificationFilterButtons) {
       const filterName = filterButton.actionId.replace("notif-filter-", "");
@@ -2432,56 +2830,70 @@ export class UIScene extends Phaser.Scene {
         row.panel.disableInteractive();
         continue;
       }
-      const rowTop = bounds.top + 34 + filterHeight + i * NOTIFICATION_ROW_HEIGHT;
+      const rowTop = bounds.top + NOTIFICATION_HEADER_HEIGHT + filterHeight + i * NOTIFICATION_ROW_HEIGHT;
+      const rowWidth = this.notificationPanel.displayWidth - NOTIFICATION_ROW_INSET * 2;
+      const rowLeft = bounds.left + NOTIFICATION_ROW_INSET;
+      const rowRight = rowLeft + rowWidth;
       this.setNotificationRowVisible(row, true);
-      row.panel.setPosition(bounds.left + 8, rowTop);
-      row.panel.setSize(this.notificationPanel.displayWidth - 16, NOTIFICATION_ROW_HEIGHT - 4);
-      row.badge.setPosition(bounds.left + 14, rowTop + 8);
-      row.header.setPosition(bounds.left + 72, rowTop + 7);
-      row.message.setPosition(bounds.left + 16, rowTop + 24);
-      row.jump.setPosition(bounds.left + this.notificationPanel.displayWidth - 50, rowTop + 8);
+      row.panel.setPosition(rowLeft, rowTop);
+      row.panel.setSize(rowWidth, NOTIFICATION_ROW_HEIGHT - 4);
+      row.stripe.setPosition(rowLeft, rowTop);
+      row.stripe.setSize(3, NOTIFICATION_ROW_HEIGHT - 4);
+      row.badge.setPosition(rowLeft + 8, rowTop + 8);
+      row.header.setPosition(rowLeft + 70, rowTop + 7);
+      row.message.setPosition(rowLeft + 12, rowTop + 24);
+      row.unreadDot.setPosition(rowRight - 10, rowTop + 14);
+      row.jump.setPosition(rowRight - 36, rowTop + 7);
       row.badgeLabel.setPosition(row.badge.x + 5, row.badge.y + 2);
       if (entry.kind === "group") {
+        row.stripe.setVisible(false);
         row.badge.setVisible(false);
         row.badgeLabel.setVisible(false);
-        row.header.setText(entry.label);
-        row.header.setColor("#6b5a41");
+        this.setTextWithinWidth(row.header, entry.label, Math.max(80, rowWidth - 18));
+        row.header.setColor("#6e5d45");
         row.header.setAlpha(1);
         row.message.setText("");
         row.message.setVisible(false);
+        row.unreadDot.setVisible(false);
         row.jump.setVisible(false);
-        row.panel.setFillStyle(0xe6d8bb, 0.42);
-        row.panel.setStrokeStyle(0);
+        row.panel.setFillStyle(SEMANTIC_COLORS.panelSoftBg, 0.54);
+        row.panel.setStrokeStyle(1, SEMANTIC_COLORS.panelBorder, 0.4);
         row.panel.disableInteractive();
         continue;
       }
       const card = entry.entry;
       const categoryStyle = getNotificationCategoryStyle(card.category);
-      const messageLine = truncateText(card.message, Math.max(36, Math.floor((this.notificationPanel.displayWidth - 22) / 7.4)));
-      const headerParts = [];
-      if (card.unread) {
-        headerParts.push("New");
-      }
-      headerParts.push(card.focus ? "Action" : "Update");
+      const headerParts = [`${card.category}`, `Turn ${Math.max(0, card.turn ?? this.currentTurn)}`];
       if (card.level === "warning") {
         headerParts.push("Warning");
+      } else if (card.focus) {
+        headerParts.push("Focusable");
       }
+      const rightPadding = card.focus ? 54 : card.unread ? 20 : 14;
+      const headerMaxWidth = Math.max(82, rowWidth - 82 - rightPadding);
+      const messageMaxWidth = Math.max(110, rowWidth - 20 - rightPadding);
+      row.stripe.setVisible(true);
+      row.stripe.setFillStyle(categoryStyle.fill, 0.9);
       row.badge.setVisible(true);
       row.badgeLabel.setVisible(true);
       row.badge.setFillStyle(categoryStyle.fill, 0.94);
       row.badge.setSize(52, 15);
       row.badgeLabel.setText(categoryStyle.label);
       row.badgeLabel.setColor("#f8f0dd");
-      row.header.setText(headerParts.join(" | "));
+      this.setTextWithinWidth(row.header, headerParts.join(" | "), headerMaxWidth);
       row.header.setColor(card.focus ? SEMANTIC_COLORS.textInfo : SEMANTIC_COLORS.textMuted);
       row.message.setVisible(true);
-      row.message.setText(messageLine);
+      this.setTextWithinWidth(row.message, card.message, messageMaxWidth);
       row.message.setColor(card.level === "warning" ? SEMANTIC_COLORS.textWarning : SEMANTIC_COLORS.textStrong);
       row.message.setAlpha(card.unread ? 1 : 0.92);
-      row.panel.setFillStyle(card.unread ? 0xf5ead2 : 0xefe2c7, card.focus ? 0.95 : 0.84);
-      row.panel.setStrokeStyle(card.focus ? 2 : 1, card.focus ? 0x355e94 : 0x7d5a2f, card.focus ? 0.9 : 0.56);
+      row.unreadDot.setVisible(card.unread);
+      row.unreadDot.setFillStyle(card.level === "warning" ? SEMANTIC_COLORS.accentRed : SEMANTIC_COLORS.accentBlue, 0.94);
+      row.unreadDot.setPosition(rowRight - (card.focus ? 52 : 10), rowTop + 14);
+      row.panel.setFillStyle(card.unread ? SEMANTIC_COLORS.panelActiveBg : SEMANTIC_COLORS.panelBg, card.focus ? 0.95 : 0.84);
+      row.panel.setStrokeStyle(card.focus ? PANEL_STROKE_WIDTH : 1, card.focus ? 0x355e94 : SEMANTIC_COLORS.panelBorder, card.focus ? 0.9 : 0.56);
       row.jump.setVisible(!!card.focus);
       row.jump.setColor(card.level === "warning" ? SEMANTIC_COLORS.textWarning : SEMANTIC_COLORS.textInfo);
+      row.jump.setPosition(rowRight - 36, rowTop + 7);
       if (card.focus) {
         row.panel.setInteractive({ useHandCursor: true });
       } else {
@@ -2489,9 +2901,18 @@ export class UIScene extends Phaser.Scene {
       }
     }
     this.notificationUnreadCount = this.notifications.filter((entry) => entry.unread).length;
-    this.notificationTitle.setText(
-      this.notificationUnreadCount > 0 ? `Notifications (${this.notificationUnreadCount} new)` : "Notifications"
+    this.setTextWithinWidth(
+      this.notificationTitle,
+      this.notificationUnreadCount > 0 ? `Notifications (${this.notificationUnreadCount} new)` : "Notifications",
+      Math.max(120, this.notificationPanel.displayWidth - 24)
     );
+    const hasUnread = this.notificationUnreadCount > 0;
+    this.notificationPanel.setStrokeStyle(
+      PANEL_STROKE_WIDTH,
+      hasUnread ? SEMANTIC_COLORS.accentBlue : SEMANTIC_COLORS.panelBorder,
+      hasUnread ? 0.92 : 0.86
+    );
+    this.notificationTitle.setColor(hasUnread ? "#233a58" : "#2a1d11");
   }
 
   handlePointerMove(pointer) {
@@ -2791,6 +3212,15 @@ export class UIScene extends Phaser.Scene {
     button.label.setVisible(visible);
   }
 
+  setTurnAssistantPulse(_enabled) {
+    if (this.turnAssistantPulseTween) {
+      this.turnAssistantPulseTween.stop();
+      this.turnAssistantPulseTween = null;
+    }
+    this.turnAssistantStatusDot.setScale(1);
+    this.turnAssistantStatusDot.setAlpha(0.94);
+  }
+
   handleEscapePressed() {
     if (this.restartConfirmOpen) {
       this.closeRestartConfirm();
@@ -2964,7 +3394,9 @@ export class UIScene extends Phaser.Scene {
         y: this.minimapPanel.y,
         width: this.minimapPanel.displayWidth,
         height: this.minimapPanel.displayHeight,
-        frameVisible: this.minimapViewportFrame.visible,
+        frameVisible: this.minimapViewportBoundarySegments > 0,
+        viewportBoundarySegments: this.minimapViewportBoundarySegments,
+        viewportFootprint: this.minimapViewportFootprint ? { ...this.minimapViewportFootprint } : null,
         frame: {
           x: this.minimapViewportFrame.x,
           y: this.minimapViewportFrame.y,
@@ -3215,7 +3647,9 @@ export class UIScene extends Phaser.Scene {
       minimap: {
         visible: this.minimapVisible,
         bounds: this.minimapContentBounds ? { ...this.minimapContentBounds } : null,
-        frameVisible: this.minimapViewportFrame.visible,
+        frameVisible: this.minimapViewportBoundarySegments > 0,
+        viewportBoundarySegments: this.minimapViewportBoundarySegments,
+        viewportFootprint: this.minimapViewportFootprint ? { ...this.minimapViewportFootprint } : null,
         frame: {
           x: this.minimapViewportFrame.x,
           y: this.minimapViewportFrame.y,
@@ -3303,39 +3737,39 @@ function formatTurnsShort(turns) {
 
 function resolveMinimapTileColor(terrainType, explored, visible) {
   if (!explored) {
-    return 0x383530;
+    return 0x3a3834;
   }
   const terrainColor =
     terrainType === "forest"
-      ? 0x6f8f56
+      ? 0x738665
       : terrainType === "hill"
-        ? 0x9b8d6b
+        ? 0x8b7f68
         : terrainType === "mountain"
-          ? 0x7a7470
-          : 0xb2c87c;
+          ? 0x75716d
+          : 0x98aa75;
   if (visible) {
     return terrainColor;
   }
   return terrainType === "forest"
-    ? 0x4a5a3b
+    ? 0x56604d
     : terrainType === "hill"
-      ? 0x6a614d
+      ? 0x696252
       : terrainType === "mountain"
-        ? 0x595451
-        : 0x748050;
+        ? 0x5e5a57
+        : 0x667051;
 }
 
 function resolveMinimapOwnerColor(owner) {
   if (owner === "enemy") {
-    return 0x8f2c23;
+    return 0x925c4f;
   }
   if (owner === "purple") {
-    return 0x6a3a98;
+    return 0x736088;
   }
   if (owner === "player") {
-    return 0x1f4f93;
+    return 0x5b7394;
   }
-  return 0x6f6d63;
+  return 0x7b796f;
 }
 
 function normalizeNotificationCategory(input, message = "") {
@@ -3371,15 +3805,15 @@ function getNotificationCategoryStyle(category) {
     return { fill: 0x8a4734, label: "Combat" };
   }
   if (category === "City") {
-    return { fill: 0x3f6f59, label: "City" };
+    return { fill: 0x3e6d58, label: "City" };
   }
   if (category === "Research") {
-    return { fill: 0x355e94, label: "Research" };
+    return { fill: 0x2f5f90, label: "Research" };
   }
   if (category === "System") {
-    return { fill: 0x6f6d63, label: "System" };
+    return { fill: 0x5f5d55, label: "System" };
   }
-  return { fill: 0x6f6d63, label: "All" };
+  return { fill: 0x5f5d55, label: "All" };
 }
 
 function normalizeNotificationFocus(focus) {

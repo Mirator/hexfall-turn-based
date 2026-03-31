@@ -69,13 +69,193 @@ import {
 const SQRT_3 = Math.sqrt(3);
 const RESTART_MIN_FACTION_DISTANCE = DEFAULT_MIN_FACTION_DISTANCE;
 const CAMERA_KEYBOARD_PAN_SPEED = 700;
-const MOVE_SEGMENT_MS = 160;
-const ATTACK_ANIMATION_MS = 260;
-const FOUND_CITY_ANIMATION_MS = 420;
-const ENEMY_ACTION_GAP_MS = 120;
+const MOVE_SEGMENT_MS = 150;
+const ATTACK_ANIMATION_MS = 238;
+const FOUND_CITY_ANIMATION_MS = 390;
+const ENEMY_ACTION_GAP_MS = 110;
 const TERRAIN_DISPLAY_WIDTH = SQRT_3 * HEX_SIZE * 1.08;
 const TERRAIN_DISPLAY_HEIGHT = HEX_SIZE * 2 * 1.08;
 const UNIT_SPRITE_DISPLAY_SIZE = 40;
+const HEX_UNIT_POINTS = Array.from({ length: 6 }, (_, index) => {
+  const angle = Phaser.Math.DegToRad(60 * index - 30);
+  return { x: Math.cos(angle), y: Math.sin(angle) };
+});
+const INGAME_VISUAL_THEME = {
+  map: {
+    visibleTint: 0xffffff,
+    visibleSpriteAlpha: 0.99,
+    tileStroke: 0x62513a,
+    tileStrokeAlpha: 0.74,
+    tileStrokeWidth: 1.14,
+    shroudFill: 0x312e2a,
+    shroudStroke: 0x24211d,
+    shroudAlpha: 0.95,
+    shroudStrokeWidth: 1.25,
+    memoryTint: 0xb9af9f,
+    memorySpriteAlpha: 0.68,
+    memoryOverlayFill: 0x6f6456,
+    memoryOverlayStroke: 0x4f473d,
+    memoryOverlayAlpha: 0.31,
+    memoryOverlayStrokeAlpha: 0.84,
+  },
+  overlays: {
+    reachable: {
+      outerScale: 0.95,
+      innerScale: 0.82,
+      outerFill: 0xf2de8c,
+      outerFillAlpha: 0.34,
+      outerStroke: 0xae8d2d,
+      outerStrokeWidth: 1.2,
+      innerFill: 0xffefaa,
+      innerFillAlpha: 0.23,
+      innerStroke: 0xd6b24f,
+      innerStrokeWidth: 1.45,
+    },
+    attackableUnit: {
+      outerScale: 0.94,
+      innerScale: 0.82,
+      outerFill: 0xe88c7c,
+      outerFillAlpha: 0.34,
+      outerStroke: 0x91362c,
+      outerStrokeWidth: 1.5,
+      innerFill: 0xffb7aa,
+      innerFillAlpha: 0.2,
+      innerStroke: 0xc04f42,
+      innerStrokeWidth: 1.8,
+    },
+    attackableCity: {
+      outerScale: 0.92,
+      innerScale: 0.8,
+      outerFill: 0xeb8f7f,
+      outerFillAlpha: 0.25,
+      outerStroke: 0x8f352b,
+      outerStrokeWidth: 1.7,
+      innerFill: 0xffb2a4,
+      innerFillAlpha: 0.15,
+      innerStroke: 0xae4439,
+      innerStrokeWidth: 2,
+    },
+    threat: {
+      outerScale: 0.87,
+      innerScale: 0.74,
+      outerFill: 0xcc685c,
+      outerFillAlpha: 0.18,
+      outerStroke: 0x8a3429,
+      outerStrokeWidth: 1,
+      innerFill: 0xe99487,
+      innerFillAlpha: 0.09,
+      innerStroke: 0xa14236,
+      innerStrokeWidth: 0.9,
+    },
+    previewMove: {
+      outerScale: 0.97,
+      innerScale: 0.84,
+      outerFill: 0x78c1d7,
+      outerFillAlpha: 0.42,
+      outerStroke: 0x2b6e83,
+      outerStrokeWidth: 2.15,
+      innerFill: 0xa8deea,
+      innerFillAlpha: 0.2,
+      innerStroke: 0x3f879b,
+      innerStrokeWidth: 1.5,
+    },
+    previewAttack: {
+      outerScale: 0.97,
+      innerScale: 0.84,
+      outerFill: 0xf09a90,
+      outerFillAlpha: 0.37,
+      outerStroke: 0xa14034,
+      outerStrokeWidth: 2.2,
+      innerFill: 0xffc0b5,
+      innerFillAlpha: 0.19,
+      innerStroke: 0xc1574a,
+      innerStrokeWidth: 1.55,
+    },
+    previewLink: {
+      stroke: 0xa34337,
+      strokeAlpha: 0.82,
+      strokeWidth: 1.9,
+    },
+    selection: {
+      stroke: COLORS.selectedStroke,
+      baseStrokeWidth: 2.8,
+      pulseStrokeWidth: 1.8,
+      pulseScale: 1.06,
+      pulseAlpha: 0.72,
+      pulseDurationMs: 380,
+    },
+    previewPulseDurationMs: 280,
+  },
+  sprites: {
+    unitShadowColor: 0x120d08,
+    unitShadowAlpha: 0.22,
+    unitShadowOffsetY: 6,
+    unitShadowWidth: 22,
+    unitShadowHeight: 9,
+    cityShadowColor: 0x171009,
+    cityShadowAlpha: 0.25,
+    cityShadowOffsetY: 7,
+    cityShadowWidth: 24,
+    cityShadowHeight: 10,
+  },
+  healthBars: {
+    backFill: 0x1f1a15,
+    backAlpha: 0.68,
+    unitFill: 0x8dd575,
+    cityFill: 0xb8df8f,
+    width: 28,
+    height: 4,
+  },
+  fx: {
+    ringAlpha: 0.33,
+    outlineAlpha: 0.19,
+    burstStrokeWidth: 1,
+    burstProfiles: {
+      hit: { maxRadius: 30, duration: 270, alpha: 0.9 },
+      counter: { maxRadius: 23, duration: 230, alpha: 0.86 },
+      cityHit: { maxRadius: 34, duration: 300, alpha: 0.92 },
+      defeat: { maxRadius: 35, duration: 360, alpha: 0.95 },
+      cityDefeat: { maxRadius: 41, duration: 420, alpha: 0.97 },
+      foundCity: { maxRadius: 44, duration: FOUND_CITY_ANIMATION_MS, alpha: 0.92 },
+      capture: { maxRadius: 34, duration: 320, alpha: 0.88 },
+      raze: { maxRadius: 38, duration: 410, alpha: 0.92 },
+    },
+    cameraShake: {
+      unitHitDuration: 50,
+      unitHitIntensity: 0.00068,
+      counterHitDuration: 38,
+      counterHitIntensity: 0.00048,
+      cityHitDuration: 66,
+      cityHitIntensity: 0.00092,
+      defeatDuration: 102,
+      defeatIntensity: 0.00195,
+      cityDefeatDuration: 114,
+      cityDefeatIntensity: 0.00225,
+      captureDuration: 86,
+      captureIntensity: 0.00155,
+      razeDuration: 102,
+      razeIntensity: 0.00195,
+    },
+  },
+  floatingDamage: {
+    fontFamily: '"Segoe UI Semibold", "Trebuchet MS", sans-serif',
+    fontSize: "15px",
+    defaultColor: "#fff3de",
+    critColor: "#ffe6c2",
+    stroke: "#261a10",
+    strokeThickness: 3,
+    durationMs: 440,
+    riseDistance: HEX_SIZE * 0.5,
+    ease: "Sine.easeOut",
+  },
+  tweenEase: {
+    default: "Sine.easeInOut",
+    move: "Quad.easeInOut",
+    lunge: "Cubic.easeOut",
+    recover: "Sine.easeIn",
+    pop: "Back.easeOut",
+  },
+};
 
 export class WorldScene extends Phaser.Scene {
   constructor() {
@@ -134,6 +314,7 @@ export class WorldScene extends Phaser.Scene {
     this.cachedProjectedIncome = { food: 0, production: 0, science: 1 };
     this.cachedProjectedNetIncome = { food: 0, production: 0, science: 0 };
     this.projectedEconomyDirty = true;
+    this.mapVisualDirty = true;
     this.cachedUiSurface = null;
     this.uiSurfaceDirty = true;
     this.cachedUiMapPayload = null;
@@ -142,6 +323,8 @@ export class WorldScene extends Phaser.Scene {
     this.cachedVisibilityPayloadRevision = -1;
     this.playerVisibleMask = new Uint8Array(0);
     this.playerExploredMask = new Uint8Array(0);
+    this.selectionPulse = { q: null, r: null, startedAt: 0, expiresAt: 0 };
+    this.previewPulse = { q: null, r: null, startedAt: 0, expiresAt: 0 };
     this.perfFrameSamples = [];
     this.perfPublishCounters = {
       state: 0,
@@ -282,6 +465,7 @@ export class WorldScene extends Phaser.Scene {
     this.cameraFocusHex = null;
     this.endCameraDrag();
     this.cachedMapWorldBoundsDirty = true;
+    this.mapVisualDirty = true;
     this.renderAll();
     this.emitCameraState();
   }
@@ -810,6 +994,7 @@ export class WorldScene extends Phaser.Scene {
     ensureEnemyAiState(this.gameState);
     this.mapRevision += 1;
     this.cachedMapWorldBoundsDirty = true;
+    this.mapVisualDirty = true;
     this.projectedEconomyDirty = true;
     this.uiSurfaceDirty = true;
     this.refreshVisibilityCaches();
@@ -1416,7 +1601,7 @@ export class WorldScene extends Phaser.Scene {
         continue;
       }
       const targetWorld = this.hexToWorld(nextHex.q, nextHex.r);
-      await this.tweenObjectTo(override, { x: targetWorld.x, y: targetWorld.y }, MOVE_SEGMENT_MS * speedScale);
+      await this.tweenObjectTo(override, { x: targetWorld.x, y: targetWorld.y }, MOVE_SEGMENT_MS * speedScale, INGAME_VISUAL_THEME.tweenEase.move);
     }
     this.unitRenderOverrides.delete(unitId);
   }
@@ -1444,17 +1629,33 @@ export class WorldScene extends Phaser.Scene {
         x: originWorld.x + (targetWorld.x - originWorld.x) * 0.34,
         y: originWorld.y + (targetWorld.y - originWorld.y) * 0.34,
       };
-      await this.tweenObjectTo(override, lungePoint, ATTACK_ANIMATION_MS * 0.46 * speedScale);
-      this.spawnFxBurst(targetHex.q, targetHex.r, { color: 0xf1998f, maxRadius: 28, textureKey: FX_TEXTURE_KEYS.impact });
+      await this.tweenObjectTo(override, lungePoint, ATTACK_ANIMATION_MS * 0.44 * speedScale, INGAME_VISUAL_THEME.tweenEase.lunge);
+      const hitFx = INGAME_VISUAL_THEME.fx.burstProfiles.hit;
+      this.spawnFxBurst(targetHex.q, targetHex.r, {
+        color: 0xf1998f,
+        maxRadius: hitFx.maxRadius,
+        duration: hitFx.duration,
+        alpha: hitFx.alpha,
+        textureKey: FX_TEXTURE_KEYS.impact,
+      });
       if (typeof attackResult?.damage === "number" && attackResult.damage > 0) {
         this.spawnFloatingDamage(targetHex.q, targetHex.r, attackResult.damage);
+        this.cameras.main.shake(INGAME_VISUAL_THEME.fx.cameraShake.unitHitDuration, INGAME_VISUAL_THEME.fx.cameraShake.unitHitIntensity);
       }
-      await this.tweenObjectTo(override, originWorld, ATTACK_ANIMATION_MS * 0.54 * speedScale);
+      await this.tweenObjectTo(override, originWorld, ATTACK_ANIMATION_MS * 0.56 * speedScale, INGAME_VISUAL_THEME.tweenEase.recover);
       this.unitRenderOverrides.delete(attackerId);
     } else {
-      this.spawnFxBurst(targetHex.q, targetHex.r, { color: 0xf1998f, maxRadius: 30, textureKey: FX_TEXTURE_KEYS.impact });
+      const hitFx = INGAME_VISUAL_THEME.fx.burstProfiles.hit;
+      this.spawnFxBurst(targetHex.q, targetHex.r, {
+        color: 0xf1998f,
+        maxRadius: hitFx.maxRadius,
+        duration: hitFx.duration,
+        alpha: hitFx.alpha,
+        textureKey: FX_TEXTURE_KEYS.impact,
+      });
       if (typeof attackResult?.damage === "number" && attackResult.damage > 0) {
         this.spawnFloatingDamage(targetHex.q, targetHex.r, attackResult.damage);
+        this.cameras.main.shake(INGAME_VISUAL_THEME.fx.cameraShake.unitHitDuration, INGAME_VISUAL_THEME.fx.cameraShake.unitHitIntensity);
       }
     }
 
@@ -1472,35 +1673,50 @@ export class WorldScene extends Phaser.Scene {
             x: defenderOrigin.x + (counterTargetWorld.x - defenderOrigin.x) * 0.24,
             y: defenderOrigin.y + (counterTargetWorld.y - defenderOrigin.y) * 0.24,
           };
-          await this.tweenObjectTo(defenderOverride, counterLunge, ATTACK_ANIMATION_MS * 0.26 * speedScale);
-          await this.tweenObjectTo(defenderOverride, defenderOrigin, ATTACK_ANIMATION_MS * 0.26 * speedScale);
+          await this.tweenObjectTo(defenderOverride, counterLunge, ATTACK_ANIMATION_MS * 0.24 * speedScale, INGAME_VISUAL_THEME.tweenEase.lunge);
+          await this.tweenObjectTo(defenderOverride, defenderOrigin, ATTACK_ANIMATION_MS * 0.24 * speedScale, INGAME_VISUAL_THEME.tweenEase.recover);
           this.unitRenderOverrides.delete(defender.id);
         }
-        this.spawnFxBurst(counterTarget.q, counterTarget.r, { color: 0xeb8f7f, maxRadius: 22, textureKey: FX_TEXTURE_KEYS.impact });
+        const counterFx = INGAME_VISUAL_THEME.fx.burstProfiles.counter;
+        this.spawnFxBurst(counterTarget.q, counterTarget.r, {
+          color: 0xeb8f7f,
+          maxRadius: counterFx.maxRadius,
+          duration: counterFx.duration,
+          alpha: counterFx.alpha,
+          textureKey: FX_TEXTURE_KEYS.impact,
+        });
         if (counterDamage > 0) {
           this.spawnFloatingDamage(counterTarget.q, counterTarget.r, counterDamage, "#fbe2d4");
+          this.cameras.main.shake(
+            INGAME_VISUAL_THEME.fx.cameraShake.counterHitDuration,
+            INGAME_VISUAL_THEME.fx.cameraShake.counterHitIntensity
+          );
         }
       }
     }
 
     if (attackResult?.targetDefeated) {
+      const defeatFx = INGAME_VISUAL_THEME.fx.burstProfiles.defeat;
       this.spawnFxBurst(targetHex.q, targetHex.r, {
         color: 0xffcc7a,
-        maxRadius: 34,
-        duration: 360,
+        maxRadius: defeatFx.maxRadius,
+        duration: defeatFx.duration,
+        alpha: defeatFx.alpha,
         textureKey: FX_TEXTURE_KEYS.burst,
       });
     }
     if (attackResult?.attackerDefeated && attackerOrigin) {
+      const defeatFx = INGAME_VISUAL_THEME.fx.burstProfiles.defeat;
       this.spawnFxBurst(attackerOrigin.q, attackerOrigin.r, {
         color: 0xffcc7a,
-        maxRadius: 34,
-        duration: 360,
+        maxRadius: defeatFx.maxRadius,
+        duration: defeatFx.duration,
+        alpha: defeatFx.alpha,
         textureKey: FX_TEXTURE_KEYS.burst,
       });
     }
     if (attackResult?.targetDefeated || attackResult?.attackerDefeated) {
-      this.cameras.main.shake(90, 0.0018);
+      this.cameras.main.shake(INGAME_VISUAL_THEME.fx.cameraShake.defeatDuration, INGAME_VISUAL_THEME.fx.cameraShake.defeatIntensity);
     }
 
     if (playbackToken !== null && !this.isPlaybackTokenCurrent(playbackToken)) {
@@ -1523,52 +1739,64 @@ export class WorldScene extends Phaser.Scene {
         x: originWorld.x + (cityWorld.x - originWorld.x) * 0.36,
         y: originWorld.y + (cityWorld.y - originWorld.y) * 0.36,
       };
-      await this.tweenObjectTo(override, lungePoint, ATTACK_ANIMATION_MS * 0.48 * speedScale);
-      await this.tweenObjectTo(override, originWorld, ATTACK_ANIMATION_MS * 0.52 * speedScale);
+      await this.tweenObjectTo(override, lungePoint, ATTACK_ANIMATION_MS * 0.46 * speedScale, INGAME_VISUAL_THEME.tweenEase.lunge);
+      await this.tweenObjectTo(override, originWorld, ATTACK_ANIMATION_MS * 0.54 * speedScale, INGAME_VISUAL_THEME.tweenEase.recover);
       this.unitRenderOverrides.delete(attackerId);
     }
 
     if (cityId && this.gameState.cities.some((city) => city.id === cityId)) {
       const cityOverride = { x: cityWorld.x, y: cityWorld.y, scale: 1, alpha: 1 };
       this.cityRenderOverrides.set(cityId, cityOverride);
-      await this.tweenObjectTo(cityOverride, { scale: 1.16 }, ATTACK_ANIMATION_MS * 0.36 * speedScale);
-      await this.tweenObjectTo(cityOverride, { scale: 1 }, ATTACK_ANIMATION_MS * 0.36 * speedScale);
+      await this.tweenObjectTo(cityOverride, { scale: 1.14 }, ATTACK_ANIMATION_MS * 0.32 * speedScale, INGAME_VISUAL_THEME.tweenEase.pop);
+      await this.tweenObjectTo(cityOverride, { scale: 1 }, ATTACK_ANIMATION_MS * 0.34 * speedScale, INGAME_VISUAL_THEME.tweenEase.recover);
       this.cityRenderOverrides.delete(cityId);
     }
 
+    const cityHitFx = INGAME_VISUAL_THEME.fx.burstProfiles.cityHit;
     this.spawnFxBurst(cityHex.q, cityHex.r, {
       color: 0xf1998f,
-      maxRadius: 34,
-      duration: 280,
+      maxRadius: cityHitFx.maxRadius,
+      duration: cityHitFx.duration,
+      alpha: cityHitFx.alpha,
       textureKey: FX_TEXTURE_KEYS.impact,
     });
     if (typeof attackResult?.damage === "number" && attackResult.damage > 0) {
       this.spawnFloatingDamage(cityHex.q, cityHex.r, attackResult.damage);
+      this.cameras.main.shake(INGAME_VISUAL_THEME.fx.cameraShake.cityHitDuration, INGAME_VISUAL_THEME.fx.cameraShake.cityHitIntensity);
     }
     if (attackResult?.cityDefeated) {
+      const cityDefeatFx = INGAME_VISUAL_THEME.fx.burstProfiles.cityDefeat;
       this.spawnFxBurst(cityHex.q, cityHex.r, {
         color: 0xffd076,
-        maxRadius: 40,
-        duration: 420,
+        maxRadius: cityDefeatFx.maxRadius,
+        duration: cityDefeatFx.duration,
+        alpha: cityDefeatFx.alpha,
         textureKey: FX_TEXTURE_KEYS.burst,
       });
       if (attackResult.outcomeChoice === "capture") {
+        const captureFx = INGAME_VISUAL_THEME.fx.burstProfiles.capture;
         this.spawnFxBurst(cityHex.q, cityHex.r, {
           color: 0x7fd59d,
-          maxRadius: 28,
-          duration: 380,
+          maxRadius: captureFx.maxRadius,
+          duration: captureFx.duration,
+          alpha: captureFx.alpha,
           textureKey: FX_TEXTURE_KEYS.found,
         });
       }
       if (attackResult.outcomeChoice === "raze") {
+        const razeFx = INGAME_VISUAL_THEME.fx.burstProfiles.raze;
         this.spawnFxBurst(cityHex.q, cityHex.r, {
           color: 0xd36f63,
-          maxRadius: 36,
-          duration: 420,
+          maxRadius: razeFx.maxRadius,
+          duration: razeFx.duration,
+          alpha: razeFx.alpha,
           textureKey: FX_TEXTURE_KEYS.impact,
         });
       }
-      this.cameras.main.shake(100, 0.0022);
+      this.cameras.main.shake(
+        INGAME_VISUAL_THEME.fx.cameraShake.cityDefeatDuration,
+        INGAME_VISUAL_THEME.fx.cameraShake.cityDefeatIntensity
+      );
     }
 
     if (playbackToken !== null && !this.isPlaybackTokenCurrent(playbackToken)) {
@@ -1580,10 +1808,12 @@ export class WorldScene extends Phaser.Scene {
     if (!Number.isFinite(q) || !Number.isFinite(r)) {
       return;
     }
+    const foundFx = INGAME_VISUAL_THEME.fx.burstProfiles.foundCity;
     this.spawnFxBurst(q, r, {
       color: 0x8dd575,
-      maxRadius: 44,
-      duration: FOUND_CITY_ANIMATION_MS * speedScale,
+      maxRadius: foundFx.maxRadius,
+      duration: foundFx.duration * speedScale,
+      alpha: foundFx.alpha,
       textureKey: FX_TEXTURE_KEYS.found,
     });
 
@@ -1595,7 +1825,12 @@ export class WorldScene extends Phaser.Scene {
     const center = this.hexToWorld(foundedCity.q, foundedCity.r);
     const cityOverride = { x: center.x, y: center.y, scale: 0.24, alpha: 0.2 };
     this.cityRenderOverrides.set(foundedCity.id, cityOverride);
-    await this.tweenObjectTo(cityOverride, { scale: 1, alpha: 1 }, FOUND_CITY_ANIMATION_MS * speedScale);
+    await this.tweenObjectTo(
+      cityOverride,
+      { scale: 1, alpha: 1 },
+      FOUND_CITY_ANIMATION_MS * speedScale,
+      INGAME_VISUAL_THEME.tweenEase.pop
+    );
     this.cityRenderOverrides.delete(foundedCity.id);
 
     if (playbackToken !== null && !this.isPlaybackTokenCurrent(playbackToken)) {
@@ -1608,14 +1843,44 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
     if (choice === "capture") {
-      this.spawnFxBurst(q, r, { color: 0x7fd59d, maxRadius: 36, duration: 320, textureKey: FX_TEXTURE_KEYS.found });
-      this.spawnFxBurst(q, r, { color: 0xb5f0c4, maxRadius: 26, duration: 260, textureKey: FX_TEXTURE_KEYS.burst });
+      const captureFx = INGAME_VISUAL_THEME.fx.burstProfiles.capture;
+      this.spawnFxBurst(q, r, {
+        color: 0x7fd59d,
+        maxRadius: captureFx.maxRadius + 2,
+        duration: captureFx.duration,
+        alpha: captureFx.alpha,
+        textureKey: FX_TEXTURE_KEYS.found,
+      });
+      this.spawnFxBurst(q, r, {
+        color: 0xb5f0c4,
+        maxRadius: captureFx.maxRadius - 8,
+        duration: Math.max(160, captureFx.duration - 60),
+        alpha: Math.min(0.95, captureFx.alpha + 0.07),
+        textureKey: FX_TEXTURE_KEYS.burst,
+      });
+      this.cameras.main.shake(
+        INGAME_VISUAL_THEME.fx.cameraShake.captureDuration,
+        INGAME_VISUAL_THEME.fx.cameraShake.captureIntensity
+      );
     } else {
-      this.spawnFxBurst(q, r, { color: 0xd36f63, maxRadius: 40, duration: 360, textureKey: FX_TEXTURE_KEYS.impact });
-      this.spawnFxBurst(q, r, { color: 0xffb079, maxRadius: 28, duration: 280, textureKey: FX_TEXTURE_KEYS.burst });
+      const razeFx = INGAME_VISUAL_THEME.fx.burstProfiles.raze;
+      this.spawnFxBurst(q, r, {
+        color: 0xd36f63,
+        maxRadius: razeFx.maxRadius + 2,
+        duration: razeFx.duration,
+        alpha: razeFx.alpha,
+        textureKey: FX_TEXTURE_KEYS.impact,
+      });
+      this.spawnFxBurst(q, r, {
+        color: 0xffb079,
+        maxRadius: razeFx.maxRadius - 10,
+        duration: Math.max(180, razeFx.duration - 120),
+        alpha: Math.min(0.95, razeFx.alpha + 0.02),
+        textureKey: FX_TEXTURE_KEYS.burst,
+      });
+      this.cameras.main.shake(INGAME_VISUAL_THEME.fx.cameraShake.razeDuration, INGAME_VISUAL_THEME.fx.cameraShake.razeIntensity);
     }
-    this.cameras.main.shake(80, 0.0016);
-    await this.waitForAnimationDelay(220);
+    await this.waitForAnimationDelay(210);
   }
 
   enqueueAnimation(kind, runner) {
@@ -1653,13 +1918,13 @@ export class WorldScene extends Phaser.Scene {
     this.animationQueueRunning = false;
   }
 
-  tweenObjectTo(target, values, durationMs) {
+  tweenObjectTo(target, values, durationMs, ease = INGAME_VISUAL_THEME.tweenEase.default) {
     return new Promise((resolve) => {
       const tween = this.tweens.add({
         targets: target,
         ...values,
         duration: Math.max(20, Math.floor(durationMs)),
-        ease: "Sine.easeInOut",
+        ease,
         onComplete: () => {
           resolve(true);
         },
@@ -1694,7 +1959,8 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
     const world = this.hexToWorld(q, r);
-    const duration = Number.isFinite(options.duration) ? options.duration : 300;
+    const defaultProfile = INGAME_VISUAL_THEME.fx.burstProfiles.hit;
+    const duration = Number.isFinite(options.duration) ? options.duration : defaultProfile.duration;
     const id = `fx-${this.fxBurstNextId}`;
     this.fxBurstNextId += 1;
     this.fxBursts.push({
@@ -1703,15 +1969,15 @@ export class WorldScene extends Phaser.Scene {
       y: world.y,
       color: Number.isFinite(options.color) ? options.color : 0xf1998f,
       textureKey: options.textureKey ?? FX_TEXTURE_KEYS.burst,
-      maxRadius: Number.isFinite(options.maxRadius) ? options.maxRadius : 26,
+      maxRadius: Number.isFinite(options.maxRadius) ? options.maxRadius : defaultProfile.maxRadius,
       minRadius: Number.isFinite(options.minRadius) ? options.minRadius : 8,
-      alpha: Number.isFinite(options.alpha) ? options.alpha : 0.9,
+      alpha: Number.isFinite(options.alpha) ? options.alpha : defaultProfile.alpha,
       createdAt: this.time.now,
       expiresAt: this.time.now + duration,
     });
   }
 
-  spawnFloatingDamage(q, r, amount, color = "#fff3de") {
+  spawnFloatingDamage(q, r, amount, color = INGAME_VISUAL_THEME.floatingDamage.defaultColor) {
     if (!Number.isFinite(q) || !Number.isFinite(r) || !Number.isFinite(amount)) {
       return;
     }
@@ -1720,29 +1986,31 @@ export class WorldScene extends Phaser.Scene {
     this.floatingDamageNextId += 1;
     const text = this.add
       .text(center.x, center.y - HEX_SIZE * 0.45, `${amount}`, {
-        fontFamily: "Trebuchet MS",
-        fontSize: "15px",
+        fontFamily: INGAME_VISUAL_THEME.floatingDamage.fontFamily,
+        fontSize: INGAME_VISUAL_THEME.floatingDamage.fontSize,
         color,
-        stroke: "#2a1b10",
-        strokeThickness: 3,
+        stroke: INGAME_VISUAL_THEME.floatingDamage.stroke,
+        strokeThickness: INGAME_VISUAL_THEME.floatingDamage.strokeThickness,
       })
       .setOrigin(0.5)
       .setDepth(40);
+    text.setScale(0.93);
 
     this.floatingDamage.push({
       id,
       value: amount,
       q,
       r,
-      expiresAt: this.time.now + 460,
+      expiresAt: this.time.now + INGAME_VISUAL_THEME.floatingDamage.durationMs,
     });
     this.floatingDamageTextById.set(id, text);
     this.tweens.add({
       targets: text,
-      y: center.y - HEX_SIZE * 0.92,
+      y: center.y - HEX_SIZE * 0.45 - INGAME_VISUAL_THEME.floatingDamage.riseDistance,
+      scale: 1.05,
       alpha: 0,
-      duration: 460,
-      ease: "Sine.easeOut",
+      duration: INGAME_VISUAL_THEME.floatingDamage.durationMs,
+      ease: INGAME_VISUAL_THEME.floatingDamage.ease,
       onComplete: () => {
         text.destroy();
         this.floatingDamageTextById.delete(id);
@@ -1755,13 +2023,17 @@ export class WorldScene extends Phaser.Scene {
     const now = Number.isFinite(nowMs) ? nowMs : this.time.now;
     this.fxBursts = this.fxBursts.filter((burst) => now <= burst.expiresAt);
     this.floatingDamage = this.floatingDamage.filter((entry) => now <= entry.expiresAt);
+    const selectionPulseActive = now <= this.selectionPulse.expiresAt;
+    const previewPulseActive = now <= this.previewPulse.expiresAt;
     return (
       this.isAnimationBusy ||
       this.animationQueue.length > 0 ||
       this.unitRenderOverrides.size > 0 ||
       this.cityRenderOverrides.size > 0 ||
       this.fxBursts.length > 0 ||
-      this.floatingDamage.length > 0
+      this.floatingDamage.length > 0 ||
+      selectionPulseActive ||
+      previewPulseActive
     );
   }
 
@@ -1779,6 +2051,8 @@ export class WorldScene extends Phaser.Scene {
       text.destroy();
     }
     this.floatingDamageTextById.clear();
+    this.selectionPulse.expiresAt = 0;
+    this.previewPulse.expiresAt = 0;
   }
 
   clearAllVisualSprites() {
@@ -1786,6 +2060,7 @@ export class WorldScene extends Phaser.Scene {
       sprite.destroy();
     }
     this.terrainSpritesByHex.clear();
+    this.mapVisualDirty = true;
     for (const record of this.unitSpritesById.values()) {
       record.idleTween?.remove?.();
       record.container.destroy(true);
@@ -1889,6 +2164,9 @@ export class WorldScene extends Phaser.Scene {
   renderEffects() {
     this.fxGraphics.clear();
     const now = this.time.now;
+    const ringAlpha = INGAME_VISUAL_THEME.fx.ringAlpha;
+    const outlineAlpha = INGAME_VISUAL_THEME.fx.outlineAlpha;
+    const burstStrokeWidth = INGAME_VISUAL_THEME.fx.burstStrokeWidth;
     const activeBurstIds = new Set();
     for (const burst of this.fxBursts) {
       const duration = Math.max(1, burst.expiresAt - burst.createdAt);
@@ -1905,8 +2183,8 @@ export class WorldScene extends Phaser.Scene {
       fxSprite.setAlpha(alpha);
       fxSprite.setTint(burst.color);
       fxSprite.setDepth(1200 + burst.y);
-      this.fxGraphics.lineStyle(1, burst.color, alpha * 0.3);
-      this.fxGraphics.strokeCircle(burst.x, burst.y, radius * 0.9);
+      this.fxGraphics.lineStyle(burstStrokeWidth, burst.color, alpha * Math.max(ringAlpha, outlineAlpha));
+      this.fxGraphics.strokeCircle(burst.x, burst.y, radius * 0.84);
     }
     for (const [burstId, sprite] of this.fxBurstSpritesById.entries()) {
       if (activeBurstIds.has(burstId)) {
@@ -2071,6 +2349,10 @@ export class WorldScene extends Phaser.Scene {
     this.gameState.selectedUnitId = unitId;
     this.gameState.selectedCityId = null;
     this.setUiPreview(null);
+    const selectedUnit = getUnitById(this.gameState, unitId);
+    if (selectedUnit) {
+      this.triggerSelectionPulse(selectedUnit.q, selectedUnit.r);
+    }
     this.evaluateAndPublish();
     gameEvents.emit("ui-sfx-requested", { kind: "select" });
   }
@@ -2079,6 +2361,10 @@ export class WorldScene extends Phaser.Scene {
     this.gameState.selectedCityId = cityId;
     this.gameState.selectedUnitId = null;
     this.setUiPreview(null);
+    const selectedCity = this.gameState.cities.find((city) => city.id === cityId) ?? null;
+    if (selectedCity) {
+      this.triggerSelectionPulse(selectedCity.q, selectedCity.r);
+    }
     this.evaluateAndPublish();
     gameEvents.emit("ui-sfx-requested", { kind: "select" });
   }
@@ -2090,6 +2376,7 @@ export class WorldScene extends Phaser.Scene {
     this.gameState.selectedUnitId = null;
     this.gameState.selectedCityId = null;
     this.setUiPreview(null);
+    this.selectionPulse.expiresAt = 0;
     this.evaluateAndPublish();
   }
 
@@ -2149,6 +2436,7 @@ export class WorldScene extends Phaser.Scene {
 
     if (changed) {
       this.setUiPreview(null);
+      this.selectionPulse.expiresAt = 0;
     }
   }
 
@@ -2336,6 +2624,7 @@ export class WorldScene extends Phaser.Scene {
     this.mapOrigin.x = (viewportWidth - mapWidth) / 2 + hexWidth / 2;
     this.mapOrigin.y = (viewportHeight - mapHeight) / 2 + HEX_SIZE;
     this.cachedMapWorldBoundsDirty = true;
+    this.mapVisualDirty = true;
   }
 
   hexToWorld(q, r) {
@@ -2354,8 +2643,42 @@ export class WorldScene extends Phaser.Scene {
     this.renderEffects();
   }
 
+  drawHexOverlayPair(graphics, x, y, style, pulseStrength = 0) {
+    const pulse = Phaser.Math.Clamp(pulseStrength, 0, 1);
+    const outerScale = style.outerScale * (1 + pulse * 0.04);
+    const innerScale = style.innerScale * (1 + pulse * 0.025);
+    const outerFillAlpha = Phaser.Math.Clamp(style.outerFillAlpha * (1 + pulse * 0.2), 0, 1);
+    const innerFillAlpha = Phaser.Math.Clamp(style.innerFillAlpha * (1 + pulse * 0.24), 0, 1);
+    drawHex(
+      graphics,
+      x,
+      y,
+      HEX_SIZE * outerScale,
+      style.outerFill,
+      outerFillAlpha,
+      style.outerStroke,
+      style.outerStrokeWidth,
+      Math.min(1, 0.92 + pulse * 0.08)
+    );
+    drawHex(
+      graphics,
+      x,
+      y,
+      HEX_SIZE * innerScale,
+      style.innerFill,
+      innerFillAlpha,
+      style.innerStroke,
+      style.innerStrokeWidth,
+      Math.min(1, 0.9 + pulse * 0.1)
+    );
+  }
+
   renderMap() {
+    if (!this.mapVisualDirty) {
+      return;
+    }
     this.mapGraphics.clear();
+    const mapTheme = INGAME_VISUAL_THEME.map;
     const revealAll = isPlayerDevVisionEnabled(this.gameState);
     const mapWidth = Math.max(1, this.gameState.map.width ?? 1);
 
@@ -2375,41 +2698,45 @@ export class WorldScene extends Phaser.Scene {
           center.x,
           center.y,
           HEX_SIZE,
-          COLORS.fogShroudFill,
-          0.94,
-          COLORS.fogShroudStroke,
-          1.2
+          mapTheme.shroudFill,
+          mapTheme.shroudAlpha,
+          mapTheme.shroudStroke,
+          mapTheme.shroudStrokeWidth
         );
         continue;
       }
       terrainSprite.setVisible(true);
       if (!visible) {
-        terrainSprite.setAlpha(0.74);
-        terrainSprite.setTint(0xd0c8b9);
-        drawHex(this.mapGraphics, center.x, center.y, HEX_SIZE, undefined, 0, COLORS.tileStroke, 1.22);
-        drawHex(this.mapGraphics, center.x, center.y, HEX_SIZE, COLORS.fogMemoryFill, 0.32, COLORS.fogMemoryStroke, 1.05);
+        terrainSprite.setAlpha(mapTheme.memorySpriteAlpha);
+        terrainSprite.setTint(mapTheme.memoryTint);
+        drawHex(
+          this.mapGraphics,
+          center.x,
+          center.y,
+          HEX_SIZE,
+          mapTheme.memoryOverlayFill,
+          mapTheme.memoryOverlayAlpha,
+          mapTheme.memoryOverlayStroke,
+          mapTheme.tileStrokeWidth,
+          mapTheme.memoryOverlayStrokeAlpha
+        );
         continue;
       }
-      terrainSprite.setAlpha(1);
-      terrainSprite.clearTint();
-      drawHex(this.mapGraphics, center.x, center.y, HEX_SIZE, undefined, 0, COLORS.tileStroke, 1.22);
+      terrainSprite.setAlpha(mapTheme.visibleSpriteAlpha);
+      if (mapTheme.visibleTint === 0xffffff) {
+        terrainSprite.clearTint();
+      } else {
+        terrainSprite.setTint(mapTheme.visibleTint);
+      }
     }
+    this.mapVisualDirty = false;
   }
 
   renderReachable() {
     this.reachableGraphics.clear();
     for (const hex of this.reachableHexes) {
       const center = this.hexToWorld(hex.q, hex.r);
-      drawHex(
-        this.reachableGraphics,
-        center.x,
-        center.y,
-        HEX_SIZE * 0.93,
-        COLORS.reachableFill,
-        0.48,
-        COLORS.reachableStroke,
-        1.4
-      );
+      this.drawHexOverlayPair(this.reachableGraphics, center.x, center.y, INGAME_VISUAL_THEME.overlays.reachable);
     }
   }
 
@@ -2417,31 +2744,17 @@ export class WorldScene extends Phaser.Scene {
     this.attackableGraphics.clear();
     for (const unit of this.attackableTargets) {
       const center = this.hexToWorld(unit.q, unit.r);
-      drawHex(
-        this.attackableGraphics,
-        center.x,
-        center.y,
-        HEX_SIZE * 0.92,
-        COLORS.attackableFill,
-        0.52,
-        COLORS.attackableStroke,
-        2
-      );
+      this.drawHexOverlayPair(this.attackableGraphics, center.x, center.y, INGAME_VISUAL_THEME.overlays.attackableUnit);
     }
 
     for (const city of this.attackableCities) {
       const center = this.hexToWorld(city.q, city.r);
-      drawHex(
-        this.attackableGraphics,
-        center.x,
-        center.y,
-        HEX_SIZE * 0.9,
-        COLORS.attackableFill,
-        0.32,
-        COLORS.attackableStroke,
-        2.2
+      this.drawHexOverlayPair(this.attackableGraphics, center.x, center.y, INGAME_VISUAL_THEME.overlays.attackableCity);
+      this.attackableGraphics.lineStyle(
+        INGAME_VISUAL_THEME.overlays.attackableCity.innerStrokeWidth,
+        INGAME_VISUAL_THEME.overlays.attackableCity.innerStroke,
+        0.88
       );
-      this.attackableGraphics.lineStyle(2, COLORS.attackableStroke, 1);
       this.attackableGraphics.strokeRect(center.x - 16, center.y - 16, 32, 32);
     }
   }
@@ -2450,7 +2763,7 @@ export class WorldScene extends Phaser.Scene {
     this.threatGraphics.clear();
     for (const hex of this.threatHexes) {
       const center = this.hexToWorld(hex.q, hex.r);
-      drawHex(this.threatGraphics, center.x, center.y, HEX_SIZE * 0.84, 0xd36f63, 0.2, 0x9a3a2b, 1);
+      this.drawHexOverlayPair(this.threatGraphics, center.x, center.y, INGAME_VISUAL_THEME.overlays.threat);
     }
   }
 
@@ -2463,7 +2776,8 @@ export class WorldScene extends Phaser.Scene {
 
     if (preview.mode === "move" && typeof preview.q === "number" && typeof preview.r === "number") {
       const center = this.hexToWorld(preview.q, preview.r);
-      drawHex(this.previewGraphics, center.x, center.y, HEX_SIZE * 0.97, 0x7ac6db, 0.48, 0x276f86, 2.8);
+      const pulseStrength = this.getPulseStrength(this.previewPulse, preview.q, preview.r, this.time.now);
+      this.drawHexOverlayPair(this.previewGraphics, center.x, center.y, INGAME_VISUAL_THEME.overlays.previewMove, pulseStrength);
       return;
     }
 
@@ -2473,11 +2787,17 @@ export class WorldScene extends Phaser.Scene {
       typeof preview.r === "number"
     ) {
       const center = this.hexToWorld(preview.q, preview.r);
-      drawHex(this.previewGraphics, center.x, center.y, HEX_SIZE * 0.97, 0xf1998f, 0.4, 0xa03e32, 2.8);
+      const pulseStrength = this.getPulseStrength(this.previewPulse, preview.q, preview.r, this.time.now);
+      this.drawHexOverlayPair(this.previewGraphics, center.x, center.y, INGAME_VISUAL_THEME.overlays.previewAttack, pulseStrength);
       const attacker = getUnitById(this.gameState, preview.attackerId ?? null);
       if (attacker) {
         const attackerCenter = this.hexToWorld(attacker.q, attacker.r);
-        this.previewGraphics.lineStyle(2, 0xa03e32, 0.9);
+        const linkStyle = INGAME_VISUAL_THEME.overlays.previewLink;
+        this.previewGraphics.lineStyle(
+          linkStyle.strokeWidth + pulseStrength * 0.5,
+          linkStyle.stroke,
+          Math.min(1, linkStyle.strokeAlpha + pulseStrength * 0.08)
+        );
         this.previewGraphics.lineBetween(attackerCenter.x, attackerCenter.y, center.x, center.y);
       }
     }
@@ -2485,18 +2805,59 @@ export class WorldScene extends Phaser.Scene {
 
   renderSelection() {
     this.selectionGraphics.clear();
+    const now = this.time.now;
+    const selectionStyle = INGAME_VISUAL_THEME.overlays.selection;
 
     const selectedUnit = getUnitById(this.gameState, this.gameState.selectedUnitId);
     if (selectedUnit && this.isUnitVisibleToPlayer(selectedUnit)) {
       const unitCenter = this.hexToWorld(selectedUnit.q, selectedUnit.r);
-      drawHex(this.selectionGraphics, unitCenter.x, unitCenter.y, HEX_SIZE * 1.02, undefined, 0, COLORS.selectedStroke, 3);
+      const pulse = this.getPulseStrength(this.selectionPulse, selectedUnit.q, selectedUnit.r, now);
+      drawHex(
+        this.selectionGraphics,
+        unitCenter.x,
+        unitCenter.y,
+        HEX_SIZE * 1.02,
+        undefined,
+        0,
+        selectionStyle.stroke,
+        selectionStyle.baseStrokeWidth,
+        1
+      );
+      if (pulse > 0) {
+        drawHex(
+          this.selectionGraphics,
+          unitCenter.x,
+          unitCenter.y,
+          HEX_SIZE * selectionStyle.pulseScale * (1 + pulse * 0.04),
+          undefined,
+          0,
+          selectionStyle.stroke,
+          selectionStyle.pulseStrokeWidth + pulse * 0.35,
+          pulse * selectionStyle.pulseAlpha
+        );
+      }
     }
 
     const selectedCity = this.gameState.cities.find((city) => city.id === this.gameState.selectedCityId);
     if (selectedCity && this.isCityVisibleToPlayer(selectedCity)) {
       const cityCenter = this.hexToWorld(selectedCity.q, selectedCity.r);
-      this.selectionGraphics.lineStyle(3, COLORS.selectedStroke, 1);
+      const pulse = this.getPulseStrength(this.selectionPulse, selectedCity.q, selectedCity.r, now);
+      this.selectionGraphics.lineStyle(selectionStyle.baseStrokeWidth, selectionStyle.stroke, 1);
       this.selectionGraphics.strokeRect(cityCenter.x - 18, cityCenter.y - 18, 36, 36);
+      if (pulse > 0) {
+        const pulseInset = 1 + pulse * 1.6;
+        this.selectionGraphics.lineStyle(
+          selectionStyle.pulseStrokeWidth + pulse * 0.35,
+          selectionStyle.stroke,
+          pulse * selectionStyle.pulseAlpha
+        );
+        this.selectionGraphics.strokeRect(
+          cityCenter.x - (18 + pulseInset),
+          cityCenter.y - (18 + pulseInset),
+          36 + pulseInset * 2,
+          36 + pulseInset * 2
+        );
+      }
     }
   }
 
@@ -2524,10 +2885,11 @@ export class WorldScene extends Phaser.Scene {
 
       const hpRatio = Math.max(0, city.health / city.maxHealth);
       const healthY = center.y + 17 * scale;
-      this.cityGraphics.fillStyle(0x202020, 0.72 * alpha);
-      this.cityGraphics.fillRect(center.x - 14, healthY, 28, 4);
-      this.cityGraphics.fillStyle(0xb8df8f, alpha);
-      this.cityGraphics.fillRect(center.x - 14, healthY, 28 * hpRatio, 4);
+      const healthStyle = INGAME_VISUAL_THEME.healthBars;
+      this.cityGraphics.fillStyle(healthStyle.backFill, healthStyle.backAlpha * alpha);
+      this.cityGraphics.fillRect(center.x - healthStyle.width / 2, healthY, healthStyle.width, healthStyle.height);
+      this.cityGraphics.fillStyle(healthStyle.cityFill, alpha);
+      this.cityGraphics.fillRect(center.x - healthStyle.width / 2, healthY, healthStyle.width * hpRatio, healthStyle.height);
     }
     this.pruneHiddenCitySprites(activeCityIds);
   }
@@ -2556,10 +2918,11 @@ export class WorldScene extends Phaser.Scene {
 
       const hpRatio = Math.max(0, unit.health / unit.maxHealth);
       const healthY = center.y + HEX_SIZE * 0.47 * Math.max(0.7, scale);
-      this.unitGraphics.fillStyle(0x202020, 0.7 * alpha);
-      this.unitGraphics.fillRect(center.x - 14, healthY, 28, 4);
-      this.unitGraphics.fillStyle(0x8dd575, alpha);
-      this.unitGraphics.fillRect(center.x - 14, healthY, 28 * hpRatio, 4);
+      const healthStyle = INGAME_VISUAL_THEME.healthBars;
+      this.unitGraphics.fillStyle(healthStyle.backFill, healthStyle.backAlpha * alpha);
+      this.unitGraphics.fillRect(center.x - healthStyle.width / 2, healthY, healthStyle.width, healthStyle.height);
+      this.unitGraphics.fillStyle(healthStyle.unitFill, alpha);
+      this.unitGraphics.fillRect(center.x - healthStyle.width / 2, healthY, healthStyle.width * hpRatio, healthStyle.height);
     }
     this.pruneHiddenUnitSprites(activeUnitIds);
   }
@@ -3071,6 +3434,8 @@ export class WorldScene extends Phaser.Scene {
     const mapWidth = Math.max(0, this.gameState.map?.width ?? 0);
     const mapHeight = Math.max(0, this.gameState.map?.height ?? 0);
     const cellCount = mapWidth * mapHeight;
+    const previousVisibleMaskLength = this.playerVisibleMask.length;
+    const previousExploredMaskLength = this.playerExploredMask.length;
     if (this.playerVisibleMask.length !== cellCount) {
       this.playerVisibleMask = new Uint8Array(cellCount);
     } else {
@@ -3095,8 +3460,12 @@ export class WorldScene extends Phaser.Scene {
       }
     }
 
+    const maskResized = previousVisibleMaskLength !== cellCount || previousExploredMaskLength !== cellCount;
     if (visibleChanged || exploredChanged) {
       this.visibilityRevision += 1;
+    }
+    if (visibleChanged || exploredChanged || maskResized) {
+      this.mapVisualDirty = true;
     }
   }
 
@@ -3272,7 +3641,46 @@ export class WorldScene extends Phaser.Scene {
       return false;
     }
     this.uiPreview = normalized;
+    if (normalized && Number.isFinite(normalized.q) && Number.isFinite(normalized.r)) {
+      this.triggerPreviewPulse(normalized.q, normalized.r);
+    } else {
+      this.previewPulse.expiresAt = 0;
+    }
     return true;
+  }
+
+  triggerSelectionPulse(q, r) {
+    this.setPulseState(this.selectionPulse, q, r, INGAME_VISUAL_THEME.overlays.selection.pulseDurationMs);
+  }
+
+  triggerPreviewPulse(q, r) {
+    this.setPulseState(this.previewPulse, q, r, INGAME_VISUAL_THEME.overlays.previewPulseDurationMs);
+  }
+
+  setPulseState(state, q, r, durationMs) {
+    if (!Number.isFinite(q) || !Number.isFinite(r)) {
+      state.expiresAt = 0;
+      return;
+    }
+    const now = this.time.now;
+    state.q = q;
+    state.r = r;
+    state.startedAt = now;
+    state.expiresAt = now + Math.max(80, durationMs);
+  }
+
+  getPulseStrength(state, q, r, now = this.time.now) {
+    if (!state || !Number.isFinite(q) || !Number.isFinite(r)) {
+      return 0;
+    }
+    if (state.q !== q || state.r !== r || now > state.expiresAt) {
+      return 0;
+    }
+    const duration = Math.max(1, state.expiresAt - state.startedAt);
+    const t = Phaser.Math.Clamp((now - state.startedAt) / duration, 0, 1);
+    const envelope = 1 - t;
+    const wave = 0.5 + 0.5 * Math.sin(t * Math.PI * 3.2);
+    return envelope * (0.58 + wave * 0.42);
   }
 
   buildUiPreviewPayload() {
@@ -4132,19 +4540,28 @@ function roundFrameMetric(value) {
   return Math.round(value * 100) / 100;
 }
 
-function drawHex(graphics, x, y, size, fillColor, fillAlpha, strokeColor, strokeWidth) {
-  const points = [];
-  for (let i = 0; i < 6; i += 1) {
-    const angle = Phaser.Math.DegToRad(60 * i - 30);
-    points.push(new Phaser.Math.Vector2(x + size * Math.cos(angle), y + size * Math.sin(angle)));
+function drawHex(graphics, x, y, size, fillColor, fillAlpha, strokeColor, strokeWidth, strokeAlpha = 1) {
+  graphics.beginPath();
+  for (let i = 0; i < HEX_UNIT_POINTS.length; i += 1) {
+    const point = HEX_UNIT_POINTS[i];
+    const px = x + size * point.x;
+    const py = y + size * point.y;
+    if (i === 0) {
+      graphics.moveTo(px, py);
+    } else {
+      graphics.lineTo(px, py);
+    }
   }
+  graphics.closePath();
 
-  graphics.lineStyle(strokeWidth, strokeColor, 1);
   if (typeof fillColor === "number" && fillAlpha > 0) {
     graphics.fillStyle(fillColor, fillAlpha);
-    graphics.fillPoints(points, true);
+    graphics.fillPath();
   }
-  graphics.strokePoints(points, true);
+  if (typeof strokeColor === "number" && strokeWidth > 0 && strokeAlpha > 0) {
+    graphics.lineStyle(strokeWidth, strokeColor, strokeAlpha);
+    graphics.strokePath();
+  }
 }
 
 function formatCombatBreakdownSummary(breakdown) {

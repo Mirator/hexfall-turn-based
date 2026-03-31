@@ -1,9 +1,19 @@
 :root {
-  --bg-top: #f6f0df;
-  --bg-mid: #dcc8a2;
-  --bg-bottom: #a88f66;
-  --canvas-frame: #5f4b32;
-  --canvas-glow: rgba(70, 52, 27, 0.35);
+  --font-display: "Palatino Linotype", "Book Antiqua", "Times New Roman", serif;
+  --font-heading: "Trebuchet MS", "Segoe UI", Tahoma, sans-serif;
+  --font-body: "Segoe UI", "Trebuchet MS", Verdana, sans-serif;
+  --bg-night: #111a28;
+  --bg-midnight: #24364a;
+  --bg-ember: #4f3424;
+  --bg-ash: #1a1620;
+  --edge-bronze: #6f5332;
+  --edge-bronze-soft: rgba(212, 189, 142, 0.35);
+  --panel-warm: rgba(237, 226, 200, 0.94);
+  --panel-warm-border: rgba(112, 84, 49, 0.72);
+  --text-ink: #261b10;
+  --text-soft: #5d4b34;
+  --text-cream: #f5ebd5;
+  --canvas-glow: rgba(28, 19, 10, 0.45);
 }
 
 * {
@@ -18,12 +28,13 @@ body {
 }
 
 body {
-  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-family: var(--font-body);
   background:
-    radial-gradient(circle at 14% 12%, rgba(255, 245, 220, 0.65), transparent 36%),
-    radial-gradient(circle at 90% 20%, rgba(255, 226, 176, 0.5), transparent 32%),
-    linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 48%, var(--bg-bottom) 100%);
-  color: #2e2417;
+    radial-gradient(circle at 18% 16%, rgba(232, 209, 166, 0.22), transparent 34%),
+    radial-gradient(circle at 82% 22%, rgba(142, 174, 206, 0.16), transparent 30%),
+    radial-gradient(circle at 50% 84%, rgba(117, 79, 52, 0.2), transparent 36%),
+    linear-gradient(180deg, var(--bg-night) 0%, var(--bg-midnight) 46%, var(--bg-ember) 74%, var(--bg-ash) 100%);
+  color: var(--text-ink);
   overflow: hidden;
 }
 
@@ -32,27 +43,43 @@ body {
   height: 100vh;
   display: grid;
   place-items: center;
-  padding: 10px;
+  padding: 12px;
   position: relative;
+  isolation: isolate;
+}
+
+#game-root::before {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border: 1px solid var(--edge-bronze-soft);
+  border-radius: 10px;
+  pointer-events: none;
+  z-index: 1;
 }
 
 canvas {
-  border: 3px solid var(--canvas-frame);
-  border-radius: 8px;
-  box-shadow: 0 12px 28px var(--canvas-glow);
+  border: 3px solid var(--edge-bronze);
+  border-radius: 10px;
+  box-shadow:
+    0 16px 36px var(--canvas-glow),
+    inset 0 0 0 1px rgba(233, 213, 176, 0.12);
+  z-index: 2;
 }
 
 #loading-banner {
   position: absolute;
-  top: 16px;
-  left: 16px;
-  padding: 10px 14px;
+  top: 20px;
+  left: 20px;
+  padding: 11px 15px;
   border-radius: 8px;
-  background: rgba(237, 225, 201, 0.92);
-  border: 1px solid rgba(95, 75, 50, 0.5);
-  color: #3a2f1f;
-  font-size: 15px;
-  letter-spacing: 0.2px;
+  background: var(--panel-warm);
+  border: 1px solid var(--panel-warm-border);
+  color: var(--text-soft);
+  font-family: var(--font-heading);
+  font-size: 14px;
+  letter-spacing: 0.3px;
+  box-shadow: 0 10px 20px rgba(12, 8, 4, 0.24);
   z-index: 30;
 }
 
@@ -64,8 +91,11 @@ canvas {
   gap: 10px;
   padding: 28px;
   text-align: center;
-  background: rgba(34, 24, 14, 0.78);
-  color: #f7eedb;
+  background:
+    radial-gradient(circle at 20% 16%, rgba(232, 209, 168, 0.2), transparent 30%),
+    linear-gradient(180deg, rgba(20, 24, 34, 0.95), rgba(34, 22, 16, 0.95));
+  color: var(--text-cream);
+  font-family: var(--font-body);
   z-index: 40;
 }
 
@@ -75,13 +105,14 @@ canvas {
 
 #unsupported-viewport-banner h2 {
   margin: 0;
-  font-size: 30px;
-  letter-spacing: 0.3px;
+  font-family: var(--font-display);
+  font-size: 38px;
+  letter-spacing: 0.5px;
 }
 
 #unsupported-viewport-banner p {
   margin: 0;
-  font-size: 17px;
+  font-size: 18px;
   line-height: 1.35;
 }
 

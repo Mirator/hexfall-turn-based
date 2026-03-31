@@ -1,4 +1,5 @@
 import Phaser from "../core/phaserRuntime.js";
+import { STARTUP_THEME } from "../ui/theme.js";
 
 const EMBER_COUNT = 30;
 
@@ -22,7 +23,7 @@ function drawHexOutline(graphics, centerX, centerY, radius, color, alpha) {
 function drawDecorativeGrid(graphics, width, height) {
   const columns = 10;
   const gap = width / columns;
-  graphics.lineStyle(1, 0xd7c089, 0.08);
+  graphics.lineStyle(1, STARTUP_THEME.panelStroke, 0.09);
   for (let i = 0; i <= columns; i += 1) {
     const x = Math.round(i * gap);
     graphics.beginPath();
@@ -35,10 +36,10 @@ function drawDecorativeGrid(graphics, width, height) {
 export function createStartupBackdrop(scene) {
   const gradient = scene.add.graphics().setDepth(0);
   const details = scene.add.graphics().setDepth(1);
-  const vignette = scene.add.rectangle(0, 0, 10, 10, 0x07070b, 0.44).setOrigin(0, 0).setDepth(2);
-  const lightA = scene.add.ellipse(0, 0, 10, 10, 0xd6bb7f, 0.1).setDepth(1);
-  const lightB = scene.add.ellipse(0, 0, 10, 10, 0x6a8ba8, 0.12).setDepth(1);
-  const lightC = scene.add.ellipse(0, 0, 10, 10, 0x8f5d46, 0.08).setDepth(1);
+  const vignette = scene.add.rectangle(0, 0, 10, 10, 0x05070c, 0.5).setOrigin(0, 0).setDepth(2);
+  const lightA = scene.add.ellipse(0, 0, 10, 10, 0xe2c891, 0.1).setDepth(1);
+  const lightB = scene.add.ellipse(0, 0, 10, 10, 0x5e82a3, 0.1).setDepth(1);
+  const lightC = scene.add.ellipse(0, 0, 10, 10, 0x825238, 0.08).setDepth(1);
 
   const embers = [];
   for (let i = 0; i < EMBER_COUNT; i += 1) {
@@ -81,15 +82,15 @@ export function createStartupBackdrop(scene) {
     const width = gameSize.width;
     const height = gameSize.height;
     gradient.clear();
-    gradient.fillGradientStyle(0x0f1622, 0x26364a, 0x3e2a1c, 0x17141f, 1);
+    gradient.fillGradientStyle(0x0f1724, 0x273b52, 0x4a3020, 0x171621, 1);
     gradient.fillRect(0, 0, width, height);
 
     details.clear();
     drawDecorativeGrid(details, width, height);
-    drawHexOutline(details, width * 0.18, height * 0.24, Math.max(80, width * 0.07), 0xe8d3a2, 0.1);
-    drawHexOutline(details, width * 0.84, height * 0.32, Math.max(108, width * 0.09), 0xe8d3a2, 0.07);
-    drawHexOutline(details, width * 0.7, height * 0.8, Math.max(74, width * 0.06), 0xd1ba88, 0.08);
-    drawHexOutline(details, width * 0.32, height * 0.77, Math.max(52, width * 0.05), 0xa9bdd1, 0.09);
+    drawHexOutline(details, width * 0.18, height * 0.24, Math.max(80, width * 0.07), 0xe7d3a7, 0.12);
+    drawHexOutline(details, width * 0.84, height * 0.32, Math.max(108, width * 0.09), 0xe7d3a7, 0.08);
+    drawHexOutline(details, width * 0.7, height * 0.8, Math.max(74, width * 0.06), 0xd4be8f, 0.08);
+    drawHexOutline(details, width * 0.32, height * 0.77, Math.max(52, width * 0.05), 0x9bb4cb, 0.09);
 
     vignette.setSize(width, height);
     lightA.setPosition(width * 0.3, height * 0.22);

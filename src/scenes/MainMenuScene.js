@@ -1,4 +1,5 @@
 import Phaser from "../core/phaserRuntime.js";
+import { STARTUP_THEME, UI_FONTS, resolveStartupButtonPalette } from "../ui/theme.js";
 import { createStartupBackdrop } from "./startupBackdrop.js";
 
 const BUTTON_WIDTH = 280;
@@ -21,66 +22,58 @@ export class MainMenuScene extends Phaser.Scene {
   create() {
     this.backdrop = createStartupBackdrop(this);
 
-    this.heroPanel = this.add.rectangle(0, 0, 10, 10, 0x121723, 0.54).setDepth(4);
-    this.heroPanel.setStrokeStyle(3, 0xe0c98f, 0.5);
+    this.heroPanel = this.add.rectangle(0, 0, 10, 10, STARTUP_THEME.panelFill, STARTUP_THEME.panelAlpha).setDepth(4);
+    this.heroPanel.setStrokeStyle(3, STARTUP_THEME.panelStroke, STARTUP_THEME.panelStrokeAlpha);
 
     this.kicker = this.add
       .text(0, 0, "TURN-BASED STRATEGY", {
-        fontFamily: "Trebuchet MS, Verdana, sans-serif",
+        fontFamily: UI_FONTS.compact,
         fontSize: "18px",
-        color: "#e8d6a8",
+        color: STARTUP_THEME.hintColor,
         letterSpacing: 4,
       })
       .setDepth(5)
       .setOrigin(0.5);
 
     this.title = this.add.text(0, 0, "HEXFALL", {
-      fontFamily: "Georgia, Times New Roman, serif",
-      fontSize: "108px",
+      fontFamily: UI_FONTS.display,
+      fontSize: "102px",
       fontStyle: "bold",
-      color: "#f7e9c3",
+      color: STARTUP_THEME.titleColor,
       stroke: "#1d1a18",
-      strokeThickness: 10,
+      strokeThickness: 8,
       shadow: {
         color: "#000000",
         fill: true,
-        blur: 14,
+        blur: 12,
         stroke: true,
         offsetX: 0,
-        offsetY: 6,
+        offsetY: 5,
       },
     });
     this.title.setOrigin(0.5).setDepth(6);
 
     this.subtitle = this.add.text(0, 0, "Build your empire. Outmaneuver rival factions.", {
-      fontFamily: "Trebuchet MS, Verdana, sans-serif",
-      fontSize: "24px",
-      color: "#d7e6f5",
+      fontFamily: UI_FONTS.heading,
+      fontSize: "23px",
+      color: STARTUP_THEME.subtitleColor,
       stroke: "#1e1a16",
-      strokeThickness: 4,
+      strokeThickness: 3,
       align: "center",
     });
     this.subtitle.setOrigin(0.5).setDepth(6);
 
     this.footerHint = this.add
       .text(0, 0, "Select an option to begin", {
-        fontFamily: "Trebuchet MS, Verdana, sans-serif",
+        fontFamily: UI_FONTS.body,
         fontSize: "18px",
-        color: "#d0bf98",
+        color: STARTUP_THEME.hintColor,
       })
       .setDepth(6)
       .setOrigin(0.5);
 
-    this.newGameButton = this.createButton("New Game", () => this.openNewGameScene(), {
-      baseFill: 0x2f7f6a,
-      hoverFill: 0x3f9780,
-      downFill: 0x26695a,
-    });
-    this.aboutButton = this.createButton("About", () => this.openAboutScene(), {
-      baseFill: 0x7f6041,
-      hoverFill: 0x966f4a,
-      downFill: 0x684e35,
-    });
+    this.newGameButton = this.createButton("New Game", () => this.openNewGameScene(), "primary");
+    this.aboutButton = this.createButton("About", () => this.openAboutScene(), "secondary");
 
     this.tweens.add({
       targets: this.title,
@@ -134,18 +127,19 @@ export class MainMenuScene extends Phaser.Scene {
     button.label.setPosition(x, y);
   }
 
-  createButton(label, onClick, palette) {
+  createButton(label, onClick, variant) {
+    const palette = resolveStartupButtonPalette(variant);
     const rectangle = this.add
       .rectangle(0, 0, BUTTON_WIDTH, BUTTON_HEIGHT, palette.baseFill, 1)
       .setDepth(7)
-      .setStrokeStyle(3, 0xf0ddbc, 0.95)
+      .setStrokeStyle(3, palette.stroke, 0.95)
       .setInteractive({ useHandCursor: true });
     const sheen = this.add.rectangle(0, 0, BUTTON_WIDTH - 10, 16, 0xffffff, 0.12).setDepth(8).setOrigin(0.5, 0.5);
     const text = this.add
       .text(0, 0, label, {
-        fontFamily: "Trebuchet MS, Verdana, sans-serif",
+        fontFamily: UI_FONTS.compact,
         fontSize: "29px",
-        color: "#f9f2df",
+        color: palette.textColor,
         fontStyle: "bold",
       })
       .setDepth(9)

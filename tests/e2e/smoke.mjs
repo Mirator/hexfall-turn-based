@@ -424,8 +424,8 @@ async function run() {
       if (window.__hexfallTest.toggleStatsPanel() !== false || window.__hexfallTest.getHudPolishState()?.stats?.open) {
         return { ok: false, reason: "stats-panel-toggle-close-failed" };
       }
-      if (!polishInitial?.minimap?.visible || !polishInitial?.minimap?.frameVisible) {
-        return { ok: false, reason: "minimap-or-frame-not-visible" };
+      if (!polishInitial?.minimap?.visible || (polishInitial?.minimap?.viewportBoundarySegments ?? 0) < 6) {
+        return { ok: false, reason: "minimap-or-viewport-outline-not-visible" };
       }
       const viewport = getState().cameraViewportWorld ?? { width: window.innerWidth, height: window.innerHeight };
       const isInside = (bounds) =>
@@ -456,6 +456,75 @@ async function run() {
         focusAfterMinimap.r === focusBeforeMinimap.r
       ) {
         return { ok: false, reason: "minimap-click-did-not-change-focus-target" };
+      }
+      const validateMinimapFootprint = (label) => {
+        const minimap = window.__hexfallTest.getHudPolishState()?.minimap;
+        if (!minimap?.visible) {
+          return { ok: false, reason: `${label}-minimap-not-visible` };
+        }
+        const bounds = minimap.bounds;
+        const footprint = minimap.viewportFootprint;
+        if (!bounds || !footprint) {
+          return { ok: false, reason: `${label}-missing-minimap-footprint` };
+        }
+        if ((minimap.viewportBoundarySegments ?? 0) < 6) {
+          return { ok: false, reason: `${label}-viewport-outline-segments-too-low` };
+        }
+        if (
+          footprint.x < bounds.x - 0.5 ||
+          footprint.y < bounds.y - 0.5 ||
+          footprint.x + footprint.width > bounds.x + bounds.width + 0.5 ||
+          footprint.y + footprint.height > bounds.y + bounds.height + 0.5
+        ) {
+          return { ok: false, reason: `${label}-viewport-footprint-outside-minimap-bounds` };
+        }
+        const coverage = (footprint.width * footprint.height) / Math.max(1, bounds.width * bounds.height);
+        if (coverage < 0.02) {
+          return { ok: false, reason: `${label}-viewport-footprint-collapsed` };
+        }
+        if (coverage > 0.88) {
+          return { ok: false, reason: `${label}-viewport-footprint-inflated` };
+        }
+        return { ok: true, coverage };
+      };
+
+      const mapWidth = getState().map?.width ?? 0;
+      const mapHeight = getState().map?.height ?? 0;
+      const footprintSamples = [];
+      const focusTargets = [
+        { label: "center", q: Math.floor((mapWidth - 1) / 2), r: Math.floor((mapHeight - 1) / 2) },
+        { label: "top-right", q: mapWidth - 1, r: 0 },
+        { label: "bottom-left", q: 0, r: mapHeight - 1 },
+      ];
+      for (const target of focusTargets) {
+        if (!window.__hexfallTest.focusMinimapHex(target.q, target.r)) {
+          return { ok: false, reason: `${target.label}-minimap-focus-request-failed` };
+        }
+        await pause(120);
+        const footprintValidation = validateMinimapFootprint(target.label);
+        if (!footprintValidation.ok) {
+          return footprintValidation;
+        }
+        footprintSamples.push(footprintValidation.coverage);
+      }
+
+      if (!window.__hexfallTest.focusMinimapHex(mapWidth + 8, mapHeight + 8)) {
+        return { ok: false, reason: "map-edge-clamp-focus-request-failed" };
+      }
+      await pause(120);
+      const clampedFocus = getState().cameraFocusHex;
+      if (!clampedFocus || clampedFocus.q !== mapWidth - 1 || clampedFocus.r !== mapHeight - 1) {
+        return { ok: false, reason: "map-edge-clamp-focus-invalid" };
+      }
+      const clampedValidation = validateMinimapFootprint("edge-clamp");
+      if (!clampedValidation.ok) {
+        return clampedValidation;
+      }
+      footprintSamples.push(clampedValidation.coverage);
+      const minCoverage = Math.min(...footprintSamples);
+      const maxCoverage = Math.max(...footprintSamples);
+      if (maxCoverage - minCoverage > 0.75) {
+        return { ok: false, reason: "minimap-viewport-coverage-variance-too-high" };
       }
 
       // Pause + New Game modal sanity check.
