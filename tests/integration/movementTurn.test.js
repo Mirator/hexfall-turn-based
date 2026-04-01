@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createInitialGameState, getUnitById } from "../../src/core/gameState.js";
 import { distance } from "../../src/core/hexGrid.js";
-import { getPathTo, getReachable, moveUnit } from "../../src/systems/movementSystem.js";
+import { getPathTo, getReachable, getReachableAnalysis, moveUnit } from "../../src/systems/movementSystem.js";
 import { beginEnemyTurn, beginPlayerTurn } from "../../src/systems/turnSystem.js";
 
 describe("movement and turn systems", () => {
@@ -66,6 +66,32 @@ describe("movement and turn systems", () => {
     for (let i = 1; i < path.length; i += 1) {
       expect(distance(path[i - 1], path[i])).toBe(1);
     }
+  });
+
+  it("builds reusable preview paths for reachable destinations", () => {
+    const gameState = createInitialGameState({ seed: 8088 });
+    const unit = gameState.units.find((candidate) => candidate.owner === "player");
+    expect(unit).toBeTruthy();
+    if (!unit) {
+      return;
+    }
+
+    const analysis = getReachableAnalysis(unit.id, gameState);
+    const destination = analysis.hexes.find((hex) => hex.cost > 0);
+    expect(destination).toBeTruthy();
+    if (!destination) {
+      return;
+    }
+
+    const destinationKey = `${destination.q},${destination.r}`;
+    const previewPath = analysis.pathByHex.get(destinationKey);
+    expect(previewPath).toBeTruthy();
+    expect(previewPath?.[0]).toEqual({ q: unit.q, r: unit.r });
+    expect(previewPath?.[previewPath.length - 1]).toEqual({ q: destination.q, r: destination.r });
+
+    const pathResult = getPathTo(unit.id, { q: destination.q, r: destination.r }, gameState);
+    expect(pathResult.ok).toBe(true);
+    expect(previewPath).toEqual(pathResult.path);
   });
 
   it("beginPlayerTurn resets movement and acted flags for player units", () => {

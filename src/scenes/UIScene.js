@@ -3041,9 +3041,9 @@ export class UIScene extends Phaser.Scene {
 
     if (mode === "move") {
       this.previewTitle.setText(`Move Preview -> (${uiPreview.q}, ${uiPreview.r})`);
-      this.previewDetails.setText(
-        `Cost ${uiPreview.moveCost ?? 0} | Remaining movement ${uiPreview.movementRemainingAfter ?? 0}`
-      );
+      const routeText = formatMovePreviewRoute(uiPreview.path);
+      const summary = `Cost ${uiPreview.moveCost ?? 0} | Remaining movement ${uiPreview.movementRemainingAfter ?? 0}`;
+      this.previewDetails.setText(routeText ? `${summary}\nRoute ${routeText}` : summary);
       this.previewDetails.setColor("#2f5f74");
       return;
     }
@@ -4682,7 +4682,8 @@ function normalizeNotificationFocus(focus) {
 function summarizePreview(uiPreview) {
   const mode = uiPreview?.mode ?? "none";
   if (mode === "move") {
-    return `Move preview -> cost ${uiPreview.moveCost ?? 0}, remaining ${uiPreview.movementRemainingAfter ?? 0}.`;
+    const stepCount = countMovePreviewSteps(uiPreview.path);
+    return `Move preview -> cost ${uiPreview.moveCost ?? 0}, remaining ${uiPreview.movementRemainingAfter ?? 0}${stepCount > 0 ? `, route ${stepCount} step${stepCount === 1 ? "" : "s"}` : ""}.`;
   }
   if (mode === "attack-unit") {
     const counter = uiPreview.counterattack;
@@ -4695,6 +4696,30 @@ function summarizePreview(uiPreview) {
     return `City assault preview -> ${uiPreview.damage ?? 0} damage, city health after hit ${uiPreview.cityRemainingHealth ?? "?"}.`;
   }
   return "";
+}
+
+function formatMovePreviewRoute(path, maxShown = 5) {
+  if (!Array.isArray(path)) {
+    return "";
+  }
+  const labels = path
+    .filter((hex) => Number.isFinite(hex?.q) && Number.isFinite(hex?.r))
+    .map((hex) => `(${hex.q}, ${hex.r})`);
+  if (labels.length === 0) {
+    return "";
+  }
+  if (labels.length <= maxShown) {
+    return labels.join(" -> ");
+  }
+  const visiblePrefix = Math.max(2, maxShown - 2);
+  return `${labels.slice(0, visiblePrefix).join(" -> ")} -> ... -> ${labels[labels.length - 1]}`;
+}
+
+function countMovePreviewSteps(path) {
+  if (!Array.isArray(path) || path.length < 2) {
+    return 0;
+  }
+  return path.length - 1;
 }
 
 function truncateText(value, maxChars) {

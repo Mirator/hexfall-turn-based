@@ -54,7 +54,7 @@ import {
   prepareEnemyTurnPlan,
   runEnemyTurn,
 } from "../systems/enemyTurnSystem.js";
-import { getReachable, moveUnit } from "../systems/movementSystem.js";
+import { getReachableAnalysis, moveUnit } from "../systems/movementSystem.js";
 import {
   computeOwnerSciencePerTurn,
   cycleResearch,
@@ -165,6 +165,20 @@ const INGAME_VISUAL_THEME = {
       innerStroke: 0x3f879b,
       innerStrokeWidth: 1.5,
     },
+    previewMovePath: {
+      underStroke: 0xe3f6fb,
+      underStrokeAlpha: 0.38,
+      underStrokeWidth: 6.2,
+      stroke: 0x2b6e83,
+      strokeAlpha: 0.92,
+      strokeWidth: 3.1,
+      nodeFill: 0xf4fbfd,
+      nodeFillAlpha: 0.95,
+      nodeStroke: 0x2f7387,
+      nodeStrokeAlpha: 0.9,
+      nodeStrokeWidth: 1.3,
+      nodeRadius: 4.2,
+    },
     previewAttack: {
       outerScale: 0.97,
       innerScale: 0.84,
@@ -272,6 +286,7 @@ export class WorldScene extends Phaser.Scene {
     this.reachableHexes = [];
     this.reachableLookup = new Set();
     this.reachableCostByKey = new Map();
+    this.reachablePathByKey = new Map();
     this.attackableTargets = [];
     this.attackableLookup = new Set();
     this.attackableCities = [];
@@ -2400,6 +2415,7 @@ export class WorldScene extends Phaser.Scene {
       this.reachableHexes = [];
       this.reachableLookup = new Set();
       this.reachableCostByKey = new Map();
+      this.reachablePathByKey = new Map();
       this.attackableTargets = [];
       this.attackableLookup = new Set();
       this.attackableCities = [];
@@ -2410,9 +2426,11 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
 
-    this.reachableHexes = getReachable(selectedUnit.id, this.gameState);
+    const reachableAnalysis = getReachableAnalysis(selectedUnit.id, this.gameState);
+    this.reachableHexes = reachableAnalysis.hexes;
     this.reachableLookup = new Set(this.reachableHexes.map((hex) => axialKey(hex)));
     this.reachableCostByKey = new Map(this.reachableHexes.map((hex) => [axialKey(hex), hex.cost]));
+    this.reachablePathByKey = reachableAnalysis.pathByHex;
     this.attackableTargets = getAttackableTargets(selectedUnit.id, this.gameState).filter((unit) =>
       this.isUnitVisibleToPlayer(unit)
     );
@@ -2699,6 +2717,55 @@ export class WorldScene extends Phaser.Scene {
     );
   }
 
+  drawMovePreviewPath(path, pulseStrength = 0) {
+    if (!Array.isArray(path) || path.length < 2) {
+      return;
+    }
+
+    const points = path
+      .filter((hex) => Number.isFinite(hex?.q) && Number.isFinite(hex?.r))
+      .map((hex) => this.hexToWorld(hex.q, hex.r));
+    if (points.length < 2) {
+      return;
+    }
+
+    const style = INGAME_VISUAL_THEME.overlays.previewMovePath;
+    const pulse = Phaser.Math.Clamp(pulseStrength, 0, 1);
+
+    this.previewGraphics.lineStyle(
+      style.underStrokeWidth + pulse * 0.8,
+      style.underStroke,
+      Math.min(1, style.underStrokeAlpha + pulse * 0.08)
+    );
+    this.previewGraphics.beginPath();
+    this.previewGraphics.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i += 1) {
+      this.previewGraphics.lineTo(points[i].x, points[i].y);
+    }
+    this.previewGraphics.strokePath();
+
+    this.previewGraphics.lineStyle(
+      style.strokeWidth + pulse * 0.45,
+      style.stroke,
+      Math.min(1, style.strokeAlpha + pulse * 0.06)
+    );
+    this.previewGraphics.beginPath();
+    this.previewGraphics.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i += 1) {
+      this.previewGraphics.lineTo(points[i].x, points[i].y);
+    }
+    this.previewGraphics.strokePath();
+
+    const nodeRadius = style.nodeRadius * (1 + pulse * 0.06);
+    for (let i = 1; i < points.length - 1; i += 1) {
+      const point = points[i];
+      this.previewGraphics.fillStyle(style.nodeFill, style.nodeFillAlpha);
+      this.previewGraphics.fillCircle(point.x, point.y, nodeRadius);
+      this.previewGraphics.lineStyle(style.nodeStrokeWidth, style.nodeStroke, style.nodeStrokeAlpha);
+      this.previewGraphics.strokeCircle(point.x, point.y, nodeRadius);
+    }
+  }
+
   renderMap() {
     if (!this.mapVisualDirty) {
       return;
@@ -2803,6 +2870,7 @@ export class WorldScene extends Phaser.Scene {
     if (preview.mode === "move" && typeof preview.q === "number" && typeof preview.r === "number") {
       const center = this.hexToWorld(preview.q, preview.r);
       const pulseStrength = this.getPulseStrength(this.previewPulse, preview.q, preview.r, this.time.now);
+      this.drawMovePreviewPath(preview.path, pulseStrength);
       this.drawHexOverlayPair(this.previewGraphics, center.x, center.y, INGAME_VISUAL_THEME.overlays.previewMove, pulseStrength);
       return;
     }
@@ -3798,6 +3866,7 @@ export class WorldScene extends Phaser.Scene {
     const hoveredKey = axialKey(hoveredHex);
     if (this.reachableLookup.has(hoveredKey)) {
       const moveCost = this.reachableCostByKey.get(hoveredKey) ?? 0;
+      const path = this.reachablePathByKey.get(hoveredKey) ?? [];
       return {
         mode: "move",
         unitId: selectedUnit.id,
@@ -3805,6 +3874,7 @@ export class WorldScene extends Phaser.Scene {
         r: hoveredHex.r,
         moveCost,
         movementRemainingAfter: Math.max(0, selectedUnit.movementRemaining - moveCost),
+        path,
       };
     }
 
@@ -4525,6 +4595,10 @@ function arePreviewsEqual(a, b) {
     }
   }
 
+  if (!areHexPathsEqual(a.path, b.path)) {
+    return false;
+  }
+
   if (
     !areObjectsEqualByKeys(a.counterattack, b.counterattack, ["triggered", "reason", "damage"]) ||
     !areObjectsEqualByKeys(a.breakdown, b.breakdown, [
@@ -4536,6 +4610,24 @@ function arePreviewsEqual(a, b) {
     ])
   ) {
     return false;
+  }
+  return true;
+}
+
+function areHexPathsEqual(a, b) {
+  if (!a && !b) {
+    return true;
+  }
+  if (!Array.isArray(a) || !Array.isArray(b)) {
+    return false;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    if ((a[i]?.q ?? null) !== (b[i]?.q ?? null) || (a[i]?.r ?? null) !== (b[i]?.r ?? null)) {
+      return false;
+    }
   }
   return true;
 }

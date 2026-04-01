@@ -79,6 +79,6 @@
 
 ## Known gaps and next steps
 
-- Sprite content is static v1 (single-frame tokens with lightweight FX), not full multi-frame authored animation sheets.
+- Sprite content is static v1 (single-frame character sprites with lightweight FX), not full multi-frame authored animation sheets.
 - No animation skip/fast-forward toggle in UI yet.
 - No dedicated combat timeline panel beyond playback banner + notification stream.

@@ -1,21 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <defs>
-    <radialGradient id="core" cx="50%" cy="36%" r="60%">
-      <stop offset="0%" stop-color="#FAFAFA"/>
-      <stop offset="100%" stop-color="#8A8A8A"/>
-    </radialGradient>
-    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#FFFFFF"/>
-      <stop offset="100%" stop-color="#B7B7B7"/>
-    </linearGradient>
-  </defs>
-  <ellipse cx="32" cy="55" rx="14.5" ry="4.4" fill="#000000" opacity="0.17"/>
-  <circle cx="32" cy="32" r="21" fill="url(#core)" stroke="url(#rim)" stroke-width="2.5"/>
-  <circle cx="32" cy="32" r="16.2" fill="#000000" opacity="0.13"/>
-  <path d="M32 16 L39 23 L35 27 L38 33 L32 30 L26 33 L29 27 L25 23 Z" fill="#F2F2F2"/>
-  <rect x="30.8" y="27.6" width="2.5" height="17.8" rx="1.1" fill="#F0F0F0"/>
-  <path d="M22.8 39.8 L41.2 39.8 L38 47.4 L26 47.4 Z" fill="#DCDCDC" opacity="0.95"/>
-  <circle cx="26" cy="23.8" r="2" fill="#E6E6E6" opacity="0.8"/>
+  <ellipse cx="31.8" cy="55.4" rx="13.2" ry="4" fill="#000000" opacity="0.2"/>
+  <rect x="42.5" y="19.2" width="2.4" height="24.6" rx="1" fill="#efefef"/>
+  <polygon points="41.7,18.8 43.7,14.4 45.7,18.8" fill="#dadada"/>
+  <rect x="41.6" y="42.4" width="4.2" height="1.8" rx="0.7" fill="#bdbdbd"/>
+  <circle cx="32.2" cy="20.8" r="5.4" fill="#ebebeb"/>
+  <path d="M26.7 20.9l2.8-4h5.5l2.6 4v3h-10.9z" fill="#c8c8c8"/>
+  <path d="M26.4 27.8l5.8-2.8l6.3 2.8v15.7l-6.3 3.2l-6.2-3.1z" fill="#d2d2d2"/>
+  <path d="M20.3 29.2c0.8-3.7 3.7-6.5 7.2-6.5h0.8v17.8h-4.6z" fill="#b4b4b4"/>
+  <path d="M24.4 47h4.8l-0.8 4.3h-5.1z" fill="#f0f0f0"/>
+  <path d="M34.8 47h5l0.9 4.2h-5.3z" fill="#e4e4e4"/>
+  <path d="M20 28.2c0-5.3 4.3-9.5 9.5-9.5h0.3c5.3 0 9.7 4.3 9.7 9.5v0.5h-3.2v-0.5c0-3.5-2.9-6.3-6.5-6.3h-0.3
+    c-3.5 0-6.3 2.8-6.3 6.3v0.5h-3.2z" fill="#f3f3f3" opacity="0.8"/>
 </svg>
 
 

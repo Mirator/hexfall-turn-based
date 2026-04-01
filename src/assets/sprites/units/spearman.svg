@@ -1,21 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <defs>
-    <radialGradient id="core" cx="50%" cy="36%" r="60%">
-      <stop offset="0%" stop-color="#FAFAFA"/>
-      <stop offset="100%" stop-color="#8A8A8A"/>
-    </radialGradient>
-    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#FFFFFF"/>
-      <stop offset="100%" stop-color="#B7B7B7"/>
-    </linearGradient>
-  </defs>
-  <ellipse cx="32" cy="55" rx="14.5" ry="4.4" fill="#000000" opacity="0.17"/>
-  <circle cx="32" cy="32" r="21" fill="url(#core)" stroke="url(#rim)" stroke-width="2.5"/>
-  <circle cx="32" cy="32" r="16.2" fill="#000000" opacity="0.13"/>
-  <rect x="31" y="15.5" width="2.8" height="30.2" rx="1.2" fill="#F2F2F2"/>
-  <polygon points="32.4,8.7 38.2,18.7 26.7,18.7" fill="#F2F2F2"/>
-  <path d="M24 32.7 L31 29.8 L31 43.4 L24 46.2 Z" fill="#DCDCDC" opacity="0.9"/>
-  <circle cx="26" cy="23.8" r="2" fill="#E6E6E6" opacity="0.8"/>
+  <ellipse cx="32.1" cy="55.3" rx="13" ry="3.9" fill="#000000" opacity="0.2"/>
+  <polygon points="37.6,8.8 41.8,15.6 33.4,15.6" fill="#e8e8e8"/>
+  <rect x="36.1" y="14.8" width="2.8" height="34.1" rx="1.1" fill="#d0d0d0"/>
+  <circle cx="30.7" cy="21.2" r="5.2" fill="#ececec"/>
+  <path d="M25.4 21.6l2.3-3.5h5.8l2.2 3.5v2.7h-10.3z" fill="#c9c9c9"/>
+  <path d="M25.1 27.1l5.5-2.5l6.1 2.8l-0.9 15.3l-5.2 3h-4.9l-5.3-2.8z" fill="#d5d5d5"/>
+  <path d="M22.2 31.4c0.8-2.8 3.3-4.8 6-4.8h0.4v13.8h-4.1z" fill="#b6b6b6"/>
+  <path d="M22.9 40.1c0-3.8 3-6.8 6.8-6.8c3.7 0 6.8 3 6.8 6.8c0 3.8-3.1 6.9-6.8 6.9c-3.8 0-6.8-3.1-6.8-6.9z" fill="#a9a9a9"/>
+  <path d="M24.8 40.1c0-2.7 2.2-4.9 4.9-4.9c2.6 0 4.8 2.2 4.8 4.9c0 2.7-2.2 4.9-4.8 4.9c-2.7 0-4.9-2.2-4.9-4.9z" fill="#dbdbdb"/>
+  <path d="M24 46.8h4.6l-0.8 4.4h-4.9z" fill="#f2f2f2"/>
+  <path d="M33.8 46.8h4.9l0.8 4.3h-5.1z" fill="#e7e7e7"/>
 </svg>
 
 

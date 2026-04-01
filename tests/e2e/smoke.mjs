@@ -720,6 +720,10 @@ async function run() {
       // Found player city.
       window.__hexfallTest.selectUnit(playerSettler.id);
       const selectedSettlerState = getState();
+      const selectedSettler = selectedSettlerState.units.find((unit) => unit.id === playerSettler.id);
+      if (!selectedSettler) {
+        return { ok: false, reason: "selected-settler-missing-for-preview" };
+      }
       const reachablePreviewHex = selectedSettlerState.reachableHexes.find((hex) => (hex.cost ?? 0) > 0);
       if (!reachablePreviewHex) {
         return { ok: false, reason: "missing-reachable-hex-for-preview" };
@@ -728,12 +732,32 @@ async function run() {
         return { ok: false, reason: "hover-hex-hook-failed" };
       }
       const movePreview = window.__hexfallTest.getActionPreviewState();
+      const movePath = Array.isArray(movePreview?.path) ? movePreview.path : [];
+      const lastMoveStep = movePath[movePath.length - 1] ?? null;
       if (
         movePreview?.mode !== "move" ||
         movePreview.q !== reachablePreviewHex.q ||
-        movePreview.r !== reachablePreviewHex.r
+        movePreview.r !== reachablePreviewHex.r ||
+        movePreview.moveCost !== reachablePreviewHex.cost ||
+        movePath.length < 2 ||
+        movePath[0]?.q !== selectedSettler.q ||
+        movePath[0]?.r !== selectedSettler.r ||
+        lastMoveStep?.q !== reachablePreviewHex.q ||
+        lastMoveStep?.r !== reachablePreviewHex.r
       ) {
         return { ok: false, reason: "move-preview-missing-or-invalid" };
+      }
+      for (let i = 1; i < movePath.length; i += 1) {
+        const previousStep = movePath[i - 1];
+        const nextStep = movePath[i];
+        const distance = Math.max(
+          Math.abs((previousStep?.q ?? 0) - (nextStep?.q ?? 0)),
+          Math.abs((previousStep?.r ?? 0) - (nextStep?.r ?? 0)),
+          Math.abs((previousStep?.q ?? 0) + (previousStep?.r ?? 0) - (nextStep?.q ?? 0) - (nextStep?.r ?? 0))
+        );
+        if (distance !== 1) {
+          return { ok: false, reason: "move-preview-path-not-contiguous" };
+        }
       }
 
       const turnAssistantBeforeFound = window.__hexfallTest.getTurnAssistantState();
