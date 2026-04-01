@@ -555,6 +555,24 @@ Viewport support note (2026-03-27): legacy mentions of mobile checks/artifacts i
   - `README.md` gameplay/features/controls updated with Tech Tree control and overview behavior.
   - `docs/spec-007-hud-context-panels-and-notifications.md` updated for button placement, modal interaction rules, and payload/test expectations.
   - this `progress.md` entry added as implementation/test/docs completion log.
+## 2026-04-01 (Horizontal Tech Tree graph in modal)
+- Replaced list-style tech rows with a read-only horizontal graph inside the existing Tech Tree modal.
+- Implemented deterministic graph layout:
+  - era lanes (`Era 1/2/3`),
+  - left-to-right depth ordering from prerequisites,
+  - stable tie-break by `TECH_ORDER`,
+  - orthogonal prerequisite connector lines.
+- Added inner graph viewport with clipping/mask and scrolling support:
+  - shift-wheel / trackpad horizontal scrolling,
+  - optional drag-to-pan via graph hit area.
+- Preserved summary header + top-HUD button behavior and existing modal gating semantics.
+- Extended runtime/test payload with graph metadata:
+  - `graph.viewport`, `graph.contentWidth`, `graph.contentHeight`, `graph.scrollX`,
+  - `graph.nodes[{ id, x, y, width, height, lane, depth, status }]`,
+  - `graph.edges[{ from, to }]`.
+- Added test hook:
+  - `window.__hexfallTest.scrollTechTreeGraph(delta)`.
+- Updated e2e smoke checks for graph node/edge assertions, lane/depth order validation, and scroll-state change.
 ## 2026-04-01 (GitHub Pages terrain tile visibility fix)
 - Investigated missing terrain tile visuals on deployed GitHub Pages build (`https://mirator.github.io/hexfall-turn-based/`).
 - Root cause: sprite URLs in `src/core/visualAssets.js` were constructed with `new URL(relativePath, import.meta.url)` and dynamic template paths. In production bundles, Vite could not statically include/copy those SVGs, so terrain/unit/city/fx texture URLs resolved to non-existent runtime paths.

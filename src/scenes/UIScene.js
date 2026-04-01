@@ -39,6 +39,19 @@ const TECH_TREE_MODAL_WIDTH_MAX = 1120;
 const TECH_TREE_MODAL_HEIGHT_MIN = 420;
 const TECH_TREE_MODAL_HEIGHT_MAX = 760;
 const TECH_TREE_MODAL_CONTENT_PADDING = 16;
+const TECH_TREE_GRAPH_VIEWPORT_MIN_HEIGHT = 220;
+const TECH_TREE_GRAPH_LANE_HEIGHT = 96;
+const TECH_TREE_GRAPH_NODE_WIDTH = 168;
+const TECH_TREE_GRAPH_NODE_HEIGHT = 58;
+const TECH_TREE_GRAPH_NODE_SLOT_WIDTH = TECH_TREE_GRAPH_NODE_WIDTH + 22;
+const TECH_TREE_GRAPH_DEPTH_GAP = 56;
+const TECH_TREE_GRAPH_PADDING_LEFT = 72;
+const TECH_TREE_GRAPH_PADDING_RIGHT = 34;
+const TECH_TREE_GRAPH_PADDING_TOP = 14;
+const TECH_TREE_GRAPH_PADDING_BOTTOM = 14;
+const TECH_TREE_GRAPH_CONNECTOR_COLOR = 0x756851;
+const TECH_TREE_GRAPH_CONNECTOR_ALPHA = 0.72;
+const TECH_TREE_GRAPH_CONNECTOR_WIDTH = 2;
 const CONTEXT_PANEL_COLLAPSED_HEIGHT = 76;
 const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY = 250;
 const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY_TABLET = 300;
@@ -155,7 +168,25 @@ export class UIScene extends Phaser.Scene {
         cityScienceBreakdown: [],
       },
       rows: [],
+      graph: {
+        viewport: { x: 0, y: 0, width: 0, height: 0 },
+        contentWidth: 0,
+        contentHeight: 0,
+        scrollX: 0,
+        nodes: [],
+        edges: [],
+      },
     };
+    this.techTreeGraphViewportBounds = { x: 0, y: 0, width: 0, height: 0 };
+    this.techTreeGraphContentWidth = 0;
+    this.techTreeGraphContentHeight = 0;
+    this.techTreeGraphScrollX = 0;
+    this.techTreeGraphMaxScrollX = 0;
+    this.techTreeGraphDragging = false;
+    this.techTreeGraphDragPointerId = null;
+    this.techTreeGraphDragStartX = 0;
+    this.techTreeGraphDragStartScrollX = 0;
+    this.techTreeGraphNodeObjects = [];
     this.contextPanelExpanded = false;
     this.contextPanelPinned = false;
     this.lastContextSelectionKey = null;
@@ -526,7 +557,49 @@ export class UIScene extends Phaser.Scene {
     this.techTreeSummaryCurrentLabel = this.createLabel("", 0, 0, "13px", "#3b2a16", 41).setVisible(false);
     this.techTreeSummaryCitiesLabel = this.createLabel("", 0, 0, "12px", "#5d4b34", 41).setVisible(false);
     this.techTreeSummaryLegendLabel = this.createLabel("", 0, 0, "11px", "#6a5a45", 41).setVisible(false);
-    this.techTreeRowLabels = TECH_ORDER.map(() => this.createLabel("", 0, 0, "11px", "#3b2a16", 41).setVisible(false));
+    this.techTreeGraphViewportPanel = this.add
+      .rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelSoftBg, 0.88)
+      .setOrigin(0, 0)
+      .setDepth(41)
+      .setVisible(false);
+    this.techTreeGraphViewportPanel.setStrokeStyle(1, SEMANTIC_COLORS.panelBorder, 0.75);
+    this.techTreeGraphLaneBands = [0, 1, 2].map(() =>
+      this.add.rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelBg, 0.34).setOrigin(0, 0).setDepth(41).setVisible(false)
+    );
+    this.techTreeLaneLabels = [1, 2, 3].map((era) =>
+      this.createLabel(`Era ${era}`, 0, 0, "11px", "#5d4b34", 42).setVisible(false)
+    );
+    for (const laneLabel of this.techTreeLaneLabels) {
+      laneLabel.setFontFamily(UI_FONTS.compact);
+    }
+    this.techTreeGraphHitArea = this.add
+      .rectangle(0, 0, 10, 10, 0x000000, 0)
+      .setOrigin(0, 0)
+      .setDepth(42)
+      .setVisible(false)
+      .setInteractive({ useHandCursor: true });
+    this.techTreeGraphHitArea.on("pointerdown", (pointer, _x, _y, event) => {
+      event.stopPropagation();
+      if (!this.techTreeModalOpen) {
+        return;
+      }
+      this.techTreeGraphDragging = true;
+      this.techTreeGraphDragPointerId = pointer.id;
+      this.techTreeGraphDragStartX = pointer.x;
+      this.techTreeGraphDragStartScrollX = this.techTreeGraphScrollX;
+    });
+    this.techTreeGraphHitArea.on("pointerup", (pointer, _x, _y, event) => {
+      event.stopPropagation();
+      if (this.techTreeGraphDragPointerId === pointer.id || this.techTreeGraphDragPointerId === null) {
+        this.stopTechTreeGraphDrag();
+      }
+    });
+    this.techTreeGraphContainer = this.add.container(0, 0).setDepth(41).setVisible(false);
+    this.techTreeGraphEdges = this.add.graphics().setDepth(41).setVisible(false);
+    this.techTreeGraphContainer.add(this.techTreeGraphEdges);
+    this.techTreeGraphMaskShape = this.add.graphics().setDepth(0).setVisible(false);
+    this.techTreeGraphMask = this.techTreeGraphMaskShape.createGeometryMask();
+    this.techTreeGraphContainer.setMask(this.techTreeGraphMask);
     this.techTreeCloseButton = this.createButton("Close", "tech-tree-close", () => this.closeTechTreeModal(), {
       variant: "chip",
       width: 86,
@@ -680,6 +753,7 @@ export class UIScene extends Phaser.Scene {
     this.escapeKey?.on("down", this.handleEscapePressed, this);
     this.input.on("wheel", this.handleWheel, this);
     this.input.on("pointermove", this.handlePointerMove, this);
+    this.input.on("pointerup", this.handlePointerUp, this);
     gameEvents.on("state-changed", this.updateFromState, this);
     gameEvents.on("camera-changed", this.handleCameraChanged, this);
     gameEvents.on("preview-changed", this.handlePreviewChanged, this);
@@ -692,6 +766,7 @@ export class UIScene extends Phaser.Scene {
       this.escapeKey?.off("down", this.handleEscapePressed, this);
       this.input.off("wheel", this.handleWheel, this);
       this.input.off("pointermove", this.handlePointerMove, this);
+      this.input.off("pointerup", this.handlePointerUp, this);
       gameEvents.off("state-changed", this.updateFromState, this);
       gameEvents.off("camera-changed", this.handleCameraChanged, this);
       gameEvents.off("preview-changed", this.handlePreviewChanged, this);
@@ -1063,14 +1138,25 @@ export class UIScene extends Phaser.Scene {
     this.techTreeSummaryCurrentLabel.setVisible(show);
     this.techTreeSummaryCitiesLabel.setVisible(show);
     this.techTreeSummaryLegendLabel.setVisible(show);
-    for (const rowLabel of this.techTreeRowLabels) {
-      rowLabel.setVisible(show);
+    this.techTreeGraphViewportPanel.setVisible(show);
+    this.techTreeGraphHitArea.setVisible(show);
+    this.techTreeGraphContainer.setVisible(show);
+    this.techTreeGraphEdges.setVisible(show);
+    for (const laneBand of this.techTreeGraphLaneBands) {
+      laneBand.setVisible(show);
+    }
+    for (const laneLabel of this.techTreeLaneLabels) {
+      laneLabel.setVisible(show);
     }
     this.setCompositeVisible(this.techTreeCloseButton, show);
     this.setButtonActive(this.techTreeButton, show);
     this.latestTechTreeModalPayload.open = show;
     if (show) {
       this.updateTechTreeModalPayload(this.latestState);
+    } else {
+      this.stopTechTreeGraphDrag();
+      this.clearTechTreeGraphNodes();
+      this.techTreeGraphEdges.clear();
     }
     if (this.latestState) {
       this.layout(this.scale.gameSize);
@@ -1519,29 +1605,45 @@ export class UIScene extends Phaser.Scene {
     this.techTreeSummaryCurrentLabel.setWordWrapWidth(summaryWidth, true);
     this.techTreeSummaryCitiesLabel.setWordWrapWidth(summaryWidth, true);
     this.techTreeSummaryLegendLabel.setWordWrapWidth(summaryWidth, true);
-
-    const columns = gameSize.width >= 1100 ? 2 : 1;
-    const rowsPerColumn = Math.ceil(TECH_ORDER.length / columns);
-    const rowTop = summaryTop + 76;
-    const rowBottomPadding = 14;
-    const rowAreaHeight = Math.max(120, techTreeModalHeight - (rowTop - techTreeTop) - rowBottomPadding);
-    const rowStep = rowAreaHeight / Math.max(1, rowsPerColumn);
-    const rowFontSize = columns === 2 ? 11 : rowStep < 23 ? 10 : 11;
-    const columnGap = 12;
-    const columnWidth =
-      columns === 2
-        ? (summaryWidth - columnGap) / 2
-        : summaryWidth;
-    for (let index = 0; index < this.techTreeRowLabels.length; index += 1) {
-      const label = this.techTreeRowLabels[index];
-      const column = Math.floor(index / rowsPerColumn);
-      const row = index % rowsPerColumn;
-      const x = summaryLeft + column * (columnWidth + columnGap);
-      const y = rowTop + row * rowStep;
-      label.setPosition(x, y);
-      label.setFontSize(rowFontSize);
-      label.setWordWrapWidth(Math.max(120, columnWidth - 4), true);
+    const graphTop = summaryTop + 74;
+    const graphBottomPadding = 14;
+    const graphHeight = Math.max(
+      TECH_TREE_GRAPH_VIEWPORT_MIN_HEIGHT,
+      techTreeModalHeight - (graphTop - techTreeTop) - graphBottomPadding
+    );
+    this.techTreeGraphViewportBounds = {
+      x: summaryLeft,
+      y: graphTop,
+      width: summaryWidth,
+      height: graphHeight,
+    };
+    this.techTreeGraphViewportPanel.setPosition(this.techTreeGraphViewportBounds.x, this.techTreeGraphViewportBounds.y);
+    this.techTreeGraphViewportPanel.setSize(this.techTreeGraphViewportBounds.width, this.techTreeGraphViewportBounds.height);
+    this.techTreeGraphHitArea.setPosition(this.techTreeGraphViewportBounds.x, this.techTreeGraphViewportBounds.y);
+    this.techTreeGraphHitArea.setSize(this.techTreeGraphViewportBounds.width, this.techTreeGraphViewportBounds.height);
+    const laneBandHeight = this.techTreeGraphViewportBounds.height / 3;
+    for (let laneIndex = 0; laneIndex < this.techTreeGraphLaneBands.length; laneIndex += 1) {
+      const laneBand = this.techTreeGraphLaneBands[laneIndex];
+      laneBand.setPosition(this.techTreeGraphViewportBounds.x, this.techTreeGraphViewportBounds.y + laneIndex * laneBandHeight);
+      laneBand.setSize(this.techTreeGraphViewportBounds.width, laneBandHeight);
     }
+    for (let laneIndex = 0; laneIndex < this.techTreeLaneLabels.length; laneIndex += 1) {
+      const laneLabel = this.techTreeLaneLabels[laneIndex];
+      laneLabel.setPosition(
+        this.techTreeGraphViewportBounds.x + 8,
+        this.techTreeGraphViewportBounds.y + laneIndex * laneBandHeight + 5
+      );
+    }
+    this.techTreeGraphMaskShape.clear();
+    this.techTreeGraphMaskShape.fillStyle(0xffffff, 1);
+    this.techTreeGraphMaskShape.fillRect(
+      this.techTreeGraphViewportBounds.x,
+      this.techTreeGraphViewportBounds.y,
+      this.techTreeGraphViewportBounds.width,
+      this.techTreeGraphViewportBounds.height
+    );
+    this.applyTechTreeGraphScroll(this.techTreeGraphScrollX, { updatePayload: false });
+    this.renderTechTreeGraph(this.latestTechTreeModalPayload);
 
     const pauseCenterX = gameSize.width / 2;
     const pauseCenterY = gameSize.height / 2 - 20;
@@ -2515,8 +2617,6 @@ export class UIScene extends Phaser.Scene {
       return;
     }
     const payload = buildTechTreeModalPayload(gameState);
-    payload.open = this.techTreeModalOpen;
-    this.latestTechTreeModalPayload = payload;
     const summary = payload.summary;
     this.techTreeSummaryScienceLabel.setText(
       `Science/Turn ${formatMetric(summary.sciencePerTurn)} | Base ${formatMetric(summary.baseSciencePerTurn)} | Global +${formatMetric(
@@ -2536,17 +2636,134 @@ export class UIScene extends Phaser.Scene {
         : "Per-city science: no city science breakdown available"
     );
     this.techTreeSummaryLegendLabel.setText("Status legend: Completed | Active | Available | Locked");
-    for (let index = 0; index < this.techTreeRowLabels.length; index += 1) {
-      const rowLabel = this.techTreeRowLabels[index];
-      const row = payload.rows[index];
-      if (!row) {
-        rowLabel.setText("");
-        rowLabel.setColor("#3b2a16");
+    payload.open = this.techTreeModalOpen;
+    payload.graph.viewport = { ...this.techTreeGraphViewportBounds };
+    payload.graph.scrollX = this.techTreeGraphScrollX;
+    this.latestTechTreeModalPayload = payload;
+    this.renderTechTreeGraph(payload);
+  }
+
+  renderTechTreeGraph(payload) {
+    const graph = payload?.graph ?? null;
+    if (!graph) {
+      return;
+    }
+    this.clearTechTreeGraphNodes();
+    this.techTreeGraphEdges.clear();
+    const viewportWidth = Math.max(0, this.techTreeGraphViewportBounds.width);
+    const viewportHeight = Math.max(0, this.techTreeGraphViewportBounds.height);
+    this.techTreeGraphContentWidth = Math.max(viewportWidth, Number.isFinite(graph.contentWidth) ? graph.contentWidth : viewportWidth);
+    this.techTreeGraphContentHeight = Math.max(viewportHeight, Number.isFinite(graph.contentHeight) ? graph.contentHeight : viewportHeight);
+    this.techTreeGraphMaxScrollX = Math.max(0, this.techTreeGraphContentWidth - viewportWidth);
+    this.applyTechTreeGraphScroll(this.techTreeGraphScrollX, { updatePayload: false });
+    if (!this.techTreeModalOpen) {
+      this.latestTechTreeModalPayload.graph = {
+        ...this.latestTechTreeModalPayload.graph,
+        viewport: { ...this.techTreeGraphViewportBounds },
+        contentWidth: this.techTreeGraphContentWidth,
+        contentHeight: this.techTreeGraphContentHeight,
+        scrollX: this.techTreeGraphScrollX,
+        nodes: graph.nodes.map((node) => ({ ...node })),
+        edges: graph.edges.map((edge) => ({ ...edge })),
+      };
+      return;
+    }
+    const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+    for (const edge of graph.edges) {
+      const source = nodeById.get(edge.from);
+      const target = nodeById.get(edge.to);
+      if (!source || !target) {
         continue;
       }
-      rowLabel.setText(formatTechTreeRowLine(row));
-      rowLabel.setColor(resolveTechRowColor(row.status));
+      const startX = source.x + source.width;
+      const startY = source.y + source.height / 2;
+      const endX = target.x;
+      const endY = target.y + target.height / 2;
+      const bendX = startX + Math.max(20, (endX - startX) * 0.5);
+      this.techTreeGraphEdges.lineStyle(TECH_TREE_GRAPH_CONNECTOR_WIDTH, TECH_TREE_GRAPH_CONNECTOR_COLOR, TECH_TREE_GRAPH_CONNECTOR_ALPHA);
+      this.techTreeGraphEdges.beginPath();
+      this.techTreeGraphEdges.moveTo(startX, startY);
+      this.techTreeGraphEdges.lineTo(bendX, startY);
+      this.techTreeGraphEdges.lineTo(bendX, endY);
+      this.techTreeGraphEdges.lineTo(endX, endY);
+      this.techTreeGraphEdges.strokePath();
     }
+    for (const node of graph.nodes) {
+      const palette = resolveTechNodePalette(node.status);
+      const rect = this.add.rectangle(node.x, node.y, node.width, node.height, palette.fill, palette.fillAlpha).setOrigin(0, 0);
+      rect.setStrokeStyle(2, palette.stroke, 0.92);
+      const title = this.createLabel(node.name, node.x + 7, node.y + 5, "12px", palette.text, 41);
+      title.setWordWrapWidth(Math.max(84, node.width - 12), true);
+      this.setTextWithinWidth(title, node.name, Math.max(84, node.width - 12));
+      const statusLabel = this.createLabel(node.status, node.x + 7, node.y + 23, "11px", palette.statusText, 41);
+      const progressLabel = this.createLabel(
+        `${formatMetric(node.progress)}/${formatMetric(node.cost)} | ${node.boostTarget > 0 ? `Boost ${node.boostCurrent}/${node.boostTarget}` : "Boost n/a"}`,
+        node.x + 7,
+        node.y + 39,
+        "10px",
+        palette.progressText,
+        41
+      );
+      progressLabel.setWordWrapWidth(Math.max(84, node.width - 12), true);
+      this.setTextWithinWidth(progressLabel, progressLabel.text, Math.max(84, node.width - 12));
+      this.techTreeGraphContainer.add([rect, title, statusLabel, progressLabel]);
+      this.techTreeGraphNodeObjects.push(rect, title, statusLabel, progressLabel);
+    }
+    this.latestTechTreeModalPayload.graph = {
+      ...this.latestTechTreeModalPayload.graph,
+      viewport: { ...this.techTreeGraphViewportBounds },
+      contentWidth: this.techTreeGraphContentWidth,
+      contentHeight: this.techTreeGraphContentHeight,
+      scrollX: this.techTreeGraphScrollX,
+      nodes: graph.nodes.map((node) => ({ ...node })),
+      edges: graph.edges.map((edge) => ({ ...edge })),
+    };
+  }
+
+  clearTechTreeGraphNodes() {
+    for (const object of this.techTreeGraphNodeObjects) {
+      object.destroy();
+    }
+    this.techTreeGraphNodeObjects = [];
+  }
+
+  applyTechTreeGraphScroll(nextScrollX, options = {}) {
+    const updatePayload = options.updatePayload !== false;
+    const clamped = Phaser.Math.Clamp(
+      Number.isFinite(nextScrollX) ? nextScrollX : 0,
+      0,
+      Math.max(0, this.techTreeGraphMaxScrollX)
+    );
+    this.techTreeGraphScrollX = clamped;
+    this.techTreeGraphContainer.setPosition(this.techTreeGraphViewportBounds.x - clamped, this.techTreeGraphViewportBounds.y);
+    if (updatePayload && this.latestTechTreeModalPayload?.graph) {
+      this.latestTechTreeModalPayload.graph.scrollX = clamped;
+      this.latestTechTreeModalPayload.graph.viewport = { ...this.techTreeGraphViewportBounds };
+      this.latestTechTreeModalPayload.graph.contentWidth = this.techTreeGraphContentWidth;
+      this.latestTechTreeModalPayload.graph.contentHeight = this.techTreeGraphContentHeight;
+    }
+    return clamped;
+  }
+
+  stopTechTreeGraphDrag() {
+    this.techTreeGraphDragging = false;
+    this.techTreeGraphDragPointerId = null;
+  }
+
+  isPointerInTechTreeGraphViewport(pointer) {
+    if (!pointer || !this.techTreeModalOpen) {
+      return false;
+    }
+    return Phaser.Geom.Rectangle.Contains(
+      new Phaser.Geom.Rectangle(
+        this.techTreeGraphViewportBounds.x,
+        this.techTreeGraphViewportBounds.y,
+        this.techTreeGraphViewportBounds.width,
+        this.techTreeGraphViewportBounds.height
+      ),
+      pointer.x,
+      pointer.y
+    );
   }
 
   buildLayoutStateKey(gameState) {
@@ -3178,10 +3395,30 @@ export class UIScene extends Phaser.Scene {
   }
 
   handlePointerMove(pointer) {
+    if (this.techTreeGraphDragging) {
+      const samePointer = this.techTreeGraphDragPointerId === null || pointer.id === this.techTreeGraphDragPointerId;
+      if (!pointer.isDown || !samePointer) {
+        if (!pointer.isDown) {
+          this.stopTechTreeGraphDrag();
+        }
+      } else {
+        const dragDelta = pointer.x - this.techTreeGraphDragStartX;
+        this.applyTechTreeGraphScroll(this.techTreeGraphDragStartScrollX - dragDelta);
+      }
+    }
     if (!this.disabledTooltipVisible || !this.disabledHoverText) {
       return;
     }
     this.updateDisabledTooltipPosition(pointer);
+  }
+
+  handlePointerUp(pointer) {
+    if (!this.techTreeGraphDragging) {
+      return;
+    }
+    if (this.techTreeGraphDragPointerId === null || pointer.id === this.techTreeGraphDragPointerId) {
+      this.stopTechTreeGraphDrag();
+    }
   }
 
   showDisabledTooltip(message) {
@@ -3224,7 +3461,18 @@ export class UIScene extends Phaser.Scene {
     this.disabledTooltipLabel.setPosition(x - width / 2 + 7, y - height / 2 + 5);
   }
 
-  handleWheel(pointer, _gameObjects, _deltaX, deltaY) {
+  handleWheel(pointer, _gameObjects, deltaX, deltaY) {
+    if (this.isPointerInTechTreeGraphViewport(pointer)) {
+      const shiftHeld = !!pointer?.event?.shiftKey;
+      let scrollDelta = Number.isFinite(deltaX) ? deltaX : 0;
+      if (shiftHeld) {
+        scrollDelta += Number.isFinite(deltaY) ? deltaY : 0;
+      }
+      if (Math.abs(scrollDelta) >= 0.1) {
+        this.applyTechTreeGraphScroll(this.techTreeGraphScrollX + scrollDelta);
+      }
+      return;
+    }
     if (!this.isPointerInNotificationCenter(pointer)) {
       return;
     }
@@ -3926,7 +4174,22 @@ export class UIScene extends Phaser.Scene {
       panelBounds: this.techTreeModalPanel.getBounds(),
       summary: { ...this.latestTechTreeModalPayload.summary },
       rows: this.latestTechTreeModalPayload.rows.map((row) => ({ ...row })),
+      graph: {
+        viewport: { ...this.latestTechTreeModalPayload.graph.viewport },
+        contentWidth: this.latestTechTreeModalPayload.graph.contentWidth,
+        contentHeight: this.latestTechTreeModalPayload.graph.contentHeight,
+        scrollX: this.latestTechTreeModalPayload.graph.scrollX,
+        nodes: this.latestTechTreeModalPayload.graph.nodes.map((node) => ({ ...node })),
+        edges: this.latestTechTreeModalPayload.graph.edges.map((edge) => ({ ...edge })),
+      },
     };
+  }
+
+  testScrollTechTreeGraph(delta) {
+    if (!this.techTreeModalOpen) {
+      return this.techTreeGraphScrollX;
+    }
+    return this.applyTechTreeGraphScroll(this.techTreeGraphScrollX + (Number(delta) || 0));
   }
 
   testClickMinimapNormalized(nx, ny) {
@@ -3977,6 +4240,14 @@ export class UIScene extends Phaser.Scene {
         buttonActive: this.techTreeButton.isActive,
         summary: { ...this.latestTechTreeModalPayload.summary },
         rows: this.latestTechTreeModalPayload.rows.map((row) => ({ ...row })),
+        graph: {
+          viewport: { ...this.latestTechTreeModalPayload.graph.viewport },
+          contentWidth: this.latestTechTreeModalPayload.graph.contentWidth,
+          contentHeight: this.latestTechTreeModalPayload.graph.contentHeight,
+          scrollX: this.latestTechTreeModalPayload.graph.scrollX,
+          nodes: this.latestTechTreeModalPayload.graph.nodes.map((node) => ({ ...node })),
+          edges: this.latestTechTreeModalPayload.graph.edges.map((edge) => ({ ...edge })),
+        },
       },
       minimap: {
         visible: this.minimapVisible,
@@ -4042,6 +4313,7 @@ function buildTechTreeModalPayload(gameState) {
       unlocks,
     };
   });
+  const graph = buildTechTreeGraphModel(rows);
   const cityScienceEntries = Object.values(research.cityScienceById ?? {})
     .sort((a, b) => String(a.cityName ?? a.cityId).localeCompare(String(b.cityName ?? b.cityId)))
     .map((entry) => ({
@@ -4073,35 +4345,144 @@ function buildTechTreeModalPayload(gameState) {
       cityScienceBreakdown: cityScienceEntries,
     },
     rows,
+    graph,
   };
 }
 
-function formatTechTreeRowLine(row) {
-  const boostText =
-    row.boostTarget > 0
-      ? `${row.boostCurrent}/${row.boostTarget}${row.boostMet ? " ready" : ""}`
-      : "n/a";
-  return `${row.name} [${row.status}] E${row.era} | Progress ${formatMetric(row.progress)}/${formatMetric(row.cost)} | Boost ${boostText} | Unlocks ${formatUnlockSummary(row.unlocks)}`;
+function buildTechTreeGraphModel(rows) {
+  const depthByTechId = computeTechDepthMap();
+  const depthGroups = new Map();
+  for (const techId of TECH_ORDER) {
+    const depth = depthByTechId[techId] ?? 0;
+    if (!depthGroups.has(depth)) {
+      depthGroups.set(depth, []);
+    }
+    depthGroups.get(depth).push(techId);
+  }
+  const sortedDepths = [...depthGroups.keys()].sort((a, b) => a - b);
+  const depthStartX = new Map();
+  const depthSlotByTechId = new Map();
+  let runningX = TECH_TREE_GRAPH_PADDING_LEFT;
+  for (const depth of sortedDepths) {
+    const group = depthGroups.get(depth) ?? [];
+    depthStartX.set(depth, runningX);
+    for (let index = 0; index < group.length; index += 1) {
+      depthSlotByTechId.set(group[index], index);
+    }
+    runningX += Math.max(1, group.length) * TECH_TREE_GRAPH_NODE_SLOT_WIDTH + TECH_TREE_GRAPH_DEPTH_GAP;
+  }
+  const nodes = rows.map((row) => {
+    const depth = depthByTechId[row.id] ?? 0;
+    const slot = depthSlotByTechId.get(row.id) ?? 0;
+    const lane = Phaser.Math.Clamp(Number(row.era) || 1, 1, 3);
+    const x = (depthStartX.get(depth) ?? TECH_TREE_GRAPH_PADDING_LEFT) + slot * TECH_TREE_GRAPH_NODE_SLOT_WIDTH;
+    const laneTop = TECH_TREE_GRAPH_PADDING_TOP + (lane - 1) * TECH_TREE_GRAPH_LANE_HEIGHT;
+    const y = laneTop + (TECH_TREE_GRAPH_LANE_HEIGHT - TECH_TREE_GRAPH_NODE_HEIGHT) / 2;
+    return {
+      id: row.id,
+      name: row.name,
+      status: row.status,
+      lane,
+      depth,
+      x,
+      y,
+      width: TECH_TREE_GRAPH_NODE_WIDTH,
+      height: TECH_TREE_GRAPH_NODE_HEIGHT,
+      progress: row.progress,
+      cost: row.cost,
+      boostCurrent: row.boostCurrent,
+      boostTarget: row.boostTarget,
+    };
+  });
+  const edges = [];
+  for (const row of rows) {
+    for (const prerequisite of row.prerequisites) {
+      if (TECH_TREE[prerequisite]) {
+        edges.push({ from: prerequisite, to: row.id });
+      }
+    }
+  }
+  const furthestNodeX = nodes.reduce((max, node) => Math.max(max, node.x + node.width), 0);
+  const contentWidth = Math.max(
+    TECH_TREE_GRAPH_PADDING_LEFT + TECH_TREE_GRAPH_NODE_WIDTH + TECH_TREE_GRAPH_PADDING_RIGHT,
+    furthestNodeX + TECH_TREE_GRAPH_PADDING_RIGHT
+  );
+  const contentHeight = TECH_TREE_GRAPH_PADDING_TOP + TECH_TREE_GRAPH_LANE_HEIGHT * 3 + TECH_TREE_GRAPH_PADDING_BOTTOM;
+  return {
+    viewport: { x: 0, y: 0, width: 0, height: 0 },
+    contentWidth,
+    contentHeight,
+    scrollX: 0,
+    nodes,
+    edges,
+  };
 }
 
-function resolveTechRowColor(status) {
+function computeTechDepthMap() {
+  const memo = {};
+  const visiting = new Set();
+  const resolveDepth = (techId) => {
+    if (Number.isFinite(memo[techId])) {
+      return memo[techId];
+    }
+    if (visiting.has(techId)) {
+      return 0;
+    }
+    visiting.add(techId);
+    const prerequisites = TECH_TREE[techId]?.prerequisites ?? [];
+    let depth = 0;
+    for (const prerequisite of prerequisites) {
+      depth = Math.max(depth, resolveDepth(prerequisite) + 1);
+    }
+    visiting.delete(techId);
+    memo[techId] = depth;
+    return depth;
+  };
+  for (const techId of TECH_ORDER) {
+    resolveDepth(techId);
+  }
+  return memo;
+}
+
+function resolveTechNodePalette(status) {
   if (status === "Completed") {
-    return SEMANTIC_COLORS.textPositive;
+    return {
+      fill: SEMANTIC_COLORS.accentGreen,
+      fillAlpha: 0.32,
+      stroke: SEMANTIC_COLORS.accentGreen,
+      text: "#244a33",
+      statusText: "#2f7242",
+      progressText: "#2d5d40",
+    };
   }
   if (status === "Active") {
-    return SEMANTIC_COLORS.textInfo;
+    return {
+      fill: SEMANTIC_COLORS.accentBlue,
+      fillAlpha: 0.24,
+      stroke: SEMANTIC_COLORS.accentBlue,
+      text: "#23415e",
+      statusText: "#2f5f90",
+      progressText: "#385775",
+    };
   }
   if (status === "Available") {
-    return SEMANTIC_COLORS.textStrong;
+    return {
+      fill: SEMANTIC_COLORS.panelActiveBg,
+      fillAlpha: 0.74,
+      stroke: SEMANTIC_COLORS.panelBorder,
+      text: SEMANTIC_COLORS.textStrong,
+      statusText: "#4d3a24",
+      progressText: "#5a452f",
+    };
   }
-  return SEMANTIC_COLORS.textMuted;
-}
-
-function formatUnlockSummary(unlocks) {
-  if (!Array.isArray(unlocks) || unlocks.length === 0) {
-    return "-";
-  }
-  return unlocks.join(", ");
+  return {
+    fill: SEMANTIC_COLORS.panelSoftBg,
+    fillAlpha: 0.58,
+    stroke: SEMANTIC_COLORS.panelBorder,
+    text: SEMANTIC_COLORS.textMuted,
+    statusText: "#6a5944",
+    progressText: "#7a6852",
+  };
 }
 
 function scaledToScience(value) {

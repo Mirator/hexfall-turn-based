@@ -23,8 +23,8 @@
 - Chosen: top HUD includes a `Tech Tree` button (adjacent to `Stats`) that opens a read-only modal overview:
   - compact summary: science per turn, base science, global modifier %, completed tech count, active tech + turns remaining
   - per-city science totals sourced from `research.cityScienceById`
-  - deterministic full `14`-tech list (all rows) with status/progress/boost/unlocks
-  - two-column layout on wide viewports, one compact column otherwise
+  - deterministic horizontal tech graph with era lanes (`Era 1/2/3`), prerequisite connectors, and `14` node cards
+  - inner horizontal scrolling within modal viewport (supports shift-wheel/trackpad and drag pan)
   - close interactions: `Tech Tree` toggle, `Esc`, backdrop click, and explicit modal `Close` button
 - Chosen: city and research context surfaces expose per-city science breakdown when available:
   - population science
@@ -51,10 +51,11 @@
   - `hudTopLeft`, `selectedInfo`, `contextMenu`, `uiHints`, `uiActions`, `uiPreview`, `uiTurnAssistant`, `uiTurnForecast`, `uiContextPanel`, `uiNotifications`
 - HUD polish/test payload extensions:
   - top HUD control snapshot now includes `techTree*` fields (`visible`, `label`, `width`, `bounds`)
-  - HUD polish snapshot includes `techTree` block (`open`, `summary`, `rows`)
+  - HUD polish snapshot includes `techTree` block (`open`, `summary`, `rows`, `graph`)
 - Test bridge methods:
   - `toggleTechTreeModal()`
   - `getTechTreeModalState()`
+  - `scrollTechTreeGraph(delta)`
 - Notification categories:
   - `All`, `Combat`, `City`, `Research`, `System`
 
@@ -72,8 +73,8 @@
 - Tech overview readability:
   - top HUD `Tech Tree` button is visible and horizontally adjacent to `Stats`/`Menu` with matching chip dimensions
   - modal opens as read-only overlay and blocks non-modal gameplay controls while open
-  - modal always renders all `14` tech rows in `TECH_ORDER`
-  - each row shows: status (`Completed|Active|Available|Locked`), era, progress/cost, boost progress, unlock summary
+  - modal always renders all `14` tech nodes in deterministic left-to-right dependency order
+  - graph visualizes era lanes (`1..3`), prerequisite connectors, node status (`Completed|Active|Available|Locked`), and compact progress/boost text
   - modal summary shows science-per-turn values and per-city science totals
   - modal closes via toggle, `Esc`, backdrop, or `Close` button
 - City science transparency:
@@ -96,13 +97,14 @@
   - `tests/e2e/smoke.mjs` validates:
     - research payload presence (`sciencePerTurn`, `turnsRemaining`, `boostProgressByTech`, `cityScienceById`)
     - top HUD `Tech Tree` button presence/alignment and ordering with `Stats` + `Menu`
-    - read-only tech-tree modal open/close and deterministic `14`-row payload
+    - read-only tech-tree modal open/close and deterministic graph payload (`nodes`, `edges`, `viewport`, `scrollX`)
+    - graph scroll behavior updates `scrollX` while modal remains open
     - modal gameplay gating while tech-tree overlay is open
     - notification filter behavior including `Research` category
     - context/panel flows and non-overlap behavior across supported viewport sizes
 
 ## Known gaps and next steps
 
-- Tech-tree modal is compact text-based overview (no node-link graph visualization).
+- Tech-tree modal uses fixed-scale horizontal graph (no zoom controls yet).
 - Notification center still favors compact rows over expanded detail cards.
 - No user-configurable research panel pinning independent of context-panel pin state.

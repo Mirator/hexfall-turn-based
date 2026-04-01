@@ -442,6 +442,10 @@ async function run() {
         return { ok: false, reason: "tech-tree-modal-toggle-open-failed" };
       }
       const techTreeOpen = window.__hexfallTest.getTechTreeModalState();
+      const graphNodes = techTreeOpen?.graph?.nodes ?? [];
+      const graphEdges = techTreeOpen?.graph?.edges ?? [];
+      const graphNodeById = new Map(graphNodes.map((node) => [node.id, node]));
+      const hasEdge = (from, to) => graphEdges.some((edge) => edge?.from === from && edge?.to === to);
       if (
         !techTreeOpen?.open ||
         !Number.isFinite(techTreeOpen?.summary?.sciencePerTurn) ||
@@ -465,6 +469,38 @@ async function run() {
         ][index])
       ) {
         return { ok: false, reason: "tech-tree-modal-open-payload-invalid" };
+      }
+      if (!Array.isArray(graphNodes) || graphNodes.length !== 14 || !Array.isArray(graphEdges) || graphEdges.length === 0) {
+        return { ok: false, reason: "tech-tree-graph-missing-nodes-or-edges" };
+      }
+      if (!hasEdge("pottery", "writing") || !hasEdge("education", "chemistry")) {
+        return { ok: false, reason: "tech-tree-graph-missing-known-edge" };
+      }
+      const writingNode = graphNodeById.get("writing");
+      const potteryNode = graphNodeById.get("pottery");
+      const chemistryNode = graphNodeById.get("chemistry");
+      const educationNode = graphNodeById.get("education");
+      if (
+        !writingNode ||
+        !potteryNode ||
+        !chemistryNode ||
+        !educationNode ||
+        writingNode.lane !== 1 ||
+        chemistryNode.lane !== 3 ||
+        !(potteryNode.x < writingNode.x) ||
+        !(educationNode.x < chemistryNode.x)
+      ) {
+        return { ok: false, reason: "tech-tree-graph-lane-or-depth-order-invalid" };
+      }
+      if (!Number.isFinite(techTreeOpen?.graph?.contentWidth) || !Number.isFinite(techTreeOpen?.graph?.viewport?.width)) {
+        return { ok: false, reason: "tech-tree-graph-viewport-missing" };
+      }
+      const scrollBefore = Number(techTreeOpen?.graph?.scrollX ?? 0);
+      const scrolled = Number(window.__hexfallTest.scrollTechTreeGraph(240));
+      const techTreeAfterScroll = window.__hexfallTest.getTechTreeModalState();
+      const scrollAfter = Number(techTreeAfterScroll?.graph?.scrollX ?? 0);
+      if (!Number.isFinite(scrolled) || !Number.isFinite(scrollAfter) || scrollAfter < scrollBefore) {
+        return { ok: false, reason: "tech-tree-graph-scroll-failed" };
       }
       if (window.__hexfallTest.requestEndTurn()) {
         return { ok: false, reason: "tech-tree-modal-should-block-end-turn" };

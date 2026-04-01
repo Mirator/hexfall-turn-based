@@ -224,6 +224,10 @@ window.__hexfallTest = {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testGetTechTreeModalState() : null;
   },
+  scrollTechTreeGraph(delta) {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testScrollTechTreeGraph(delta) : 0;
+  },
   clickMinimapNormalized(nx, ny) {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testClickMinimapNormalized(nx, ny) : false;
