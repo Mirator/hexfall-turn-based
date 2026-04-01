@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="hexFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#c7d88f"/>
+      <stop offset="100%" stop-color="#5e7d3a"/>
+    </linearGradient>
+    <linearGradient id="hFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f8fbff"/>
+      <stop offset="100%" stop-color="#b8d6ff"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="64" height="64" rx="12" fill="#111622"/>
+  <polygon
+    points="32,5 53,17 53,47 32,59 11,47 11,17"
+    fill="url(#hexFill)"
+    stroke="#eaf4ff"
+    stroke-width="2.5"
+    stroke-linejoin="round"
+  />
+
+  <path
+    d="M22 18h7v12h6V18h7v28h-7V35h-6v11h-7z"
+    fill="url(#hFill)"
+  />
+</svg>
