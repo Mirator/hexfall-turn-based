@@ -3,6 +3,7 @@ import { axialKey, distance, neighbors } from "./hexGrid.js";
 import { resolveMatchConfig } from "./matchConfig.js";
 import { createSeededRng, mixSeed, normalizeSeed, shuffleInPlace } from "./random.js";
 import { applyTerrainDefinition, generateTerrainTiles } from "./terrainData.js";
+import { TECH_ORDER } from "./techTree.js";
 import { DEFAULT_UNLOCKED_UNITS, createUnit } from "./unitData.js";
 import { createVisibilityState, recomputeVisibility } from "../systems/visibilitySystem.js";
 
@@ -97,11 +98,7 @@ export function createInitialGameState(options = {}) {
     cities: [],
     selectedUnitId: null,
     selectedCityId: null,
-    research: {
-      activeTechId: null,
-      progress: 0,
-      completedTechIds: [],
-    },
+    research: createInitialResearchState(),
     unlocks: {
       units: [...DEFAULT_UNLOCKED_UNITS],
     },
@@ -209,12 +206,46 @@ function createEmptyEconomyBucket() {
   return {
     foodStock: 0,
     productionStock: 0,
-    scienceStock: 0,
+    sciencePerTurn: 0,
     lastTurnIncome: {
       food: 0,
       production: 0,
       science: 0,
     },
+  };
+}
+
+function createInitialResearchState() {
+  const progressByTech = {};
+  const effectiveCostByTech = {};
+  const boostAppliedByTech = {};
+  const boostProgressByTech = {};
+  for (const techId of TECH_ORDER) {
+    progressByTech[techId] = 0;
+    effectiveCostByTech[techId] = 0;
+    boostAppliedByTech[techId] = false;
+    boostProgressByTech[techId] = {
+      current: 0,
+      target: 0,
+      met: false,
+      label: null,
+    };
+  }
+
+  return {
+    currentTechId: null,
+    activeTechId: null,
+    progress: 0,
+    progressByTech,
+    effectiveCostByTech,
+    boostAppliedByTech,
+    boostProgressByTech,
+    completedTechIds: [],
+    lastSciencePerTurn: 0,
+    lastBaseSciencePerTurn: 0,
+    lastGlobalModifierTotal: 0,
+    lastCityScienceById: {},
+    boostsAppliedLastTurn: [],
   };
 }
 

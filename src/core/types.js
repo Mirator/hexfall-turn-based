@@ -91,7 +91,8 @@
  * @property {number} health
  * @property {number} maxHealth
  * @property {"units"|"buildings"} productionTab
- * @property {Array<"granary"|"workshop"|"monument">} buildings
+ * @property {Array<"granary"|"workshop"|"monument"|"campus"|"library"|"university"|"researchLab">} buildings
+ * @property {{ built: boolean, adjacency: number, adjacencyBreakdown: { mountains: number, forests: number, nearbyCampuses: number } }} campus
  * @property {CityQueueItem[]} queue
  */
 
@@ -107,7 +108,7 @@
  * @typedef {Object} EmpireEconomy
  * @property {number} foodStock
  * @property {number} productionStock
- * @property {number} scienceStock
+ * @property {number} sciencePerTurn
  * @property {YieldBundle} lastTurnIncome
  */
 
@@ -119,9 +120,26 @@
 
 /**
  * @typedef {Object} ResearchState
+ * @property {string|null} currentTechId
  * @property {string|null} activeTechId
  * @property {number} progress
+ * @property {Record<string, number>} progressByTech
+ * @property {Record<string, number>} effectiveCostByTech
+ * @property {Record<string, boolean>} boostAppliedByTech
+ * @property {Record<string, { current: number, target: number, met: boolean, label: string|null }>} boostProgressByTech
  * @property {string[]} completedTechIds
+ * @property {number} lastSciencePerTurn
+ * @property {number} lastBaseSciencePerTurn
+ * @property {number} lastGlobalModifierTotal
+ * @property {Record<string, {
+ *   cityId: string,
+ *   cityName: string,
+ *   populationScience: number,
+ *   campusAdjacencyScience: number,
+ *   buildingScience: number,
+ *   totalScience: number
+ * }>} lastCityScienceById
+ * @property {{ id: string, amount: number }[]} boostsAppliedLastTurn
  */
 
 /**

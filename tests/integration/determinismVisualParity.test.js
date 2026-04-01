@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { AI_OWNERS } from "../../src/core/factions.js";
 import { DEFAULT_MIN_FACTION_DISTANCE, createInitialGameState } from "../../src/core/gameState.js";
 import { runEnemyTurn } from "../../src/systems/enemyTurnSystem.js";
-import { consumeScienceStock } from "../../src/systems/researchSystem.js";
+import { resolveResearchTurn } from "../../src/systems/researchSystem.js";
 import { beginPlayerTurn } from "../../src/systems/turnSystem.js";
 import { evaluateMatchState } from "../../src/systems/victorySystem.js";
 import { processTurn as processCityTurn } from "../../src/systems/citySystem.js";
@@ -29,9 +29,9 @@ function runReferenceSimulation(seed, rounds) {
       processCityTurn(gameState, owner);
     }
     beginPlayerTurn(gameState);
-    const cityTurnResult = processCityTurn(gameState, "player");
-    consumeScienceStock(gameState, "player", 1);
-    gameState.economy.researchIncomeThisTurn = 1 + cityTurnResult.researchIncome;
+    processCityTurn(gameState, "player");
+    const researchTurn = resolveResearchTurn(gameState, "player");
+    gameState.economy.researchIncomeThisTurn = researchTurn.sciencePerTurn;
     evaluateMatchState(gameState);
     if (gameState.match.status !== "ongoing") {
       break;

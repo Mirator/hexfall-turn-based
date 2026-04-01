@@ -126,8 +126,8 @@ describe("enemy AI personalities and deterministic decisions", () => {
   });
 
   it("chooses research and queue priorities by personality deterministically", () => {
-    expect(pickEnemyResearchTech("raider", ["masonry", "archery", "bronzeWorking"])).toBe("archery");
-    expect(pickEnemyResearchTech("expansionist", ["masonry", "archery", "bronzeWorking"])).toBe("bronzeWorking");
+    expect(pickEnemyResearchTech("raider", ["masonry", "archery", "bronzeWorking"])).toBe("bronzeWorking");
+    expect(pickEnemyResearchTech("expansionist", ["masonry", "archery", "bronzeWorking"])).toBe("archery");
     expect(pickEnemyResearchTech("guardian", ["masonry", "archery", "bronzeWorking"])).toBe("masonry");
 
     const gameState = createInitialGameState({ seed: 91 });
@@ -136,6 +136,45 @@ describe("enemy AI personalities and deterministic decisions", () => {
 
     gameState.unlocks.units.push("spearman");
     expect(pickEnemyQueueUnit(gameState, "guardian")).toBe("spearman");
+  });
+
+  it("uses boost readiness and existing progress when scoring research choices", () => {
+    const gameState = createInitialGameState({ seed: 141 });
+    gameState.research.boostProgressByTech.archery = {
+      current: 1,
+      target: 1,
+      met: true,
+      label: "Build 1 Campus",
+    };
+    gameState.research.boostProgressByTech.bronzeWorking = {
+      current: 0,
+      target: 2,
+      met: false,
+      label: "Own 2 Warriors",
+    };
+
+    const boostDrivenChoice = pickEnemyResearchTech("raider", ["bronzeWorking", "archery"], gameState, "enemy");
+    expect(boostDrivenChoice).toBe("archery");
+
+    gameState.research.currentTechId = "writing";
+    gameState.research.activeTechId = "writing";
+    gameState.research.progressByTech.writing = 180;
+    gameState.research.progressByTech.pottery = 0;
+    gameState.research.boostProgressByTech.writing = {
+      current: 1,
+      target: 2,
+      met: false,
+      label: "Found 2 cities",
+    };
+    gameState.research.boostProgressByTech.pottery = {
+      current: 0,
+      target: 1,
+      met: false,
+      label: "Found 1 city",
+    };
+
+    const keepProgressChoice = pickEnemyResearchTech("expansionist", ["pottery", "writing"], gameState, "enemy");
+    expect(keepProgressChoice).toBe("writing");
   });
 
   it("applies personality-specific AI capture and raze policy", () => {

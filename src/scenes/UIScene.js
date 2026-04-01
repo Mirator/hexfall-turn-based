@@ -63,7 +63,7 @@ const MINIMAP_TITLE_HEIGHT = 24;
 const MINIMAP_CAPTION_HEIGHT = 14;
 const PRODUCTION_TABS = ["units", "buildings"];
 const UNIT_PRODUCTION_TYPES = ["warrior", "settler", "spearman", "archer"];
-const BUILDING_PRODUCTION_TYPES = ["granary", "workshop", "monument"];
+const BUILDING_PRODUCTION_TYPES = ["granary", "workshop", "monument", "campus", "library", "university", "researchLab"];
 const NOTIFICATION_FILTERS = ["All", "Combat", "City", "Research", "System"];
 const UI_SFX_ACTIONS = new Set([
   "endTurn",
@@ -90,6 +90,10 @@ const BUILDING_LABELS = {
   granary: "Granary",
   workshop: "Workshop",
   monument: "Monument",
+  campus: "Campus",
+  library: "Library",
+  university: "University",
+  researchLab: "Research Lab",
 };
 
 const PRODUCTION_TAB_LABELS = {
@@ -2159,8 +2163,8 @@ export class UIScene extends Phaser.Scene {
     const readyUnits = turnAssistant.readyUnits ?? turnAssistant.readyCount ?? 0;
     const pendingQueues = turnAssistant.emptyQueues ?? turnAssistant.emptyQueueCityCount ?? 0;
     const pendingOrders = readyUnits + pendingQueues;
-    const projected = gameState.projectedNetIncome ?? gameState.projectedIncome ?? { food: 0, production: 0, science: 1 };
-    const economy = gameState.economy?.player ?? { foodStock: 0, productionStock: 0, scienceStock: 0 };
+    const projected = gameState.projectedNetIncome ?? gameState.projectedIncome ?? { food: 0, production: 0, science: 0 };
+    const economy = gameState.economy?.player ?? { foodStock: 0, productionStock: 0, sciencePerTurn: 0 };
 
     if (!this.contextPanelPinned && selectionKey !== this.lastContextSelectionKey && selectionKey !== "none") {
       this.contextPanelExpanded = true;
@@ -2178,7 +2182,8 @@ export class UIScene extends Phaser.Scene {
     this.productionLabel.setText(`Production: ${economy.productionStock}`);
     this.productionDeltaLabel.setText(`(${formatSigned(projected.production)})`);
     this.productionDeltaLabel.setColor(getDeltaColor(projected.production));
-    this.scienceLabel.setText(`Science: ${economy.scienceStock}`);
+    const sciencePerTurn = economy.sciencePerTurn ?? gameState.research?.sciencePerTurn ?? 0;
+    this.scienceLabel.setText(`Science/Turn: ${formatMetric(sciencePerTurn)}`);
     this.scienceDeltaLabel.setText(`(${formatSigned(projected.science)})`);
     this.scienceDeltaLabel.setColor(getDeltaColor(projected.science));
     this.devVisionLabel.setText(`Dev Vision: ${gameState.devVisionEnabled ? "ON (V)" : "OFF (V)"}`);
@@ -2210,7 +2215,13 @@ export class UIScene extends Phaser.Scene {
     const playerCities = gameState.cities.filter((city) => city.owner === playerOwner).length;
     const playerUnits = gameState.units.filter((unit) => unit.owner === playerOwner).length;
     const completedTech = gameState.research?.completedTechIds?.length ?? 0;
-    const activeTech = gameState.research?.activeTechId ?? "None";
+    const activeTech = gameState.research?.currentTechId ?? gameState.research?.activeTechId ?? "None";
+    const turnsRemaining = gameState.research?.turnsRemaining ?? null;
+    const activeBoost = activeTech && activeTech !== "None" ? gameState.research?.boostProgressByTech?.[activeTech] ?? null : null;
+    const boostLabel =
+      activeBoost && Number.isFinite(activeBoost.target) && activeBoost.target > 0
+        ? `Boost ${activeBoost.current}/${activeBoost.target}${activeBoost.met ? " ready" : ""}`
+        : "Boost n/a";
     const exploredHexes = gameState.visibility?.byOwner?.[playerOwner]?.exploredHexes?.length ?? 0;
     const totalHexes = Math.max(1, (gameState.map?.width ?? 1) * (gameState.map?.height ?? 1));
     const exploredPercent = Math.round((exploredHexes / totalHexes) * 100);
@@ -2224,7 +2235,11 @@ export class UIScene extends Phaser.Scene {
     };
     this.statsCitiesLabel.setText(`Cities: ${playerCities}`);
     this.statsUnitsLabel.setText(`Units: ${playerUnits} (Ready ${readyUnits})`);
-    this.statsTechLabel.setText(`Tech: ${completedTech} complete | Active ${capitalizeLabel(activeTech)}`);
+    this.statsTechLabel.setText(
+      `Tech: ${completedTech} complete | Active ${capitalizeLabel(activeTech)}${
+        Number.isFinite(turnsRemaining) ? ` (${turnsRemaining} turns)` : ""
+      } | ${boostLabel}`
+    );
     this.statsExploreLabel.setText(`Explored: ${exploredPercent}%`);
     this.layoutResourceDeltas();
 
@@ -2397,15 +2412,20 @@ export class UIScene extends Phaser.Scene {
       this.setCityControlsVisible(expanded);
       this.setUnitControlsVisible(false);
 
-      if (expanded) {
-        const localYield = selectedCity.yieldLastTurn ?? { food: 0, production: 0, science: 0 };
-        const productionStock = gameState.uiActions?.cityProductionStock ?? 0;
-        const localProduction = gameState.uiActions?.cityLocalProduction ?? 0;
-        this.contextPanelMetaPrimary.setText(
-          `Local Food ${localYield.food} | Local Production ${localYield.production} | Local Science ${localYield.science} | Identity ${selectedCity.identity}`
-        );
-        this.contextPanelMetaSecondary.setText(`Production stock ${productionStock} | Local production per turn +${localProduction}`);
-      }
+        if (expanded) {
+          const localYield = selectedCity.yieldLastTurn ?? { food: 0, production: 0, science: 0 };
+          const productionStock = gameState.uiActions?.cityProductionStock ?? 0;
+          const localProduction = gameState.uiActions?.cityLocalProduction ?? 0;
+          const scienceBreakdown = formatCityScienceBreakdown(selectedCity.id, gameState);
+          this.contextPanelMetaPrimary.setText(
+            `Local Food ${localYield.food} | Local Production ${localYield.production} | Local Science ${localYield.science} | Identity ${selectedCity.identity}`
+          );
+          this.contextPanelMetaSecondary.setText(
+            scienceBreakdown
+              ? `${scienceBreakdown} | Production stock ${productionStock} | Local production per turn +${localProduction}`
+              : `Production stock ${productionStock} | Local production per turn +${localProduction}`
+          );
+        }
 
       const productionTab = gameState.uiActions?.cityProductionTab ?? "units";
       for (let i = 0; i < this.cityProductionTabButtons.length; i += 1) {
@@ -2556,6 +2576,7 @@ export class UIScene extends Phaser.Scene {
     const localYield = selectedCity.yieldLastTurn ?? { food: 0, production: 0, science: 0 };
     const productionStock = gameState.uiActions?.cityProductionStock ?? 0;
     const localProduction = gameState.uiActions?.cityLocalProduction ?? 0;
+    const scienceBreakdown = formatCityScienceBreakdown(selectedCity.id, gameState);
     const queueSlots = gameState.uiActions?.cityQueueSlots ?? [];
     const nextSlot = queueSlots.find((slot) => !slot.empty) ?? null;
     const nextCompletion = !nextSlot
@@ -2565,7 +2586,9 @@ export class UIScene extends Phaser.Scene {
         : `${nextSlot.label} in ${formatTurns(nextSlot.etaTurns)}.`;
     return {
       primary: `${formatCityName(selectedCity.id)} | Population ${selectedCity.population} | Identity ${selectedCity.identity}`,
-      secondary: `Local Food ${localYield.food} | Local Production ${localYield.production} | Local Science ${localYield.science}`,
+      secondary: scienceBreakdown
+        ? `Local Food ${localYield.food} | Local Production ${localYield.production} | ${scienceBreakdown}`
+        : `Local Food ${localYield.food} | Local Production ${localYield.production} | Local Science ${localYield.science}`,
       tertiary: `Production stock ${productionStock} | Local production per turn +${localProduction} | Next completion: ${nextCompletion}`,
     };
   }
@@ -3750,7 +3773,26 @@ export class UIScene extends Phaser.Scene {
 }
 
 function formatSigned(value) {
-  return `${value >= 0 ? "+" : ""}${value}`;
+  return `${value >= 0 ? "+" : ""}${formatMetric(value)}`;
+}
+
+function formatCityScienceBreakdown(cityId, gameState) {
+  if (!cityId) {
+    return null;
+  }
+  const breakdown = gameState?.research?.cityScienceById?.[cityId] ?? null;
+  if (!breakdown) {
+    return null;
+  }
+  return `Science breakdown Pop ${formatMetric(breakdown.populationScience)} + Campus ${formatMetric(
+    breakdown.campusAdjacencyScience
+  )} + Buildings ${formatMetric(breakdown.buildingScience)} = ${formatMetric(breakdown.totalScience)}`;
+}
+
+function formatMetric(value) {
+  const numeric = Number.isFinite(value) ? value : 0;
+  const rounded = Math.round(numeric * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
 function getDeltaColor(value) {

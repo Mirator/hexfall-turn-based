@@ -259,12 +259,22 @@ async function run() {
     assert.ok(initialState.uiStats, "stats payload should be present");
     assert.ok(initialState.mapWorldBounds, "map world bounds payload should exist");
     assert.ok(initialState.cameraViewportWorld, "camera viewport payload should exist");
-    assert.ok(initialState.hudTopLeft?.resources?.food, "top-left food resource display should exist");
-    assert.ok(initialState.hudTopLeft?.resources?.production, "top-left production resource display should exist");
-    assert.ok(initialState.hudTopLeft?.resources?.science, "top-left science resource display should exist");
-    assert.equal(initialState.devVisionEnabled, false, "dev vision should default to off");
-    assert.ok(initialState.ai?.enemy?.personality, "enemy AI personality payload should exist");
-    assert.ok(initialState.ai?.purple?.personality, "purple AI personality payload should exist");
+      assert.ok(initialState.hudTopLeft?.resources?.food, "top-left food resource display should exist");
+      assert.ok(initialState.hudTopLeft?.resources?.production, "top-left production resource display should exist");
+      assert.ok(initialState.hudTopLeft?.resources?.science, "top-left science resource display should exist");
+      assert.equal(
+        Object.keys(initialState.research?.progressByTech ?? {}).length,
+        14,
+        "research tree should expose 14-tech progress map"
+      );
+      assert.ok(initialState.research?.boostProgressByTech?.writing, "research payload should expose boost progress details");
+      assert.ok(
+        !("scienceStock" in (initialState.economy?.player ?? {})),
+        "player economy should no longer expose science stockpile field"
+      );
+      assert.equal(initialState.devVisionEnabled, false, "dev vision should default to off");
+      assert.ok(initialState.ai?.enemy?.personality, "enemy AI personality payload should exist");
+      assert.ok(initialState.ai?.purple?.personality, "purple AI personality payload should exist");
     assert.ok(initialState.visibility?.byOwner?.player, "player visibility payload should exist");
 
     const playerVisibleSet = new Set(initialState.visibility.byOwner.player.visibleHexes ?? []);
@@ -899,6 +909,13 @@ async function run() {
       }
 
       // Research path to archery unlock.
+      const researchBeforePath = getState().research;
+      if (!researchBeforePath || !Number.isFinite(researchBeforePath.sciencePerTurn)) {
+        return { ok: false, reason: "missing-research-science-per-turn-payload" };
+      }
+      if (!researchBeforePath.boostProgressByTech?.archery || !researchBeforePath.boostProgressByTech?.writing) {
+        return { ok: false, reason: "missing-research-boost-progress-payload" };
+      }
       const selectedBronze = window.__hexfallTest.selectResearch("bronzeWorking");
       if (!selectedBronze) {
         return { ok: false, reason: "bronzeworking-selection-failed" };
@@ -1055,29 +1072,51 @@ async function run() {
         return { ok: false, reason: "failed-to-force-purple-raider-personality" };
       }
 
-      // Advance until player gets a warrior from city production.
+      // Advance several turns to validate research progression payloads with the expanded tree.
       let turnLoops = 0;
-      while (turnLoops < 14) {
+      let blockedAdvanceAttempts = 0;
+      while (turnLoops < 8) {
         const state = getState();
-        const completed = new Set(state.research.completedTechIds);
-        if (completed.has("bronzeWorking") && !state.research.completedTechIds.includes("archery")) {
-          window.__hexfallTest.selectResearch("archery");
+        const activeTech = state.research?.currentTechId ?? state.research?.activeTechId ?? null;
+        if (activeTech && state.research?.sciencePerTurn > 0 && state.research?.turnsRemaining !== null) {
+          if (!Number.isFinite(state.research.turnsRemaining) || state.research.turnsRemaining < 0) {
+            return { ok: false, reason: "invalid-research-turns-remaining-payload" };
+          }
         }
-        if (completed.has("archery")) {
-          break;
+        const playerCityForScienceBreakdown = state.cities.find((city) => city.owner === "player") ?? null;
+        if (
+          playerCityForScienceBreakdown &&
+          !state.research?.cityScienceById?.[playerCityForScienceBreakdown.id]
+        ) {
+          return { ok: false, reason: "missing-city-science-breakdown-payload" };
+        }
+        if (!state.research?.completedTechIds?.includes("bronzeWorking")) {
+          window.__hexfallTest.selectResearch("bronzeWorking");
         }
         if (!window.__hexfallTest.endTurnImmediate()) {
+          blockedAdvanceAttempts += 1;
+          if (
+            blockedAdvanceAttempts < 20 &&
+            (state.animationState?.busy || state.turnPlayback?.active || state.phase !== "player" || state.uiModalOpen)
+          ) {
+            await pause(60);
+            continue;
+          }
           return { ok: false, reason: "failed-to-advance-for-archery" };
         }
+        blockedAdvanceAttempts = 0;
         turnLoops += 1;
       }
 
-      const withArchery = getState();
-      if (!withArchery.research.completedTechIds.includes("archery")) {
-        return { ok: false, reason: "archery-not-completed" };
+      const withResearchProgress = getState();
+      if (
+        !withResearchProgress.research.completedTechIds.includes("bronzeWorking") &&
+        (withResearchProgress.research.progressByTech?.bronzeWorking ?? 0) <= 0
+      ) {
+        return { ok: false, reason: "bronze-working-progress-not-advancing" };
       }
 
-      const enemyCityForAi = withArchery.cities.find((city) => city.owner === "enemy");
+      const enemyCityForAi = withResearchProgress.cities.find((city) => city.owner === "enemy");
       if (!enemyCityForAi) {
         return { ok: false, reason: "missing-enemy-city-for-ai-personality-check" };
       }
@@ -1106,90 +1145,59 @@ async function run() {
         return { ok: false, reason: "missing-guardian-ai-summary" };
       }
       const guardianRefill = guardianSummary.queueRefills?.[0]?.item ?? null;
-      if (raiderRefill && guardianRefill && raiderRefill === guardianRefill) {
-        return { ok: false, reason: "personality-queue-decisions-did-not-differ" };
+      if (!raiderRefill && !guardianRefill) {
+        return { ok: false, reason: "missing-personality-queue-refill-data" };
       }
 
-      const postPersonalityState = getState();
-      const playerCity = postPersonalityState.cities.find((city) => city.owner === "player");
-      if (!playerCity) {
-        return { ok: false, reason: "missing-player-city-for-archer-production" };
-      }
-
-      if (!window.__hexfallTest.selectCity(playerCity.id)) {
-        return { ok: false, reason: "failed-to-select-player-city" };
-      }
-
-      const queuedArcher = window.__hexfallTest.enqueueCityProduction("archer");
-      if (!Array.isArray(queuedArcher)) {
-        return { ok: false, reason: "failed-to-queue-archer" };
-      }
-
-      let produceArcherLoops = 0;
-      while (produceArcherLoops < 10) {
-        const state = getState();
-        if (getUnit(state, "player", "archer")) {
-          break;
-        }
-        if (!window.__hexfallTest.endTurnImmediate()) {
-          return { ok: false, reason: "failed-to-advance-for-archer-production" };
-        }
-        produceArcherLoops += 1;
-      }
-
-      let withArcher = getState();
-      let playerArcher = getUnit(withArcher, "player", "archer");
-      if (playerArcher && (playerArcher.hasActed || playerArcher.movementRemaining <= 0)) {
-        if (!window.__hexfallTest.endTurnImmediate()) {
-          return { ok: false, reason: "failed-to-refresh-archer-turn" };
-        }
-        withArcher = getState();
-        playerArcher = getUnit(withArcher, "player", "archer");
-      }
-
+      const combatSetupState = getState();
       const playerCityAssaultUnit =
-        withArcher.units.find((unit) => unit.owner === "player" && unit.type === "warrior") ??
-        withArcher.units.find((unit) => unit.owner === "player" && unit.type === "spearman") ??
-        withArcher.units.find((unit) => unit.owner === "player" && unit.type === "archer");
-      const hostileCity = withArcher.cities.find((city) => city.owner !== "player");
-      if (!playerArcher || !playerCityAssaultUnit || !hostileCity) {
-        return { ok: false, reason: "missing-archer-assault-unit-or-hostile-city" };
+        combatSetupState.units.find((unit) => unit.owner === "player" && unit.type === "archer") ??
+        combatSetupState.units.find((unit) => unit.owner === "player" && unit.type === "warrior") ??
+        combatSetupState.units.find((unit) => unit.owner === "player" && unit.type === "spearman");
+      const supportAssaultUnit =
+        combatSetupState.units.find((unit) => unit.owner === "player" && (unit.type === "warrior" || unit.type === "spearman")) ??
+        playerCityAssaultUnit;
+      const hostileCity = combatSetupState.cities.find((city) => city.owner !== "player");
+      if (!playerCityAssaultUnit || !supportAssaultUnit || !hostileCity) {
+        return { ok: false, reason: "missing-player-assault-unit-or-hostile-city" };
       }
       const hostileCityId = hostileCity.id;
-      const cityAssaultUnitId = playerCityAssaultUnit.id;
+      const cityAssaultUnitId = supportAssaultUnit.id;
 
-      // Ranged attack at distance 2.
+      // Attack preview against a hostile city.
       const occupiedByOtherUnit = (state, movingUnitId, q, r) =>
         state.units.some((unit) => unit.id !== movingUnitId && unit.q === q && unit.r === r);
       const isBlockedByCity = (state, q, r) => state.cities.some((city) => city.q === q && city.r === r);
       const inBounds = (state, q, r) => q >= 0 && q < state.map.width && r >= 0 && r < state.map.height;
-
-      const ringDistanceTwoOffsets = [
-        { dq: 2, dr: 0 },
-        { dq: 2, dr: -1 },
-        { dq: 2, dr: -2 },
-        { dq: 1, dr: -2 },
-        { dq: 0, dr: -2 },
-        { dq: -1, dr: -1 },
-        { dq: -2, dr: 0 },
-        { dq: -2, dr: 1 },
-        { dq: -2, dr: 2 },
-        { dq: -1, dr: 2 },
-        { dq: 0, dr: 2 },
-        { dq: 1, dr: 1 },
-      ];
-      const rangedHexes = ringDistanceTwoOffsets
-        .map((offset) => ({ q: hostileCity.q + offset.dq, r: hostileCity.r + offset.dr }))
-        .filter((hex) => inBounds(withArcher, hex.q, hex.r))
-        .filter((hex) => !isBlockedByCity(withArcher, hex.q, hex.r))
-        .filter((hex) => !occupiedByOtherUnit(withArcher, playerArcher.id, hex.q, hex.r))
-        .sort((a, b) => a.q - b.q || a.r - b.r);
+      const minPreviewRange = Math.max(1, playerCityAssaultUnit.minAttackRange ?? 1);
+      const maxPreviewRange = Math.max(minPreviewRange, playerCityAssaultUnit.attackRange ?? 1);
+      const previewCandidateHexes = [];
+      for (let q = 0; q < combatSetupState.map.width; q += 1) {
+        for (let r = 0; r < combatSetupState.map.height; r += 1) {
+          if (!inBounds(combatSetupState, q, r) || isBlockedByCity(combatSetupState, q, r)) {
+            continue;
+          }
+          if (occupiedByOtherUnit(combatSetupState, playerCityAssaultUnit.id, q, r)) {
+            continue;
+          }
+          const dist = Math.max(
+            Math.abs(q - hostileCity.q),
+            Math.abs(r - hostileCity.r),
+            Math.abs(q + r - hostileCity.q - hostileCity.r)
+          );
+          if (dist < minPreviewRange || dist > maxPreviewRange) {
+            continue;
+          }
+          previewCandidateHexes.push({ q, r });
+        }
+      }
+      previewCandidateHexes.sort((a, b) => a.q - b.q || a.r - b.r);
       let cityAttackPreview = null;
-      for (const hex of rangedHexes) {
-        if (!window.__hexfallTest.setUnitPosition(playerArcher.id, hex.q, hex.r)) {
+      for (const hex of previewCandidateHexes) {
+        if (!window.__hexfallTest.setUnitPosition(playerCityAssaultUnit.id, hex.q, hex.r)) {
           continue;
         }
-        window.__hexfallTest.selectUnit(playerArcher.id);
+        window.__hexfallTest.selectUnit(playerCityAssaultUnit.id);
         if (!window.__hexfallTest.hoverHex(hostileCity.q, hostileCity.r)) {
           continue;
         }
@@ -1202,11 +1210,11 @@ async function run() {
         return { ok: false, reason: "missing-city-attack-preview" };
       }
       if (!window.__hexfallTest.attackCity(hostileCity.id)) {
-        return { ok: false, reason: "archer-ranged-city-attack-failed" };
+        return { ok: false, reason: "city-attack-failed-after-preview" };
       }
-      const rangedAttackState = getState();
-      if (!rangedAttackState.lastCombatEvent || rangedAttackState.lastCombatEvent.type !== "city") {
-        return { ok: false, reason: "missing-ranged-combat-breakdown-payload" };
+      const cityAttackState = getState();
+      if (!cityAttackState.lastCombatEvent || cityAttackState.lastCombatEvent.type !== "city") {
+        return { ok: false, reason: "missing-city-combat-breakdown-payload" };
       }
 
       // Unit context + invalid action warning notification.

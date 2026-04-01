@@ -2,55 +2,89 @@
 
 ## Goal and scope
 
-- Define research progression and unlock behavior for units/buildings.
-- Keep research deterministic and funded by empire science stock.
-- Keep UI/research hooks compact and automation-friendly.
+- Define the civ-like science/research model based on direct per-turn science.
+- Provide deterministic formulas for tech costs, boosts, switching, and overflow.
+- Document the expanded medium tree (`14` techs), unlock outputs, and research-facing runtime payloads.
 
 ## Decisions made (and alternatives rejected)
 
-- Chosen: compact tech set (`bronzeWorking`, `archery`, `masonry`) with explicit prerequisite checks.
-- Chosen: research consumes pooled empire science (`economy[owner].scienceStock`) plus baseline turn income.
-- Chosen: overflow can complete a tech and continue into the next selectable tech in the same turn.
-- Chosen: unlock mapping:
-  - `bronzeWorking` -> `spearman`
-  - `archery` (prereq `bronzeWorking`) -> `archer`
-  - `masonry` (prereq `bronzeWorking`) supports building unlock usage (`monument`) through city system rules.
-- Chosen: AI personalities can select active tech deterministically (when none is active) through `spec-008` prelude behavior.
-- Rejected for now: full visual tech graph, diplomacy-based exchange, per-city research sliders.
+- Chosen: research is direct progression (`science_per_turn`) and no longer consumes science stockpiles.
+- Chosen: active research can be switched at any time; progress is stored per tech and never reset by switching.
+- Chosen: medium tree with `14` techs and explicit prerequisites.
+- Chosen: per-tech effective cost formula uses base cost, era multiplier, and city-count penalty:
+  - `effectiveCost = baseCost * eraMultiplier * (1 + cityPenalty)`
+  - `eraMultiplier`: era1=`1.0`, era2=`1.35`, era3=`1.75`
+  - `cityPenalty = max(0, cityCount - 1) * 0.03`
+- Chosen: one-time Eureka boosts grant `40%` of effective tech cost.
+- Chosen: boost progress is tracked for every incomplete tech and exposed in runtime payload.
+- Chosen: overflow is deterministic and can chain-complete multiple techs in a single turn.
+- Chosen: global science modifiers apply after city aggregation and before tech progress is added.
+- Chosen: no dual-mode compatibility period; old stock-based API remains as compatibility wrapper only.
+- Rejected for now: specialists, diffusion/decay, parallel research, randomized tech tree.
 
 ## Interfaces/types added
 
-- Research state:
-  - `activeTechId`, `progress`, `completedTechIds`
-- Tech definitions:
-  - `src/core/techTree.js`
-- Research APIs:
-  - `canSelectResearch(techId, gameState)`
+- `TECH_TREE` schema in `src/core/techTree.js`:
+  - `baseCost`, `era`, `prerequisites`, `boostCondition`, `unlocks`, optional `globalScienceModifier`
+- `GameState.research`:
+  - `currentTechId`, `activeTechId`
+  - `progressByTech`, `effectiveCostByTech`
+  - `boostAppliedByTech`, `boostProgressByTech`
+  - `lastSciencePerTurn`, `lastBaseSciencePerTurn`, `lastGlobalModifierTotal`
+  - `lastCityScienceById`, `boostsAppliedLastTurn`
+- Core APIs in `src/systems/researchSystem.js`:
+  - `computeOwnerSciencePerTurn(owner, gameState)`
+  - `getOwnerGlobalScienceModifier(owner, gameState)`
+  - `resolveResearchTurn(gameState, owner)`
   - `selectResearch(techId, gameState)`
   - `cycleResearch(gameState)`
-  - `advanceResearch(gameState, points)`
-  - `consumeScienceStock(gameState, owner, baseIncome)`
   - `getSelectableTechIds(gameState)`
+  - `getEffectiveTechCost(techId, gameState)`
 
 ## Behavior and acceptance criteria
 
-- Player can set/cycle active research.
-- Each player turn adds baseline science and spends available empire stock on active tech.
-- Completed techs are persisted in `completedTechIds`.
-- Overflow/carryover behavior is deterministic and preserved.
-- Remaining science is retained when no further selectable tech exists.
-- Unlocks update production availability for city queue choices.
-- AI research selection uses the same selectable-tech constraints and personality priorities from `spec-008`.
+- Science aggregation:
+  - `baseSciencePerTurn = sum(cityScienceOutput)`
+  - `sciencePerTurn = baseSciencePerTurn * (1 + globalModifierTotal)`
+- Research progression:
+  - if no active tech and at least one selectable tech exists, first selectable tech is auto-selected
+  - active tech receives `sciencePerTurn` each player turn
+  - tech completes when `progress >= effectiveCost`
+- Switching:
+  - selecting another tech does not clear progress on prior tech
+  - switching updates `currentTechId/activeTechId` and continues from stored `progressByTech`
+- Eureka boosts:
+  - each tech can apply at most one boost (`boostAppliedByTech[techId]`)
+  - when condition is met, apply `round(effectiveCost * 0.4)` to that tech's progress
+  - boost progress payload includes `current`, `target`, `met`, `label`
+- Overflow/completion chain:
+  - overflow from completed tech is carried into next selectable tech immediately
+  - completion chain repeats until no further completion or no selectable tech remains
+- Unlock propagation:
+  - unit unlocks are pushed into `gameState.unlocks.units` on completion
+  - building unlock gates are consumed by city production system checks
+- Expanded tree contract:
+  - `pottery`, `mining`, `writing`, `bronzeWorking`, `archery`, `masonry`, `engineering`, `mathematics`, `education`, `civilService`, `machinery`, `astronomy`, `chemistry`, `scientificMethod`
 
 ## Validation performed (tests/manual checks)
 
 - Integration:
   - `tests/integration/researchSystem.test.js`
+    - cost scaling (era + city-count penalty)
+    - switching with preserved per-tech progress
+    - one-time 40% boost behavior
+    - overflow chaining and unlock propagation
+- Integration (AI selection coupling):
+  - `tests/integration/enemyAi.test.js` (boost-aware and progress-aware tech scoring)
 - E2E:
-  - `tests/e2e/smoke.mjs` verifies `bronzeWorking -> archery` progression in scenario flow.
+  - `tests/e2e/smoke.mjs` verifies runtime research payloads:
+    - `sciencePerTurn`
+    - `turnsRemaining`
+    - `boostProgressByTech`
+    - `cityScienceById`
 
 ## Known gaps and next steps
 
-- No dedicated research panel beyond compact controls.
-- No branching visualization UI for prerequisites.
-- No non-technology unlock classes yet (civics/policies, etc.).
+- No dedicated standalone research screen; research remains HUD/context driven.
+- Research is currently single-player-authoritative in game-state ownership.
+- Specialist-driven science and advanced catch-up systems are intentionally deferred.

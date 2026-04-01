@@ -88,7 +88,7 @@ describe("city economy and identity", () => {
     city.growthProgress = 0;
     gameState.economy.player.foodStock = 6;
     gameState.economy.player.productionStock = 0;
-    gameState.economy.player.scienceStock = 0;
+    gameState.economy.player.sciencePerTurn = 0;
 
     const result = processTurn(gameState, "player");
     expect(result.grew).toContain(city.id);
@@ -122,7 +122,7 @@ describe("city economy and identity", () => {
 
     gameState.economy.player.foodStock = 3;
     gameState.economy.player.productionStock = 0;
-    gameState.economy.player.scienceStock = 0;
+    gameState.economy.player.sciencePerTurn = 0;
 
     processTurn(gameState, "player");
 
@@ -143,7 +143,7 @@ describe("city economy and identity", () => {
 
     gameState.economy.player.foodStock = 0;
     gameState.economy.player.productionStock = 5;
-    gameState.economy.player.scienceStock = 0;
+    gameState.economy.player.sciencePerTurn = 0;
 
     const result = processTurn(gameState, "player");
     expect(result.produced.length).toBe(1);
@@ -252,7 +252,7 @@ describe("city economy and identity", () => {
 
     gameState.economy.player.foodStock = 0;
     gameState.economy.player.productionStock = 20;
-    gameState.economy.player.scienceStock = 0;
+    gameState.economy.player.sciencePerTurn = 0;
 
     const firstTurn = processTurn(gameState, "player");
     expect(firstTurn.produced.length).toBe(1);
@@ -273,7 +273,7 @@ describe("city economy and identity", () => {
 
     gameState.economy.enemy.foodStock = 0;
     gameState.economy.enemy.productionStock = 100;
-    gameState.economy.enemy.scienceStock = 0;
+    gameState.economy.enemy.sciencePerTurn = 0;
 
     const result = processTurn(gameState, "enemy");
     expect(result.produced.length).toBe(0);
@@ -303,7 +303,7 @@ describe("city economy and identity", () => {
     city.queue = [{ kind: "unit", id: "warrior" }];
     gameState.economy[dynamicAiOwner].foodStock = 0;
     gameState.economy[dynamicAiOwner].productionStock = 12;
-    gameState.economy[dynamicAiOwner].scienceStock = 0;
+    gameState.economy[dynamicAiOwner].sciencePerTurn = 0;
 
     for (const owner of gameState.factions.allOwners) {
       expect(gameState.economy[owner]).toBeTruthy();
@@ -331,7 +331,7 @@ describe("city economy and identity", () => {
 
     gameState.economy.player.foodStock = 0;
     gameState.economy.player.productionStock = 20;
-    gameState.economy.player.scienceStock = 0;
+    gameState.economy.player.sciencePerTurn = 0;
 
     const result = processTurn(gameState, "player");
     expect(result.produced.some((entry) => entry.includes("building:granary"))).toBe(true);
@@ -389,7 +389,7 @@ describe("city economy and identity", () => {
 
     gameState.economy.player.foodStock = 0;
     gameState.economy.player.productionStock = 10;
-    gameState.economy.player.scienceStock = 0;
+    gameState.economy.player.sciencePerTurn = 0;
 
     const result = processTurn(gameState, "player");
     expect(result.produced.length).toBe(1);

@@ -55,7 +55,13 @@ import {
   runEnemyTurn,
 } from "../systems/enemyTurnSystem.js";
 import { getReachable, moveUnit } from "../systems/movementSystem.js";
-import { consumeScienceStock, cycleResearch, selectResearch } from "../systems/researchSystem.js";
+import {
+  computeOwnerSciencePerTurn,
+  cycleResearch,
+  getEffectiveTechCost,
+  resolveResearchTurn,
+  selectResearch,
+} from "../systems/researchSystem.js";
 import { beginEnemyTurn, beginPlayerTurn } from "../systems/turnSystem.js";
 import { deriveUiSurface } from "../systems/uiSurfaceSystem.js";
 import { getSkipUnitReasonText, skipUnit } from "../systems/unitActionSystem.js";
@@ -311,7 +317,7 @@ export class WorldScene extends Phaser.Scene {
     this.visibilityRevision = 0;
     this.cachedMapWorldBounds = null;
     this.cachedMapWorldBoundsDirty = true;
-    this.cachedProjectedIncome = { food: 0, production: 0, science: 1 };
+    this.cachedProjectedIncome = { food: 0, production: 0, science: 0 };
     this.cachedProjectedNetIncome = { food: 0, production: 0, science: 0 };
     this.projectedEconomyDirty = true;
     this.mapVisualDirty = true;
@@ -1155,12 +1161,20 @@ export class WorldScene extends Phaser.Scene {
       processCityTurn(this.gameState, owner);
     }
     beginPlayerTurn(this.gameState);
-    const cityTurnResult = processCityTurn(this.gameState, playerOwner);
-    const researchResult = consumeScienceStock(this.gameState, playerOwner, 1);
-    this.gameState.economy.researchIncomeThisTurn = 1 + cityTurnResult.researchIncome;
+    processCityTurn(this.gameState, playerOwner);
+    const researchResult = resolveResearchTurn(this.gameState, playerOwner);
+    this.gameState.economy.researchIncomeThisTurn = researchResult.sciencePerTurn;
     if (researchResult.completedTechIds.length > 0) {
       for (const techId of researchResult.completedTechIds) {
         this.emitNotification(`Research completed: ${capitalizeLabel(techId)}.`, {
+          level: "info",
+          category: "Research",
+        });
+      }
+    }
+    if (researchResult.boostsApplied.length > 0) {
+      for (const boost of researchResult.boostsApplied) {
+        this.emitNotification(`Boost triggered: ${capitalizeLabel(boost.id)} (+${boost.amount} science).`, {
           level: "info",
           category: "Research",
         });
@@ -2486,7 +2500,7 @@ export class WorldScene extends Phaser.Scene {
       ({
         foodStock: 0,
         productionStock: 0,
-        scienceStock: 0,
+        sciencePerTurn: 0,
         lastTurnIncome: { food: 0, production: 0, science: 0 },
       });
     return {
@@ -2545,6 +2559,7 @@ export class WorldScene extends Phaser.Scene {
         maxHealth: city.maxHealth,
         productionTab: city.productionTab,
         buildings: [...(city.buildings ?? [])],
+        campus: city.campus ? structuredClone(city.campus) : null,
         yieldLastTurn: city.yieldLastTurn,
         workedHexes: city.workedHexes.map((hex) => ({ q: hex.q, r: hex.r })),
         queue: city.queue.map((item) =>
@@ -2560,15 +2575,26 @@ export class WorldScene extends Phaser.Scene {
           }
         : null,
       research: {
+        currentTechId: this.gameState.research.currentTechId,
         activeTechId: this.gameState.research.activeTechId,
         progress: this.gameState.research.progress,
+        progressByTech: { ...this.gameState.research.progressByTech },
+        effectiveCostByTech: { ...this.gameState.research.effectiveCostByTech },
+        boostAppliedByTech: { ...this.gameState.research.boostAppliedByTech },
+        boostProgressByTech: structuredClone(this.gameState.research.boostProgressByTech),
+        sciencePerTurn: this.gameState.research.lastSciencePerTurn ?? playerEconomy.sciencePerTurn ?? 0,
+        baseSciencePerTurn: this.gameState.research.lastBaseSciencePerTurn ?? 0,
+        globalModifierTotal: this.gameState.research.lastGlobalModifierTotal ?? 0,
+        cityScienceById: structuredClone(this.gameState.research.lastCityScienceById ?? {}),
+        boostsAppliedLastTurn: structuredClone(this.gameState.research.boostsAppliedLastTurn ?? []),
+        turnsRemaining: this.getCurrentResearchTurnsRemaining(playerOwner),
         completedTechIds: [...this.gameState.research.completedTechIds],
       },
       economy: {
         player: {
           foodStock: playerEconomy.foodStock,
           productionStock: playerEconomy.productionStock,
-          scienceStock: playerEconomy.scienceStock,
+          sciencePerTurn: playerEconomy.sciencePerTurn ?? 0,
           lastTurnIncome: playerEconomy.lastTurnIncome ? { ...playerEconomy.lastTurnIncome } : null,
         },
       },
@@ -3054,7 +3080,7 @@ export class WorldScene extends Phaser.Scene {
       ({
         foodStock: 0,
         productionStock: 0,
-        scienceStock: 0,
+        sciencePerTurn: 0,
         lastTurnIncome: { food: 0, production: 0, science: 0 },
       });
     const economyByOwner = Object.fromEntries(ownerOrder.map((owner) => [owner, this.gameState.economy[owner] ?? null]));
@@ -3131,6 +3157,7 @@ export class WorldScene extends Phaser.Scene {
         maxHealth: city.maxHealth,
         productionTab: city.productionTab,
         buildings: [...(city.buildings ?? [])],
+        campus: city.campus ? structuredClone(city.campus) : null,
         yieldLastTurn: city.yieldLastTurn,
         workedHexes: city.workedHexes.map((hex) => ({ q: hex.q, r: hex.r })),
         queue: city.queue.map((item) =>
@@ -3146,8 +3173,19 @@ export class WorldScene extends Phaser.Scene {
           }
         : null,
       research: {
+        currentTechId: this.gameState.research.currentTechId,
         activeTechId: this.gameState.research.activeTechId,
         progress: this.gameState.research.progress,
+        progressByTech: { ...this.gameState.research.progressByTech },
+        effectiveCostByTech: { ...this.gameState.research.effectiveCostByTech },
+        boostAppliedByTech: { ...this.gameState.research.boostAppliedByTech },
+        boostProgressByTech: structuredClone(this.gameState.research.boostProgressByTech),
+        sciencePerTurn: this.gameState.research.lastSciencePerTurn ?? playerEconomy.sciencePerTurn ?? 0,
+        baseSciencePerTurn: this.gameState.research.lastBaseSciencePerTurn ?? 0,
+        globalModifierTotal: this.gameState.research.lastGlobalModifierTotal ?? 0,
+        cityScienceById: structuredClone(this.gameState.research.lastCityScienceById ?? {}),
+        boostsAppliedLastTurn: structuredClone(this.gameState.research.boostsAppliedLastTurn ?? []),
+        turnsRemaining: this.getCurrentResearchTurnsRemaining(playerOwner),
         completedTechIds: [...this.gameState.research.completedTechIds],
       },
       economy: {
@@ -3181,7 +3219,11 @@ export class WorldScene extends Phaser.Scene {
             delta: projectedNetIncome.production,
             grossDelta: projectedIncome.production,
           },
-          science: { current: playerEconomy.scienceStock, delta: projectedNetIncome.science, grossDelta: projectedIncome.science },
+          science: {
+            current: playerEconomy.sciencePerTurn ?? this.gameState.research.lastSciencePerTurn ?? 0,
+            delta: projectedNetIncome.science,
+            grossDelta: projectedIncome.science,
+          },
         },
       },
       selectedInfo: this.buildSelectedInfo(selectedUnit, selectedCity),
@@ -3228,7 +3270,7 @@ export class WorldScene extends Phaser.Scene {
     const projected = {
       food: 0,
       production: 0,
-      science: 1,
+      science: 0,
     };
     for (const city of this.gameState.cities) {
       if (city.owner !== playerOwner) {
@@ -3239,6 +3281,8 @@ export class WorldScene extends Phaser.Scene {
       projected.production += cityYield.production;
       projected.science += cityYield.science;
     }
+    const projectedScience = computeOwnerSciencePerTurn(playerOwner, this.gameState);
+    projected.science = projectedScience.sciencePerTurn;
     const simulation = cloneGameState(this.gameState);
     const before = simulation.economy[playerOwner];
     if (!before) {
@@ -3249,17 +3293,16 @@ export class WorldScene extends Phaser.Scene {
     }
     const beforeFood = before.foodStock;
     const beforeProduction = before.productionStock;
-    const beforeScience = before.scienceStock;
 
     processCityTurn(simulation, playerOwner);
-    consumeScienceStock(simulation, playerOwner, 1);
+    const projectedResearch = resolveResearchTurn(simulation, playerOwner);
 
     const after = simulation.economy[playerOwner] ?? before;
     this.cachedProjectedIncome = projected;
     this.cachedProjectedNetIncome = {
       food: after.foodStock - beforeFood,
       production: after.productionStock - beforeProduction,
-      science: after.scienceStock - beforeScience,
+      science: projectedResearch.sciencePerTurn,
     };
     this.projectedEconomyDirty = false;
   }
@@ -3296,6 +3339,22 @@ export class WorldScene extends Phaser.Scene {
     };
   }
 
+  getCurrentResearchTurnsRemaining(owner = this.gameState.factions?.playerOwner ?? "player") {
+    const techId = this.gameState.research.currentTechId ?? this.gameState.research.activeTechId ?? null;
+    if (!techId) {
+      return null;
+    }
+    const sciencePerTurn = this.gameState.research.lastSciencePerTurn ?? this.gameState.economy?.[owner]?.sciencePerTurn ?? 0;
+    if (sciencePerTurn <= 0) {
+      return null;
+    }
+    const costScaled = Math.max(0, Math.round(getEffectiveTechCost(techId, this.gameState) * 10));
+    const progressScaled = Math.max(0, this.gameState.research.progressByTech?.[techId] ?? 0);
+    const remainingScaled = Math.max(0, costScaled - progressScaled);
+    const scienceScaled = Math.max(1, Math.round(sciencePerTurn * 10));
+    return Math.ceil(remainingScaled / scienceScaled);
+  }
+
   buildSelectedInfo(selectedUnit, selectedCity) {
     if (selectedUnit) {
       return {
@@ -3326,6 +3385,7 @@ export class WorldScene extends Phaser.Scene {
         specialization: selectedCity.specialization,
         productionTab: selectedCity.productionTab,
         buildings: [...(selectedCity.buildings ?? [])],
+        campus: selectedCity.campus ? structuredClone(selectedCity.campus) : null,
         yieldLastTurn: selectedCity.yieldLastTurn,
         queue: selectedCity.queue.map((item) =>
           typeof item === "string" ? { kind: "unit", id: item } : { kind: item.kind, id: item.id }

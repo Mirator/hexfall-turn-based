@@ -200,6 +200,32 @@ describe("UI surface hints/actions", () => {
     expect(ui.uiActions.disabledActionHints["city-queue-remove-0"]).toContain("empty");
   });
 
+  it("shows campus prerequisite reasons for science buildings in city production hints", () => {
+    const gameState = createInitialGameState({ seed: 229 });
+    const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
+    expect(settler).toBeTruthy();
+    if (!settler) {
+      return;
+    }
+    const founded = foundCity(settler.id, gameState);
+    expect(founded.ok).toBe(true);
+    const city = gameState.cities[0];
+    city.productionTab = "buildings";
+    gameState.research.completedTechIds.push("writing");
+
+    const ui = deriveUiSurface(gameState, null, city, [], []);
+    const campusChoice = ui.uiActions.cityBuildingChoices.find((choice) => choice.id === "campus");
+    const libraryChoice = ui.uiActions.cityBuildingChoices.find((choice) => choice.id === "library");
+
+    expect(campusChoice?.unlocked).toBe(true);
+    expect(campusChoice?.queueable).toBe(true);
+    expect(libraryChoice?.unlocked).toBe(true);
+    expect(libraryChoice?.queueable).toBe(false);
+    expect(libraryChoice?.reasonCode).toBe("missing-campus");
+    expect(libraryChoice?.reasonText).toContain("Requires a Campus");
+    expect(ui.uiActions.disabledActionHints["city-enqueue-building-library"]).toContain("Requires a Campus");
+  });
+
   it("shows pending city-resolution hint while modal context is active", () => {
     const gameState = createInitialGameState({ seed: 133 });
     gameState.pendingCityResolution = {

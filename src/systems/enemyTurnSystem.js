@@ -2,11 +2,12 @@ import { cloneGameState, getTileAt, getUnitById } from "../core/gameState.js";
 import { AI_OWNERS, getAiOwners, getHostileOwners, isAiOwner } from "../core/factions.js";
 import { distance } from "../core/hexGrid.js";
 import { mixSeed, normalizeSeed } from "../core/random.js";
+import { TECH_TREE } from "../core/techTree.js";
 import { getUnitDefinition } from "../core/unitData.js";
 import { canFoundCity, foundCity, getAvailableProductionBuildings, getAvailableProductionUnits } from "./citySystem.js";
 import { getAttackableCities, getAttackableTargets, resolveAttack, resolveCityAttack } from "./combatSystem.js";
 import { getReachable, moveUnit } from "./movementSystem.js";
-import { getSelectableTechIds, selectResearch } from "./researchSystem.js";
+import { getEffectiveTechCost, getSelectableTechIds, selectResearch } from "./researchSystem.js";
 import {
   canOwnerSeeCity,
   canOwnerSeeUnit,
@@ -133,9 +134,9 @@ const GOAL_ACTION_BONUS = {
 };
 
 const RESEARCH_PRIORITY = {
-  raider: ["archery", "bronzeWorking", "masonry"],
-  expansionist: ["bronzeWorking", "archery", "masonry"],
-  guardian: ["masonry", "archery", "bronzeWorking"],
+  raider: ["bronzeWorking", "archery", "machinery", "chemistry", "engineering"],
+  expansionist: ["pottery", "writing", "education", "civilService", "scientificMethod"],
+  guardian: ["masonry", "engineering", "education", "astronomy", "scientificMethod"],
 };
 
 const QUEUE_PRIORITY_UNITS = {
@@ -149,26 +150,37 @@ const QUEUE_PRIORITY_ITEMS = {
     { kind: "unit", id: "warrior" },
     { kind: "unit", id: "spearman" },
     { kind: "unit", id: "archer" },
+    { kind: "building", id: "campus" },
+    { kind: "building", id: "library" },
     { kind: "building", id: "workshop" },
-    { kind: "building", id: "monument" },
+    { kind: "building", id: "researchLab" },
     { kind: "building", id: "granary" },
+    { kind: "building", id: "monument" },
     { kind: "unit", id: "settler" },
   ],
   expansionist: [
     { kind: "unit", id: "settler" },
+    { kind: "building", id: "campus" },
     { kind: "building", id: "granary" },
     { kind: "unit", id: "warrior" },
+    { kind: "building", id: "library" },
     { kind: "building", id: "workshop" },
     { kind: "unit", id: "spearman" },
     { kind: "unit", id: "archer" },
+    { kind: "building", id: "university" },
+    { kind: "building", id: "researchLab" },
     { kind: "building", id: "monument" },
   ],
   guardian: [
+    { kind: "building", id: "campus" },
+    { kind: "building", id: "library" },
     { kind: "building", id: "monument" },
     { kind: "unit", id: "spearman" },
     { kind: "unit", id: "warrior" },
     { kind: "building", id: "workshop" },
     { kind: "unit", id: "archer" },
+    { kind: "building", id: "university" },
+    { kind: "building", id: "researchLab" },
     { kind: "building", id: "granary" },
     { kind: "unit", id: "settler" },
   ],
@@ -310,22 +322,88 @@ export function normalizeEnemyPersonality(personality, fallbackSeed = 0, owner =
 /**
  * @param {import("../core/types.js").EnemyPersonality} personality
  * @param {string[]} selectableTechIds
+ * @param {import("../core/types.js").GameState|null} [gameState]
+ * @param {import("../core/types.js").AiOwner} [owner]
  * @returns {string|null}
  */
-export function pickEnemyResearchTech(personality, selectableTechIds) {
+export function pickEnemyResearchTech(personality, selectableTechIds, gameState = null, owner = "enemy") {
   if (!selectableTechIds || selectableTechIds.length === 0) {
     return null;
   }
 
   const uniqueSelectable = [...new Set(selectableTechIds)];
+  if (!gameState) {
+    const priority = RESEARCH_PRIORITY[personality] ?? RESEARCH_PRIORITY.expansionist;
+    for (const techId of priority) {
+      if (uniqueSelectable.includes(techId)) {
+        return techId;
+      }
+    }
+    return [...uniqueSelectable].sort((a, b) => a.localeCompare(b))[0] ?? null;
+  }
+
   const priority = RESEARCH_PRIORITY[personality] ?? RESEARCH_PRIORITY.expansionist;
-  for (const techId of priority) {
-    if (uniqueSelectable.includes(techId)) {
-      return techId;
+  const currentTechId = gameState.research.currentTechId ?? gameState.research.activeTechId ?? null;
+  const scored = uniqueSelectable.map((techId) => {
+    const priorityIndex = priority.indexOf(techId);
+    const priorityBonus = priorityIndex >= 0 ? Math.max(0, 18 - priorityIndex * 3) : 0;
+    const boostProgress = gameState.research.boostProgressByTech?.[techId] ?? null;
+    const boostRatio =
+      boostProgress && boostProgress.target > 0 ? Math.min(1, Math.max(0, boostProgress.current / boostProgress.target)) : 0;
+    const boostBonus = boostProgress?.met ? 14 : boostRatio * 10;
+    const costPenalty = getEffectiveTechCost(techId, gameState) / 16;
+    const cost = Math.max(1, Math.round(getEffectiveTechCost(techId, gameState) * 10));
+    const progress = Math.max(0, gameState.research.progressByTech?.[techId] ?? 0);
+    const carryBonus = techId === currentTechId ? (progress > 0 ? 10 : 3) : 0;
+    const completionBonus = progress > 0 ? Math.min(8, (progress / cost) * 8) : 0;
+    const strategicBonus = getTechStrategicValue(techId, personality, owner, gameState);
+    const score = priorityBonus + boostBonus + carryBonus + completionBonus + strategicBonus - costPenalty;
+    return { techId, score };
+  });
+  scored.sort((a, b) => b.score - a.score || a.techId.localeCompare(b.techId));
+  return scored[0]?.techId ?? null;
+}
+
+function getTechStrategicValue(techId, personality, owner, gameState) {
+  const tech = TECH_TREE[techId];
+  if (!tech) {
+    return 0;
+  }
+
+  let value = 0;
+  const unlockUnits = tech.unlocks?.units?.length ?? 0;
+  const unlockBuildings = tech.unlocks?.buildings?.length ?? 0;
+  value += unlockUnits * 5 + unlockBuildings * 3 + (tech.globalScienceModifier ?? 0) * 80;
+
+  if (personality === "raider") {
+    if (unlockUnits > 0) {
+      value += 6;
+    }
+    if (techId === "machinery" || techId === "chemistry") {
+      value += 4;
+    }
+  } else if (personality === "expansionist") {
+    if (techId === "pottery" || techId === "writing" || techId === "civilService") {
+      value += 6;
+    }
+    if (unlockBuildings > 0) {
+      value += 3;
+    }
+  } else {
+    if (techId === "masonry" || techId === "engineering" || techId === "scientificMethod") {
+      value += 7;
+    }
+    if (tech.globalScienceModifier) {
+      value += 5;
     }
   }
 
-  return [...uniqueSelectable].sort((a, b) => a.localeCompare(b))[0] ?? null;
+  const ownerCities = gameState.cities.filter((city) => city.owner === owner);
+  const hasCampus = ownerCities.some((city) => (city.buildings ?? []).includes("campus"));
+  if (!hasCampus && (techId === "writing" || techId === "education")) {
+    value += 8;
+  }
+  return value;
 }
 
 /**
@@ -461,13 +539,7 @@ export function prepareEnemyTurnPlan(gameState, owner = "enemy") {
  */
 export function executeEnemyTurnPrelude(gameState, plan) {
   const owner = normalizeAiOwner(plan.owner ?? "enemy", gameState);
-  let selectedResearch = null;
-  if (plan.selectedResearch) {
-    const selected = selectResearch(plan.selectedResearch, gameState);
-    if (selected.ok) {
-      selectedResearch = plan.selectedResearch;
-    }
-  }
+  const selectedResearch = typeof plan.selectedResearch === "string" && plan.selectedResearch.length > 0 ? plan.selectedResearch : null;
 
   const appliedQueueRefills = [];
   for (const refill of plan.queueRefills ?? []) {
@@ -634,7 +706,7 @@ function buildIdleTurnPlan(gameState, owner, personality) {
 }
 
 function resolveEnemyTurnPrelude(gameState, personality, owner) {
-  const selectedResearch = maybeSelectEnemyResearch(gameState, personality);
+  const selectedResearch = maybeSelectEnemyResearch(gameState, personality, owner);
   const queueRefills = syncEnemyQueuesForPersonality(gameState, personality, owner);
   const goal = pickEnemyGoal(gameState, personality, owner);
   return {
@@ -739,14 +811,14 @@ function getActionResultDetail(actionType, result) {
   return "waited";
 }
 
-function maybeSelectEnemyResearch(gameState, personality) {
-  if (gameState.research.activeTechId) {
+function maybeSelectEnemyResearch(gameState, personality, owner) {
+  const selectableTechIds = getSelectableTechIds(gameState);
+  const techToSelect = pickEnemyResearchTech(personality, selectableTechIds, gameState, owner);
+  if (!techToSelect) {
     return null;
   }
-
-  const selectableTechIds = getSelectableTechIds(gameState);
-  const techToSelect = pickEnemyResearchTech(personality, selectableTechIds);
-  if (!techToSelect) {
+  const currentTechId = gameState.research.currentTechId ?? gameState.research.activeTechId ?? null;
+  if (currentTechId === techToSelect) {
     return null;
   }
   const selected = selectResearch(techToSelect, gameState);

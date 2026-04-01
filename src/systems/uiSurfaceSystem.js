@@ -153,14 +153,26 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
     const unlocked = isBuildingUnlocked(id, gameState);
     const alreadyBuilt = builtBuildingIds.has(id);
     const alreadyQueued = queuedBuildingIds.has(id);
+    const missingCampus = !!definition?.requiresCampus && !builtBuildingIds.has("campus");
+    const missingRequiredBuilding =
+      (definition?.requiredBuildings ?? []).find((required) => !builtBuildingIds.has(required)) ?? null;
     const affordable = productionStock >= cost;
-    const queueable = selectedPlayerCity && !isQueueFull && unlocked && !alreadyBuilt && !alreadyQueued;
+    const queueable =
+      selectedPlayerCity &&
+      !isQueueFull &&
+      unlocked &&
+      !alreadyBuilt &&
+      !alreadyQueued &&
+      !missingCampus &&
+      !missingRequiredBuilding;
     const reason = getBuildingQueueReason({
       selectedPlayerCity,
       isQueueFull,
       unlocked,
       alreadyBuilt,
       alreadyQueued,
+      missingCampus,
+      missingRequiredBuilding,
       unlockTechId: definition?.unlockedByTech ?? null,
     });
     const etaTurns = computeEtaTurns(cost, productionStock, productionRate);
@@ -351,7 +363,16 @@ function getUnitQueueReason({ selectedPlayerCity, isQueueFull, unlocked, unlockT
   return { code: null, text: null, tag: null };
 }
 
-function getBuildingQueueReason({ selectedPlayerCity, isQueueFull, unlocked, alreadyBuilt, alreadyQueued, unlockTechId }) {
+function getBuildingQueueReason({
+  selectedPlayerCity,
+  isQueueFull,
+  unlocked,
+  alreadyBuilt,
+  alreadyQueued,
+  missingCampus,
+  missingRequiredBuilding,
+  unlockTechId,
+}) {
   if (!selectedPlayerCity) {
     return {
       code: "city-not-selected",
@@ -386,6 +407,20 @@ function getBuildingQueueReason({ selectedPlayerCity, isQueueFull, unlocked, alr
       code: "already-queued",
       text: "This building is already queued.",
       tag: "Queued",
+    };
+  }
+  if (missingCampus) {
+    return {
+      code: "missing-campus",
+      text: "Requires a Campus in this city first.",
+      tag: "Requires Campus",
+    };
+  }
+  if (missingRequiredBuilding) {
+    return {
+      code: "missing-building-prerequisite",
+      text: `Requires ${capitalizeLabel(missingRequiredBuilding)} first.`,
+      tag: "Prereq",
     };
   }
   return { code: null, text: null, tag: null };
@@ -525,7 +560,9 @@ function formatTurnsLabel(turns) {
 
 function getQueueItemCost(queueItem) {
   if (queueItem.kind === "building") {
-    return getBuildingDefinition(/** @type {"granary"|"workshop"|"monument"} */ (queueItem.id))?.productionCost ?? 0;
+    return getBuildingDefinition(
+      /** @type {"granary"|"workshop"|"monument"|"campus"|"library"|"university"|"researchLab"} */ (queueItem.id)
+    )?.productionCost ?? 0;
   }
   return getUnitDefinition(/** @type {"warrior"|"settler"|"spearman"|"archer"} */ (queueItem.id))?.productionCost ?? 0;
 }

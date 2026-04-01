@@ -489,3 +489,46 @@ Viewport support note (2026-03-27): legacy mentions of mobile checks/artifacts i
   - `npm test` passed (14 files, 74 tests)
   - `npm run test:e2e` passed
   - `npm run build` passed
+## 2026-04-01 (Science overhaul big-bang + full docs parity)
+- Implemented full science-system replacement to direct per-turn model:
+  - removed stockpile-funded research behavior as authoritative path;
+  - player research now progresses from computed `sciencePerTurn` each turn;
+  - retained compatibility wrapper API (`consumeScienceStock`) as delegation to turn-resolve.
+- Expanded tech model and runtime contracts:
+  - replaced compact tree with medium `14`-tech civ-like tree;
+  - added `baseCost`, `era`, city-count penalty scaling, prerequisites, boost conditions, unlock bundles, and optional global science modifiers;
+  - migrated `GameState.research` to per-tech maps (`progressByTech`, `effectiveCostByTech`, boost maps, breakdown payload fields, `currentTechId`).
+- Added city-level science infrastructure and formulas:
+  - added `campus` city state with adjacency snapshot (`mountain +1`, `forest +0.5`, nearby owned Campus city `+0.5` at distance `<=2`);
+  - added science building chain (`campus`, `library`, `university`, `researchLab`) with queue/prerequisite enforcement;
+  - city science now derives from population + Campus adjacency + science buildings.
+- Added global science modifier framework and concrete sources:
+  - tech modifiers (for example `engineering`, `scientificMethod`);
+  - building modifiers (monument/research-lab aggregate contributions).
+- Implemented one-time `40%` Eureka boosts:
+  - per-tech progress tracking and deterministic one-time application;
+  - runtime payload exposes boost progress + labels for HUD/context surfaces.
+- Upgraded AI science behavior:
+  - boost-aware and progress-aware research scoring;
+  - science infrastructure integrated into personality queue priorities;
+  - prelude now records AI research intent without overwriting player active research.
+- HUD/runtime UX updates:
+  - top-left shows `Science/Turn`;
+  - stats line shows active tech + turns remaining + boost progress;
+  - context/right-rail city surfaces include per-city science breakdown when payload is available.
+- Tests refreshed and expanded:
+  - updated `tests/integration/researchSystem.test.js` for direct-per-turn progression, cost scaling, switching, one-time boosts, overflow/unlock propagation;
+  - extended `tests/integration/enemyAi.test.js` with boost/progress-aware research scoring assertions;
+  - extended `tests/integration/uiSurface.test.js` with Campus prerequisite science-building hint coverage;
+  - updated `tests/integration/determinismVisualParity.test.js` to use direct research turn resolution;
+  - updated `tests/e2e/smoke.mjs` research-path assertions for expanded payloads/UX and resilient flow.
+- Documentation refresh completed in same implementation pass:
+  - updated `README.md` science gameplay/features/controls;
+  - updated specs: `docs/spec-005`, `docs/spec-006`, `docs/spec-007`, `docs/spec-008`;
+  - added `docs/spec-011-science-overhaul.md`;
+  - updated `docs/README.md` index.
+- Validation run on final state:
+  - `npm run lint` passed
+  - `npm test` passed (`15` files, `85` tests)
+  - `npm run test:e2e` passed
+  - `npm run build` passed

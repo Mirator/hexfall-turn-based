@@ -1,6 +1,7 @@
 import { allocateEntityId, getCityAt, getCityById, getTileAt, getUnitAt, getUnitById, isInsideMap, removeUnitById } from "../core/gameState.js";
-import { neighbors } from "../core/hexGrid.js";
+import { distance, neighbors } from "../core/hexGrid.js";
 import { createUnit, getAllUnitTypes, getUnitDefinition } from "../core/unitData.js";
+import { getCityScienceBreakdown } from "./researchSystem.js";
 
 export const CITY_MAX_HEALTH = 12;
 export const CITY_QUEUE_MAX = 3;
@@ -21,6 +22,9 @@ const BUILDING_DEFINITIONS = {
     productionCost: 9,
     unlockedByDefault: true,
     unlockedByTech: null,
+    requiredBuildings: [],
+    requiresCampus: false,
+    scienceOutput: 0,
     yields: {
       food: 1,
       production: 0,
@@ -32,6 +36,9 @@ const BUILDING_DEFINITIONS = {
     productionCost: 10,
     unlockedByDefault: false,
     unlockedByTech: "bronzeWorking",
+    requiredBuildings: [],
+    requiresCampus: false,
+    scienceOutput: 0,
     yields: {
       food: 0,
       production: 1,
@@ -43,15 +50,74 @@ const BUILDING_DEFINITIONS = {
     productionCost: 8,
     unlockedByDefault: false,
     unlockedByTech: "masonry",
+    requiredBuildings: [],
+    requiresCampus: false,
+    scienceOutput: 0,
     yields: {
       food: 0,
       production: 0,
-      science: 1,
+      science: 0,
+    },
+  },
+  campus: {
+    id: "campus",
+    productionCost: 12,
+    unlockedByDefault: false,
+    unlockedByTech: "writing",
+    requiredBuildings: [],
+    requiresCampus: false,
+    scienceOutput: 0,
+    yields: {
+      food: 0,
+      production: 0,
+      science: 0,
+    },
+  },
+  library: {
+    id: "library",
+    productionCost: 11,
+    unlockedByDefault: false,
+    unlockedByTech: "writing",
+    requiredBuildings: ["campus"],
+    requiresCampus: true,
+    scienceOutput: 2,
+    yields: {
+      food: 0,
+      production: 0,
+      science: 0,
+    },
+  },
+  university: {
+    id: "university",
+    productionCost: 16,
+    unlockedByDefault: false,
+    unlockedByTech: "education",
+    requiredBuildings: ["library"],
+    requiresCampus: true,
+    scienceOutput: 4,
+    yields: {
+      food: 0,
+      production: 0,
+      science: 0,
+    },
+  },
+  researchLab: {
+    id: "researchLab",
+    productionCost: 18,
+    unlockedByDefault: false,
+    unlockedByTech: "chemistry",
+    requiredBuildings: ["university"],
+    requiresCampus: true,
+    scienceOutput: 5,
+    yields: {
+      food: 0,
+      production: 0,
+      science: 0,
     },
   },
 };
 
-const BUILDING_ORDER = ["granary", "workshop", "monument"];
+const BUILDING_ORDER = ["granary", "workshop", "monument", "campus", "library", "university", "researchLab"];
 
 /**
  * @typedef {{ kind: "unit"|"building", id: string }} CityQueueItem
@@ -131,6 +197,7 @@ export function foundCity(unitId, gameState) {
     maxHealth: CITY_MAX_HEALTH,
     productionTab: "units",
     buildings: [],
+    campus: createDefaultCampusState(),
     queue: [],
   });
 
@@ -208,7 +275,7 @@ export function enqueueCityQueue(cityId, unitType, gameState) {
 
 /**
  * @param {string} cityId
- * @param {"granary"|"workshop"|"monument"|string} buildingId
+ * @param {"granary"|"workshop"|"monument"|"campus"|"library"|"university"|"researchLab"|string} buildingId
  * @param {import("../core/types.js").GameState} gameState
  * @returns {{ ok: boolean, reason?: string, queue?: CityQueueItem[] }}
  */
@@ -260,6 +327,11 @@ export function enqueueCityQueueItem(cityId, queueItem, gameState) {
 
   if (!isBuildingUnlocked(normalized.id, gameState)) {
     return { ok: false, reason: "building-not-unlocked" };
+  }
+
+  const requirementCheck = canBuildBuildingInCity(city, normalized.id);
+  if (!requirementCheck.ok) {
+    return { ok: false, reason: requirementCheck.reason };
   }
 
   if ((city.buildings ?? []).includes(normalized.id)) {
@@ -421,7 +493,7 @@ export function processTurn(gameState, owner) {
   economyBucket.lastTurnIncome = { ...aggregatedIncome };
   economyBucket.foodStock += aggregatedIncome.food;
   economyBucket.productionStock += aggregatedIncome.production;
-  economyBucket.scienceStock += aggregatedIncome.science;
+  economyBucket.sciencePerTurn = aggregatedIncome.science;
 
   const growthOrder = [...ownerCities];
 
@@ -494,6 +566,12 @@ export function processTurn(gameState, owner) {
         continue;
       }
 
+      const requirementCheck = canBuildBuildingInCity(city, currentQueueItem.id);
+      if (!requirementCheck.ok) {
+        city.queue.shift();
+        continue;
+      }
+
       if ((city.buildings ?? []).includes(currentQueueItem.id)) {
         city.queue.shift();
         continue;
@@ -505,6 +583,9 @@ export function processTurn(gameState, owner) {
 
       economyBucket.productionStock -= buildingDefinition.productionCost;
       city.buildings.push(currentQueueItem.id);
+      if (currentQueueItem.id === "campus") {
+        city.campus = computeCampusSnapshot(city, gameState);
+      }
       city.specialization = deriveCitySpecialization(city.buildings ?? []);
       city.queue.shift();
       city.yieldLastTurn = computeCityYield(city.id, gameState);
@@ -531,16 +612,16 @@ export function getAvailableProductionUnits(gameState) {
 
 /**
  * @param {import("../core/types.js").GameState} gameState
- * @returns {Array<"granary"|"workshop"|"monument">}
+ * @returns {Array<"granary"|"workshop"|"monument"|"campus"|"library"|"university"|"researchLab">}
  */
 export function getAvailableProductionBuildings(gameState) {
-  return /** @type {Array<"granary"|"workshop"|"monument">} */ (
+  return /** @type {Array<"granary"|"workshop"|"monument"|"campus"|"library"|"university"|"researchLab">} */ (
     BUILDING_ORDER.filter((buildingId) => isBuildingUnlocked(buildingId, gameState))
   );
 }
 
 /**
- * @param {"granary"|"workshop"|"monument"} buildingId
+ * @param {"granary"|"workshop"|"monument"|"campus"|"library"|"university"|"researchLab"} buildingId
  * @returns {{ id: string, productionCost: number, unlockedByDefault: boolean, unlockedByTech: string|null, yields: import("../core/types.js").YieldBundle } | null}
  */
 export function getBuildingDefinition(buildingId) {
@@ -548,14 +629,14 @@ export function getBuildingDefinition(buildingId) {
 }
 
 /**
- * @returns {Array<"granary"|"workshop"|"monument">}
+ * @returns {Array<"granary"|"workshop"|"monument"|"campus"|"library"|"university"|"researchLab">}
  */
 export function getAllProductionBuildings() {
-  return /** @type {Array<"granary"|"workshop"|"monument">} */ ([...BUILDING_ORDER]);
+  return /** @type {Array<"granary"|"workshop"|"monument"|"campus"|"library"|"university"|"researchLab">} */ ([...BUILDING_ORDER]);
 }
 
 /**
- * @param {"granary"|"workshop"|"monument"} buildingId
+ * @param {"granary"|"workshop"|"monument"|"campus"|"library"|"university"|"researchLab"} buildingId
  * @param {import("../core/types.js").GameState} gameState
  * @returns {boolean}
  */
@@ -571,6 +652,73 @@ export function isBuildingUnlocked(buildingId, gameState) {
     return true;
   }
   return gameState.research.completedTechIds.includes(definition.unlockedByTech);
+}
+
+function canBuildBuildingInCity(city, buildingId) {
+  const definition = BUILDING_DEFINITIONS[buildingId];
+  if (!definition) {
+    return { ok: false, reason: "invalid-building-id" };
+  }
+  const builtSet = new Set(city.buildings ?? []);
+  if (definition.requiresCampus && !builtSet.has("campus")) {
+    return { ok: false, reason: "building-requires-campus" };
+  }
+  for (const requiredBuilding of definition.requiredBuildings ?? []) {
+    if (!builtSet.has(requiredBuilding)) {
+      return { ok: false, reason: "building-missing-prerequisite" };
+    }
+  }
+  return { ok: true };
+}
+
+function createDefaultCampusState() {
+  return {
+    built: false,
+    adjacency: 0,
+    adjacencyBreakdown: {
+      mountains: 0,
+      forests: 0,
+      nearbyCampuses: 0,
+    },
+  };
+}
+
+function computeCampusSnapshot(city, gameState) {
+  let mountains = 0;
+  let forests = 0;
+  for (const hex of neighbors(city)) {
+    const tile = getTileAt(gameState.map, hex.q, hex.r);
+    if (!tile) {
+      continue;
+    }
+    if (tile.terrainType === "mountain") {
+      mountains += 1;
+    }
+    if (tile.terrainType === "forest") {
+      forests += 1;
+    }
+  }
+
+  const nearbyCampuses = gameState.cities.filter((candidate) => {
+    if (candidate.id === city.id || candidate.owner !== city.owner) {
+      return false;
+    }
+    if (!(candidate.campus?.built || (candidate.buildings ?? []).includes("campus"))) {
+      return false;
+    }
+    return distance(candidate, city) <= 2;
+  }).length;
+
+  const adjacency = roundToTenths(mountains + forests * 0.5 + nearbyCampuses * 0.5);
+  return {
+    built: true,
+    adjacency,
+    adjacencyBreakdown: {
+      mountains,
+      forests,
+      nearbyCampuses,
+    },
+  };
 }
 
 function findSpawnHex(city, gameState) {
@@ -621,9 +769,11 @@ function computeCityYieldForWorkedHexes(city, workedHexes, gameState) {
     if (!tile || tile.blocksMovement) {
       continue;
     }
-    addYield(total, tile.yields);
+    total.food += tile.yields.food;
+    total.production += tile.yields.production;
   }
   addYield(total, getCityBuildingYieldBonus(city));
+  total.science = getCityScienceBreakdown(city, gameState).totalScience;
   return total;
 }
 
@@ -632,8 +782,8 @@ function compareHexesForWorkedPriority(a, b, gameState) {
   const tileB = getTileAt(gameState.map, b.q, b.r);
   const yieldsA = tileA?.yields ?? createEmptyYield();
   const yieldsB = tileB?.yields ?? createEmptyYield();
-  const totalA = yieldsA.food + yieldsA.production + yieldsA.science;
-  const totalB = yieldsB.food + yieldsB.production + yieldsB.science;
+  const totalA = yieldsA.food + yieldsA.production;
+  const totalB = yieldsB.food + yieldsB.production;
   if (totalA !== totalB) {
     return totalB - totalA;
   }
@@ -642,9 +792,6 @@ function compareHexesForWorkedPriority(a, b, gameState) {
   }
   if (yieldsA.production !== yieldsB.production) {
     return yieldsB.production - yieldsA.production;
-  }
-  if (yieldsA.science !== yieldsB.science) {
-    return yieldsB.science - yieldsA.science;
   }
 
   return a.q - b.q || a.r - b.r;
@@ -661,6 +808,22 @@ function ensureCityEconomyFields(city) {
 
   if (!Array.isArray(city.buildings)) {
     city.buildings = [];
+  }
+
+  if (!city.campus || typeof city.campus !== "object") {
+    city.campus = createDefaultCampusState();
+  } else {
+    city.campus.built = !!city.campus.built;
+    if (!Number.isFinite(city.campus.adjacency)) {
+      city.campus.adjacency = 0;
+    }
+    if (!city.campus.adjacencyBreakdown || typeof city.campus.adjacencyBreakdown !== "object") {
+      city.campus.adjacencyBreakdown = createDefaultCampusState().adjacencyBreakdown;
+    }
+  }
+
+  if ((city.buildings ?? []).includes("campus")) {
+    city.campus.built = true;
   }
 
   if (!CITY_PRODUCTION_TAB_ORDER.includes(city.productionTab)) {
@@ -751,7 +914,8 @@ function getCityBuildingYieldBonus(city) {
     if (!definition) {
       continue;
     }
-    addYield(yields, definition.yields);
+    yields.food += definition.yields.food;
+    yields.production += definition.yields.production;
   }
   return yields;
 }
@@ -770,6 +934,10 @@ function createEmptyYield() {
   };
 }
 
+function roundToTenths(value) {
+  return Math.round(value * 10) / 10;
+}
+
 function deriveCityIdentity(cityYield) {
   if (cityYield.food > cityYield.production && cityYield.food > cityYield.science) {
     return "agricultural";
@@ -785,7 +953,7 @@ function deriveCityIdentity(cityYield) {
 
 function deriveCitySpecialization(buildings) {
   const set = new Set(buildings ?? []);
-  if (set.has("monument")) {
+  if (set.has("campus") || set.has("library") || set.has("university") || set.has("researchLab") || set.has("monument")) {
     return "scholarly";
   }
   if (set.has("workshop")) {

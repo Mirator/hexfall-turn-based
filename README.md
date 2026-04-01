@@ -47,7 +47,11 @@ npm run dev
 - Player dev visibility toggle (`V`) to reveal full map without disabling AI fog rules
 - Unit combat with HP, attack ranges, and unit removal
 - Settler-driven city founding and lightweight production queue
-- Research progression with unlockable unit options
+- Civ-like science progression with direct `science per turn` research (no science stockpile spend)
+- Expanded `14`-tech tree with prerequisites, era scaling, city-count penalty, and per-tech stored progress
+- One-time `40%` Eureka boosts with progress tracking (city count, population, building counts, owned units)
+- Campus district abstraction (city-level) with stored adjacency snapshot (`mountain +1`, `forest +0.5`, nearby owned campus city `+0.5`)
+- Science building chain (`campus`, `library`, `university`, `researchLab`) and global science modifiers from tech/building sources
 - Sequential AI phase playback (`enemy` then `purple`) with per-actor messages
 - Match-end victory/defeat state with restart overlay
 
@@ -62,7 +66,9 @@ npm run dev
 - Select a settler and press `Found City` (or key `F`)
 - Use city context panel to set focus/production
 - Use the right-rail `City Queue` card (when a city is selected) to reorder/remove queue slots
-- Use `Research` controls in HUD to cycle/select active research
+- Use `Research` controls in HUD to cycle/select active research target
+- Monitor science HUD stats for `Science/Turn`, active tech turns-remaining, and active-tech boost progress
+- Use city context details for per-city science and campus/science-building effects
 - Press `Esc` to open Pause menu (`Resume`, `Restart`) and confirm restart
 - After match end, use the result overlay `Restart Match` button
 - Press `V` to toggle `Dev Vision: ON/OFF`

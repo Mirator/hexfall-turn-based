@@ -7,6 +7,7 @@ import {
   prepareEnemyTurnPlan,
   runEnemyTurn,
 } from "../../src/systems/enemyTurnSystem.js";
+import { selectResearch } from "../../src/systems/researchSystem.js";
 import { beginEnemyTurn, beginPlayerTurn } from "../../src/systems/turnSystem.js";
 
 describe("enemy turn flow", () => {
@@ -159,5 +160,18 @@ describe("enemy turn flow", () => {
       expect(gameState.cities.some((city) => city.owner === owner)).toBe(true);
       expect(gameState.units.some((unit) => unit.owner === owner && unit.type === "settler")).toBe(false);
     }
+  });
+
+  it("does not overwrite player active research during enemy prelude execution", () => {
+    const gameState = createInitialGameState({ seed: 3001 });
+    gameState.research.completedTechIds.push("pottery");
+    expect(selectResearch("writing", gameState).ok).toBe(true);
+    const selectedBefore = gameState.research.currentTechId;
+
+    beginEnemyTurn(gameState);
+    runEnemyTurn(gameState, "enemy");
+
+    expect(gameState.research.currentTechId).toBe(selectedBefore);
+    expect(gameState.research.activeTechId).toBe(selectedBefore);
   });
 });
