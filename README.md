@@ -52,6 +52,7 @@ npm run dev
 - One-time `40%` Eureka boosts with progress tracking (city count, population, building counts, owned units)
 - Campus district abstraction (city-level) with stored adjacency snapshot (`mountain +1`, `forest +0.5`, nearby owned campus city `+0.5`)
 - Science building chain (`campus`, `library`, `university`, `researchLab`) and global science modifiers from tech/building sources
+- Top-HUD `Tech Tree` button with read-only technology overview modal (science summary + all `14` tech rows)
 - Sequential AI phase playback (`enemy` then `purple`) with per-actor messages
 - Match-end victory/defeat state with restart overlay
 
@@ -66,7 +67,7 @@ npm run dev
 - Select a settler and press `Found City` (or key `F`)
 - Use city context panel to set focus/production
 - Use the right-rail `City Queue` card (when a city is selected) to reorder/remove queue slots
-- Use `Research` controls in HUD to cycle/select active research target
+- Click `Tech Tree` (next to `Stats`) to open a read-only science/technology overview
 - Monitor science HUD stats for `Science/Turn`, active tech turns-remaining, and active-tech boost progress
 - Use city context details for per-city science and campus/science-building effects
 - Press `Esc` to open Pause menu (`Resume`, `Restart`) and confirm restart

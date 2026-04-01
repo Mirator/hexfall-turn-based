@@ -532,3 +532,26 @@ Viewport support note (2026-03-27): legacy mentions of mobile checks/artifacts i
   - `npm test` passed (`15` files, `85` tests)
   - `npm run test:e2e` passed
   - `npm run build` passed
+## 2026-04-01 (Tech Tree HUD button + read-only overview modal)
+- Implemented top-HUD `Tech Tree` chip adjacent to `Stats` with matching chip dimensions/style.
+- Added read-only `Technology Overview` modal in `UIScene`:
+  - deterministic full `14`-tech rows from `TECH_ORDER`,
+  - compact science summary (`sciencePerTurn`, `baseSciencePerTurn`, global modifier, completed count, active tech + turns),
+  - per-city science totals sourced from `research.cityScienceById`.
+- Modal behavior integrated with existing modal framework:
+  - opens/closes from `Tech Tree` toggle,
+  - closes on `Esc`, backdrop click, or `Close` button,
+  - participates in modal gating (`isAnyModalOpen`, `isModalButton`, `syncModalState`) to block non-modal gameplay actions while open.
+- Extended test/runtime hooks:
+  - `window.__hexfallTest.toggleTechTreeModal()`
+  - `window.__hexfallTest.getTechTreeModalState()`
+  - top-HUD control payload now includes `techTree` visibility/label/width/bounds
+  - HUD polish payload now includes `techTree: { open, summary, rows }`.
+- Updated e2e smoke coverage:
+  - validates Tech Tree button visibility/order/alignment with `Stats` + `Menu`,
+  - validates modal open/close, deterministic 14-row payload, summary presence,
+  - validates gameplay action blocking while modal is open.
+- Documentation parity updates completed:
+  - `README.md` gameplay/features/controls updated with Tech Tree control and overview behavior.
+  - `docs/spec-007-hud-context-panels-and-notifications.md` updated for button placement, modal interaction rules, and payload/test expectations.
+  - this `progress.md` entry added as implementation/test/docs completion log.

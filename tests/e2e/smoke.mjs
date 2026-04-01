@@ -434,6 +434,44 @@ async function run() {
       if (window.__hexfallTest.toggleStatsPanel() !== false || window.__hexfallTest.getHudPolishState()?.stats?.open) {
         return { ok: false, reason: "stats-panel-toggle-close-failed" };
       }
+      const techTreeInitial = window.__hexfallTest.getTechTreeModalState();
+      if (techTreeInitial?.open) {
+        return { ok: false, reason: "tech-tree-modal-should-start-hidden" };
+      }
+      if (window.__hexfallTest.toggleTechTreeModal() !== true) {
+        return { ok: false, reason: "tech-tree-modal-toggle-open-failed" };
+      }
+      const techTreeOpen = window.__hexfallTest.getTechTreeModalState();
+      if (
+        !techTreeOpen?.open ||
+        !Number.isFinite(techTreeOpen?.summary?.sciencePerTurn) ||
+        !Array.isArray(techTreeOpen?.rows) ||
+        techTreeOpen.rows.length !== 14 ||
+        techTreeOpen.rows.some((row, index) => row?.id !== [
+          "pottery",
+          "mining",
+          "writing",
+          "bronzeWorking",
+          "archery",
+          "masonry",
+          "engineering",
+          "mathematics",
+          "education",
+          "civilService",
+          "machinery",
+          "astronomy",
+          "chemistry",
+          "scientificMethod",
+        ][index])
+      ) {
+        return { ok: false, reason: "tech-tree-modal-open-payload-invalid" };
+      }
+      if (window.__hexfallTest.requestEndTurn()) {
+        return { ok: false, reason: "tech-tree-modal-should-block-end-turn" };
+      }
+      if (window.__hexfallTest.toggleTechTreeModal() !== false || window.__hexfallTest.getTechTreeModalState()?.open) {
+        return { ok: false, reason: "tech-tree-modal-toggle-close-failed" };
+      }
       if (!polishInitial?.minimap?.visible || (polishInitial?.minimap?.viewportBoundarySegments ?? 0) < 6) {
         return { ok: false, reason: "minimap-or-viewport-outline-not-visible" };
       }
@@ -540,27 +578,47 @@ async function run() {
       // Top HUD controls + Pause + New Game modal sanity check.
       const topHudControls = window.__hexfallTest.getTopHudControlsState();
       if (
+        !topHudControls?.techTreeVisible ||
         !topHudControls?.statsVisible ||
         !topHudControls?.menuVisible ||
+        String(topHudControls?.techTreeLabel ?? "") !== "Tech Tree" ||
         String(topHudControls?.statsLabel ?? "") !== "Stats" ||
         String(topHudControls?.menuLabel ?? "") !== "Menu" ||
         topHudControls?.hasHudSfxButton !== false
       ) {
         return { ok: false, reason: "top-hud-controls-invalid-for-menu-sfx-rework" };
       }
-      if (Math.abs(Number(topHudControls?.statsWidth ?? 0) - Number(topHudControls?.menuWidth ?? 0)) > 0.1) {
+      if (
+        Math.abs(Number(topHudControls?.techTreeWidth ?? 0) - Number(topHudControls?.statsWidth ?? 0)) > 0.1 ||
+        Math.abs(Number(topHudControls?.statsWidth ?? 0) - Number(topHudControls?.menuWidth ?? 0)) > 0.1
+      ) {
         return { ok: false, reason: "top-hud-controls-width-mismatch" };
       }
+      const techTreeCenterX = Number(topHudControls?.techTreeBounds?.x) + Number(topHudControls?.techTreeBounds?.width) / 2;
+      const statsCenterX = Number(topHudControls?.statsBounds?.x) + Number(topHudControls?.statsBounds?.width) / 2;
+      const menuCenterX = Number(topHudControls?.menuBounds?.x) + Number(topHudControls?.menuBounds?.width) / 2;
+      if (
+        !Number.isFinite(techTreeCenterX) ||
+        !Number.isFinite(statsCenterX) ||
+        !Number.isFinite(menuCenterX) ||
+        !(techTreeCenterX < statsCenterX && statsCenterX < menuCenterX)
+      ) {
+        return { ok: false, reason: "top-hud-button-order-invalid" };
+      }
       const statsTop = Number(topHudControls?.statsBounds?.y);
+      const techTreeTop = Number(topHudControls?.techTreeBounds?.y);
       const menuTop = Number(topHudControls?.menuBounds?.y);
       const devVisionTop = Number(topHudControls?.devVisionBounds?.y);
       const devVisionHeight = Number(topHudControls?.devVisionBounds?.height);
       const devVisionBottom = devVisionTop + devVisionHeight;
       if (
+        !Number.isFinite(techTreeTop) ||
         !Number.isFinite(statsTop) ||
         !Number.isFinite(menuTop) ||
         !Number.isFinite(devVisionBottom) ||
-        devVisionBottom > Math.min(statsTop, menuTop) - 1
+        Math.abs(techTreeTop - statsTop) > 0.5 ||
+        Math.abs(statsTop - menuTop) > 0.5 ||
+        devVisionBottom > Math.min(techTreeTop, statsTop, menuTop) - 1
       ) {
         return { ok: false, reason: "dev-vision-overlaps-top-hud-buttons" };
       }

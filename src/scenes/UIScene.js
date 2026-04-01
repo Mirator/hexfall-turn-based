@@ -2,6 +2,7 @@ import Phaser from "../core/phaserRuntime.js";
 import { gameEvents } from "../core/eventBus.js";
 import { HEX_SIZE } from "../core/constants.js";
 import { axialToWorld, worldToAxial } from "../core/hexGrid.js";
+import { TECH_ORDER, TECH_TREE } from "../core/techTree.js";
 import { HUD_THEME, UI_FONTS, resolveButtonPalette } from "../ui/theme.js";
 
 const BUTTON_WIDTH = 180;
@@ -33,6 +34,11 @@ const NEW_GAME_MODAL_HEIGHT = 286;
 const NEW_GAME_MAP_PRESETS = [16, 20, 24];
 const NEW_GAME_AI_MIN = 1;
 const NEW_GAME_AI_MAX = 6;
+const TECH_TREE_MODAL_WIDTH_MIN = 560;
+const TECH_TREE_MODAL_WIDTH_MAX = 1120;
+const TECH_TREE_MODAL_HEIGHT_MIN = 420;
+const TECH_TREE_MODAL_HEIGHT_MAX = 760;
+const TECH_TREE_MODAL_CONTENT_PADDING = 16;
 const CONTEXT_PANEL_COLLAPSED_HEIGHT = 76;
 const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY = 250;
 const CONTEXT_PANEL_EXPANDED_HEIGHT_CITY_TABLET = 300;
@@ -110,6 +116,7 @@ export class UIScene extends Phaser.Scene {
     this.disabledHoverText = null;
     this.pauseMenuOpen = false;
     this.restartConfirmOpen = false;
+    this.techTreeModalOpen = false;
     this.newGameMapSize = NEW_GAME_MAP_PRESETS[0];
     this.newGameAiFactionCount = NEW_GAME_AI_MIN + 1;
     this.cityResolutionOpen = false;
@@ -133,6 +140,21 @@ export class UIScene extends Phaser.Scene {
       techCompleted: 0,
       activeTech: null,
       exploredPercent: 0,
+    };
+    this.latestTechTreeModalPayload = {
+      open: false,
+      summary: {
+        sciencePerTurn: 0,
+        baseSciencePerTurn: 0,
+        globalModifierTotal: 0,
+        completedTech: 0,
+        totalTech: TECH_ORDER.length,
+        currentTechId: null,
+        currentTechName: "None",
+        turnsRemaining: null,
+        cityScienceBreakdown: [],
+      },
+      rows: [],
     };
     this.contextPanelExpanded = false;
     this.contextPanelPinned = false;
@@ -178,10 +200,18 @@ export class UIScene extends Phaser.Scene {
       height: 24,
       fontSize: "11px",
     });
+    this.techTreeButton = this.createButton("Tech Tree", "toggle-tech-tree", () => this.toggleTechTreeModal(), {
+      variant: "chip",
+      width: 88,
+      height: 24,
+      fontSize: "11px",
+    });
     this.menuButton.rectangle.setDepth(10);
     this.menuButton.label.setDepth(11);
     this.statsToggleButton.rectangle.setDepth(10);
     this.statsToggleButton.label.setDepth(11);
+    this.techTreeButton.rectangle.setDepth(10);
+    this.techTreeButton.label.setDepth(11);
     this.playbackPanel = this.add.rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelElevatedBg, 0.96).setDepth(11).setVisible(false);
     this.playbackPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.88);
     this.playbackLabel = this.createLabel("", 0, 0, "15px", "#3b2a16", 12).setOrigin(0.5).setVisible(false);
@@ -480,13 +510,42 @@ export class UIScene extends Phaser.Scene {
     this.cityQueueRailDetailsSecondary = this.createLabel("", 0, 0, "13px", "#5d4b34", 17).setVisible(false);
     this.cityQueueRailDetailsTertiary = this.createLabel("", 0, 0, "12px", "#5d4b34", 17).setVisible(false);
 
+    this.techTreeModalPanel = this.add
+      .rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelElevatedBg, 0.98)
+      .setDepth(40)
+      .setVisible(false)
+      .setInteractive();
+    this.techTreeModalPanel.setStrokeStyle(3, SEMANTIC_COLORS.panelBorder, 1);
+    this.techTreeModalPanel.on("pointerdown", (_pointer, _x, _y, event) => event.stopPropagation());
+    this.techTreeModalTitle = this.createLabel("Technology Overview", 0, 0, "27px", "#472f17", 41).setOrigin(0.5).setVisible(false);
+    this.techTreeModalTitle.setFontFamily(UI_FONTS.display);
+    this.techTreeModalSubtitle = this.createLabel("Read-only science and research summary", 0, 0, "13px", "#5d4b34", 41)
+      .setOrigin(0.5)
+      .setVisible(false);
+    this.techTreeSummaryScienceLabel = this.createLabel("", 0, 0, "13px", "#3b2a16", 41).setVisible(false);
+    this.techTreeSummaryCurrentLabel = this.createLabel("", 0, 0, "13px", "#3b2a16", 41).setVisible(false);
+    this.techTreeSummaryCitiesLabel = this.createLabel("", 0, 0, "12px", "#5d4b34", 41).setVisible(false);
+    this.techTreeSummaryLegendLabel = this.createLabel("", 0, 0, "11px", "#6a5a45", 41).setVisible(false);
+    this.techTreeRowLabels = TECH_ORDER.map(() => this.createLabel("", 0, 0, "11px", "#3b2a16", 41).setVisible(false));
+    this.techTreeCloseButton = this.createButton("Close", "tech-tree-close", () => this.closeTechTreeModal(), {
+      variant: "chip",
+      width: 86,
+      height: 26,
+      fontSize: "11px",
+    });
+    this.techTreeCloseButton.rectangle.setDepth(42);
+    this.techTreeCloseButton.label.setDepth(43);
+    this.setCompositeVisible(this.techTreeCloseButton, false);
+
     this.modalBackdrop = this.add
       .rectangle(0, 0, 10, 10, 0x2a1b10, 0.34)
       .setDepth(39)
       .setVisible(false)
       .setInteractive({ useHandCursor: true });
     this.modalBackdrop.on("pointerdown", () => {
-      if (this.restartConfirmOpen) {
+      if (this.techTreeModalOpen) {
+        this.closeTechTreeModal();
+      } else if (this.restartConfirmOpen) {
         this.closeRestartConfirm();
       } else if (this.pauseMenuOpen) {
         this.closePauseMenu();
@@ -994,6 +1053,45 @@ export class UIScene extends Phaser.Scene {
     return this.statsPanelOpen;
   }
 
+  setTechTreeModalVisible(visible) {
+    this.techTreeModalOpen = !!visible;
+    const show = this.techTreeModalOpen;
+    this.techTreeModalPanel.setVisible(show);
+    this.techTreeModalTitle.setVisible(show);
+    this.techTreeModalSubtitle.setVisible(show);
+    this.techTreeSummaryScienceLabel.setVisible(show);
+    this.techTreeSummaryCurrentLabel.setVisible(show);
+    this.techTreeSummaryCitiesLabel.setVisible(show);
+    this.techTreeSummaryLegendLabel.setVisible(show);
+    for (const rowLabel of this.techTreeRowLabels) {
+      rowLabel.setVisible(show);
+    }
+    this.setCompositeVisible(this.techTreeCloseButton, show);
+    this.setButtonActive(this.techTreeButton, show);
+    this.latestTechTreeModalPayload.open = show;
+    if (show) {
+      this.updateTechTreeModalPayload(this.latestState);
+    }
+    if (this.latestState) {
+      this.layout(this.scale.gameSize);
+    }
+    this.syncModalState();
+  }
+
+  toggleTechTreeModal() {
+    this.setTechTreeModalVisible(!this.techTreeModalOpen);
+    this.playUiSfx(this.techTreeModalOpen ? "confirm" : "select");
+    return this.techTreeModalOpen;
+  }
+
+  closeTechTreeModal() {
+    if (!this.techTreeModalOpen) {
+      return false;
+    }
+    this.setTechTreeModalVisible(false);
+    return true;
+  }
+
   getDisabledActionHint(actionId) {
     if (!this.latestState) {
       return null;
@@ -1121,6 +1219,9 @@ export class UIScene extends Phaser.Scene {
     const statsX = menuX - this.menuButton.width / 2 - this.statsToggleButton.width / 2 - 6;
     this.statsToggleButton.rectangle.setPosition(statsX, menuY);
     this.statsToggleButton.label.setPosition(statsX, menuY);
+    const techTreeX = statsX - this.statsToggleButton.width / 2 - this.techTreeButton.width / 2 - 6;
+    this.techTreeButton.rectangle.setPosition(techTreeX, menuY);
+    this.techTreeButton.label.setPosition(techTreeX, menuY);
     const forecastWidth = isTabletLayout ? 248 : 300;
     const forecastHeight = isTabletLayout ? FORECAST_PANEL_HEIGHT_TABLET : FORECAST_PANEL_HEIGHT;
     const forecastLeft = edgePadding;
@@ -1390,6 +1491,57 @@ export class UIScene extends Phaser.Scene {
 
     this.modalBackdrop.setPosition(gameSize.width / 2, gameSize.height / 2);
     this.modalBackdrop.setSize(gameSize.width + 4, gameSize.height + 4);
+
+    const techTreeModalWidth = Phaser.Math.Clamp(gameSize.width - edgePadding * 2, TECH_TREE_MODAL_WIDTH_MIN, TECH_TREE_MODAL_WIDTH_MAX);
+    const techTreeModalHeight = Phaser.Math.Clamp(
+      gameSize.height - edgePadding * 2,
+      TECH_TREE_MODAL_HEIGHT_MIN,
+      TECH_TREE_MODAL_HEIGHT_MAX
+    );
+    const techTreeCenterX = gameSize.width / 2;
+    const techTreeCenterY = gameSize.height / 2;
+    const techTreeLeft = techTreeCenterX - techTreeModalWidth / 2;
+    const techTreeTop = techTreeCenterY - techTreeModalHeight / 2;
+    this.techTreeModalPanel.setPosition(techTreeCenterX, techTreeCenterY);
+    this.techTreeModalPanel.setSize(techTreeModalWidth, techTreeModalHeight);
+    this.techTreeModalTitle.setPosition(techTreeCenterX, techTreeTop + 34);
+    this.techTreeModalSubtitle.setPosition(techTreeCenterX, techTreeTop + 56);
+    this.techTreeCloseButton.rectangle.setPosition(techTreeLeft + techTreeModalWidth - 56, techTreeTop + 34);
+    this.techTreeCloseButton.label.setPosition(this.techTreeCloseButton.rectangle.x, this.techTreeCloseButton.rectangle.y);
+    const summaryLeft = techTreeLeft + TECH_TREE_MODAL_CONTENT_PADDING;
+    const summaryTop = techTreeTop + 80;
+    const summaryWidth = techTreeModalWidth - TECH_TREE_MODAL_CONTENT_PADDING * 2;
+    this.techTreeSummaryScienceLabel.setPosition(summaryLeft, summaryTop);
+    this.techTreeSummaryCurrentLabel.setPosition(summaryLeft, summaryTop + 18);
+    this.techTreeSummaryCitiesLabel.setPosition(summaryLeft, summaryTop + 36);
+    this.techTreeSummaryLegendLabel.setPosition(summaryLeft, summaryTop + 54);
+    this.techTreeSummaryScienceLabel.setWordWrapWidth(summaryWidth, true);
+    this.techTreeSummaryCurrentLabel.setWordWrapWidth(summaryWidth, true);
+    this.techTreeSummaryCitiesLabel.setWordWrapWidth(summaryWidth, true);
+    this.techTreeSummaryLegendLabel.setWordWrapWidth(summaryWidth, true);
+
+    const columns = gameSize.width >= 1100 ? 2 : 1;
+    const rowsPerColumn = Math.ceil(TECH_ORDER.length / columns);
+    const rowTop = summaryTop + 76;
+    const rowBottomPadding = 14;
+    const rowAreaHeight = Math.max(120, techTreeModalHeight - (rowTop - techTreeTop) - rowBottomPadding);
+    const rowStep = rowAreaHeight / Math.max(1, rowsPerColumn);
+    const rowFontSize = columns === 2 ? 11 : rowStep < 23 ? 10 : 11;
+    const columnGap = 12;
+    const columnWidth =
+      columns === 2
+        ? (summaryWidth - columnGap) / 2
+        : summaryWidth;
+    for (let index = 0; index < this.techTreeRowLabels.length; index += 1) {
+      const label = this.techTreeRowLabels[index];
+      const column = Math.floor(index / rowsPerColumn);
+      const row = index % rowsPerColumn;
+      const x = summaryLeft + column * (columnWidth + columnGap);
+      const y = rowTop + row * rowStep;
+      label.setPosition(x, y);
+      label.setFontSize(rowFontSize);
+      label.setWordWrapWidth(Math.max(120, columnWidth - 4), true);
+    }
 
     const pauseCenterX = gameSize.width / 2;
     const pauseCenterY = gameSize.height / 2 - 20;
@@ -2241,6 +2393,7 @@ export class UIScene extends Phaser.Scene {
       } | ${boostLabel}`
     );
     this.statsExploreLabel.setText(`Explored: ${exploredPercent}%`);
+    this.updateTechTreeModalPayload(gameState);
     this.layoutResourceDeltas();
 
     this.playbackPanel.setVisible(!!turnPlayback.active);
@@ -2357,6 +2510,45 @@ export class UIScene extends Phaser.Scene {
     }
   }
 
+  updateTechTreeModalPayload(gameState) {
+    if (!gameState) {
+      return;
+    }
+    const payload = buildTechTreeModalPayload(gameState);
+    payload.open = this.techTreeModalOpen;
+    this.latestTechTreeModalPayload = payload;
+    const summary = payload.summary;
+    this.techTreeSummaryScienceLabel.setText(
+      `Science/Turn ${formatMetric(summary.sciencePerTurn)} | Base ${formatMetric(summary.baseSciencePerTurn)} | Global +${formatMetric(
+        summary.globalModifierTotal * 100
+      )}%`
+    );
+    this.techTreeSummaryCurrentLabel.setText(
+      summary.currentTechId
+        ? `Progress ${summary.completedTech}/${summary.totalTech} | Active ${summary.currentTechName}${
+            Number.isFinite(summary.turnsRemaining) ? ` (${summary.turnsRemaining} turns)` : ""
+          }`
+        : `Progress ${summary.completedTech}/${summary.totalTech} | No active research`
+    );
+    this.techTreeSummaryCitiesLabel.setText(
+      summary.cityScienceBreakdown.length > 0
+        ? `Per-city science: ${summary.cityScienceBreakdown.map((entry) => `${entry.cityName} ${formatMetric(entry.totalScience)}`).join(" | ")}`
+        : "Per-city science: no city science breakdown available"
+    );
+    this.techTreeSummaryLegendLabel.setText("Status legend: Completed | Active | Available | Locked");
+    for (let index = 0; index < this.techTreeRowLabels.length; index += 1) {
+      const rowLabel = this.techTreeRowLabels[index];
+      const row = payload.rows[index];
+      if (!row) {
+        rowLabel.setText("");
+        rowLabel.setColor("#3b2a16");
+        continue;
+      }
+      rowLabel.setText(formatTechTreeRowLine(row));
+      rowLabel.setColor(resolveTechRowColor(row.status));
+    }
+  }
+
   buildLayoutStateKey(gameState) {
     if (!gameState) {
       return "none";
@@ -2373,8 +2565,12 @@ export class UIScene extends Phaser.Scene {
       gameState.animationState?.busy ? 1 : 0
     }`;
     const mapSize = `${gameState.map?.width ?? 0}x${gameState.map?.height ?? 0}`;
-    const localUi = `${this.statsPanelOpen ? 1 : 0}:${this.contextPanelExpanded ? 1 : 0}:${this.contextPanelPinned ? 1 : 0}`;
-    const modals = `${this.pauseMenuOpen ? 1 : 0}:${this.restartConfirmOpen ? 1 : 0}:${this.cityResolutionOpen ? 1 : 0}`;
+    const localUi = `${this.statsPanelOpen ? 1 : 0}:${this.techTreeModalOpen ? 1 : 0}:${this.contextPanelExpanded ? 1 : 0}:${
+      this.contextPanelPinned ? 1 : 0
+    }`;
+    const modals = `${this.techTreeModalOpen ? 1 : 0}:${this.pauseMenuOpen ? 1 : 0}:${this.restartConfirmOpen ? 1 : 0}:${
+      this.cityResolutionOpen ? 1 : 0
+    }`;
     return [selectionKey, contextType, turnState, matchState, blockers, mapSize, localUi, modals].join("|");
   }
 
@@ -3048,7 +3244,7 @@ export class UIScene extends Phaser.Scene {
   }
 
   openPauseMenu() {
-    if (this.cityResolutionOpen || this.pauseMenuOpen) {
+    if (this.cityResolutionOpen || this.pauseMenuOpen || this.techTreeModalOpen) {
       return this.pauseMenuOpen;
     }
     this.pauseMenuOpen = true;
@@ -3087,7 +3283,7 @@ export class UIScene extends Phaser.Scene {
 
   openRestartConfirm() {
     const canOpenFromResult = this.latestState?.match?.status !== "ongoing";
-    if ((!this.pauseMenuOpen && !canOpenFromResult) || this.restartConfirmOpen || this.cityResolutionOpen) {
+    if ((!this.pauseMenuOpen && !canOpenFromResult) || this.restartConfirmOpen || this.cityResolutionOpen || this.techTreeModalOpen) {
       return false;
     }
     this.syncNewGameConfigFromState();
@@ -3189,6 +3385,7 @@ export class UIScene extends Phaser.Scene {
 
   syncCityResolutionModal(pendingResolution) {
     if (pendingResolution) {
+      this.closeTechTreeModal();
       this.cityResolutionOpen = true;
       this.cityOutcomePanel.setVisible(true);
       this.cityOutcomeTitle.setVisible(true);
@@ -3209,7 +3406,7 @@ export class UIScene extends Phaser.Scene {
   }
 
   syncModalState() {
-    const nextOpen = this.pauseMenuOpen || this.restartConfirmOpen || this.cityResolutionOpen;
+    const nextOpen = this.techTreeModalOpen || this.pauseMenuOpen || this.restartConfirmOpen || this.cityResolutionOpen;
     this.modalBackdrop.setVisible(nextOpen);
     if (nextOpen) {
       this.hideDisabledTooltip();
@@ -3294,6 +3491,10 @@ export class UIScene extends Phaser.Scene {
   }
 
   handleEscapePressed() {
+    if (this.techTreeModalOpen) {
+      this.closeTechTreeModal();
+      return;
+    }
     if (this.restartConfirmOpen) {
       this.closeRestartConfirm();
       return;
@@ -3309,6 +3510,8 @@ export class UIScene extends Phaser.Scene {
 
   isModalButton(actionId) {
     return (
+      actionId === "toggle-tech-tree" ||
+      actionId === "tech-tree-close" ||
       actionId === "pause-resume" ||
       actionId === "pause-restart" ||
       actionId === "pause-sfx" ||
@@ -3323,7 +3526,7 @@ export class UIScene extends Phaser.Scene {
   }
 
   isAnyModalOpen() {
-    return this.pauseMenuOpen || this.restartConfirmOpen || this.cityResolutionOpen;
+    return this.techTreeModalOpen || this.pauseMenuOpen || this.restartConfirmOpen || this.cityResolutionOpen;
   }
 
   getEndTurnButtonCenter() {
@@ -3332,6 +3535,7 @@ export class UIScene extends Phaser.Scene {
 
   getRuntimeUiState() {
     return {
+      techTreeModalOpen: this.techTreeModalOpen,
       pauseMenuOpen: this.pauseMenuOpen,
       restartConfirmOpen: this.restartConfirmOpen,
       notifications: this.notifications.map((entry) => ({ ...entry })),
@@ -3343,6 +3547,7 @@ export class UIScene extends Phaser.Scene {
       sfxMuted: this.uiSfxMuted,
       statsPanelOpen: this.statsPanelOpen,
       stats: { ...this.latestStatsPayload },
+      techTree: structuredClone(this.latestTechTreeModalPayload),
     };
   }
 
@@ -3379,10 +3584,15 @@ export class UIScene extends Phaser.Scene {
   }
 
   testGetTopHudControlsState() {
+    const techTreeBounds = this.techTreeButton.rectangle.getBounds();
     const statsBounds = this.statsToggleButton.rectangle.getBounds();
     const menuBounds = this.menuButton.rectangle.getBounds();
     const devVisionBounds = this.devVisionLabel.getBounds();
     return {
+      techTreeVisible: this.techTreeButton.rectangle.visible && this.techTreeButton.label.visible,
+      techTreeLabel: this.techTreeButton.label.text,
+      techTreeWidth: this.techTreeButton.width,
+      techTreeBounds,
       statsVisible: this.statsToggleButton.rectangle.visible && this.statsToggleButton.label.visible,
       statsLabel: this.statsToggleButton.label.text,
       statsWidth: this.statsToggleButton.width,
@@ -3704,6 +3914,21 @@ export class UIScene extends Phaser.Scene {
     return this.toggleStatsPanel();
   }
 
+  testToggleTechTreeModal() {
+    return this.toggleTechTreeModal();
+  }
+
+  testGetTechTreeModalState() {
+    return {
+      open: this.techTreeModalOpen,
+      panelVisible: this.techTreeModalPanel.visible,
+      closeVisible: this.techTreeCloseButton.rectangle.visible && this.techTreeCloseButton.label.visible,
+      panelBounds: this.techTreeModalPanel.getBounds(),
+      summary: { ...this.latestTechTreeModalPayload.summary },
+      rows: this.latestTechTreeModalPayload.rows.map((row) => ({ ...row })),
+    };
+  }
+
   testClickMinimapNormalized(nx, ny) {
     if (!this.minimapVisible) {
       return false;
@@ -3747,6 +3972,12 @@ export class UIScene extends Phaser.Scene {
         buttonActive: this.statsToggleButton.isActive,
         payload: { ...this.latestStatsPayload },
       },
+      techTree: {
+        open: this.techTreeModalOpen,
+        buttonActive: this.techTreeButton.isActive,
+        summary: { ...this.latestTechTreeModalPayload.summary },
+        rows: this.latestTechTreeModalPayload.rows.map((row) => ({ ...row })),
+      },
       minimap: {
         visible: this.minimapVisible,
         bounds: this.minimapContentBounds ? { ...this.minimapContentBounds } : null,
@@ -3770,6 +4001,112 @@ export class UIScene extends Phaser.Scene {
       mode: this.contextMenuMode,
     };
   }
+}
+
+function buildTechTreeModalPayload(gameState) {
+  const research = gameState.research ?? {};
+  const economyPlayer = gameState.economy?.player ?? {};
+  const completedSet = new Set(research.completedTechIds ?? []);
+  const currentTechId = research.currentTechId ?? research.activeTechId ?? null;
+  const rows = TECH_ORDER.map((techId) => {
+    const tech = TECH_TREE[techId];
+    const costScaled = Number.isFinite(research.effectiveCostByTech?.[techId]) ? research.effectiveCostByTech[techId] : 0;
+    const progressScaled = Number.isFinite(research.progressByTech?.[techId]) ? research.progressByTech[techId] : 0;
+    const boost = research.boostProgressByTech?.[techId] ?? { current: 0, target: 0, met: false, label: null };
+    const prerequisites = Array.isArray(tech?.prerequisites) ? tech.prerequisites : [];
+    const prerequisitesMet = prerequisites.every((prereq) => completedSet.has(prereq));
+    const completed = completedSet.has(techId);
+    const status = completed
+      ? "Completed"
+      : currentTechId === techId
+        ? "Active"
+        : prerequisitesMet
+          ? "Available"
+          : "Locked";
+    const unlocks = [
+      ...((tech?.unlocks?.units ?? []).map((unitType) => formatUnitLabel(unitType))),
+      ...((tech?.unlocks?.buildings ?? []).map((buildingId) => formatBuildingLabel(buildingId))),
+    ];
+    return {
+      id: techId,
+      name: tech?.name ?? capitalizeLabel(techId),
+      era: tech?.era ?? 0,
+      status,
+      prerequisites,
+      progress: scaledToScience(progressScaled),
+      cost: scaledToScience(costScaled),
+      boostCurrent: Number.isFinite(boost.current) ? boost.current : 0,
+      boostTarget: Number.isFinite(boost.target) ? boost.target : 0,
+      boostMet: !!boost.met,
+      boostLabel: typeof boost.label === "string" ? boost.label : null,
+      unlocks,
+    };
+  });
+  const cityScienceEntries = Object.values(research.cityScienceById ?? {})
+    .sort((a, b) => String(a.cityName ?? a.cityId).localeCompare(String(b.cityName ?? b.cityId)))
+    .map((entry) => ({
+      cityId: entry.cityId ?? "",
+      cityName: entry.cityName ?? formatCityName(entry.cityId),
+      totalScience: Number.isFinite(entry.totalScience) ? entry.totalScience : 0,
+      populationScience: Number.isFinite(entry.populationScience) ? entry.populationScience : 0,
+      campusAdjacencyScience: Number.isFinite(entry.campusAdjacencyScience) ? entry.campusAdjacencyScience : 0,
+      buildingScience: Number.isFinite(entry.buildingScience) ? entry.buildingScience : 0,
+    }));
+  const sciencePerTurn = Number.isFinite(research.sciencePerTurn)
+    ? research.sciencePerTurn
+    : Number.isFinite(economyPlayer.sciencePerTurn)
+      ? economyPlayer.sciencePerTurn
+      : 0;
+  const baseSciencePerTurn = Number.isFinite(research.baseSciencePerTurn) ? research.baseSciencePerTurn : 0;
+  const globalModifierTotal = Number.isFinite(research.globalModifierTotal) ? research.globalModifierTotal : 0;
+  return {
+    open: false,
+    summary: {
+      sciencePerTurn,
+      baseSciencePerTurn,
+      globalModifierTotal,
+      completedTech: completedSet.size,
+      totalTech: TECH_ORDER.length,
+      currentTechId,
+      currentTechName: currentTechId ? TECH_TREE[currentTechId]?.name ?? capitalizeLabel(currentTechId) : "None",
+      turnsRemaining: Number.isFinite(research.turnsRemaining) ? research.turnsRemaining : null,
+      cityScienceBreakdown: cityScienceEntries,
+    },
+    rows,
+  };
+}
+
+function formatTechTreeRowLine(row) {
+  const boostText =
+    row.boostTarget > 0
+      ? `${row.boostCurrent}/${row.boostTarget}${row.boostMet ? " ready" : ""}`
+      : "n/a";
+  return `${row.name} [${row.status}] E${row.era} | Progress ${formatMetric(row.progress)}/${formatMetric(row.cost)} | Boost ${boostText} | Unlocks ${formatUnlockSummary(row.unlocks)}`;
+}
+
+function resolveTechRowColor(status) {
+  if (status === "Completed") {
+    return SEMANTIC_COLORS.textPositive;
+  }
+  if (status === "Active") {
+    return SEMANTIC_COLORS.textInfo;
+  }
+  if (status === "Available") {
+    return SEMANTIC_COLORS.textStrong;
+  }
+  return SEMANTIC_COLORS.textMuted;
+}
+
+function formatUnlockSummary(unlocks) {
+  if (!Array.isArray(unlocks) || unlocks.length === 0) {
+    return "-";
+  }
+  return unlocks.join(", ");
+}
+
+function scaledToScience(value) {
+  const scaled = Number.isFinite(value) ? value : 0;
+  return Math.max(0, scaled / 10);
 }
 
 function formatSigned(value) {

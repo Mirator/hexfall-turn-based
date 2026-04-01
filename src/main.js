@@ -216,6 +216,14 @@ window.__hexfallTest = {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testToggleStatsPanel() : false;
   },
+  toggleTechTreeModal() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testToggleTechTreeModal() : false;
+  },
+  getTechTreeModalState() {
+    const uiScene = game ? sceneGetters.getUIScene(game) : null;
+    return uiScene ? uiScene.testGetTechTreeModalState() : null;
+  },
   clickMinimapNormalized(nx, ny) {
     const uiScene = game ? sceneGetters.getUIScene(game) : null;
     return uiScene ? uiScene.testClickMinimapNormalized(nx, ny) : false;
