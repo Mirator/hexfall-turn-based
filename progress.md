@@ -555,3 +555,11 @@ Viewport support note (2026-03-27): legacy mentions of mobile checks/artifacts i
   - `README.md` gameplay/features/controls updated with Tech Tree control and overview behavior.
   - `docs/spec-007-hud-context-panels-and-notifications.md` updated for button placement, modal interaction rules, and payload/test expectations.
   - this `progress.md` entry added as implementation/test/docs completion log.
+## 2026-04-01 (GitHub Pages terrain tile visibility fix)
+- Investigated missing terrain tile visuals on deployed GitHub Pages build (`https://mirator.github.io/hexfall-turn-based/`).
+- Root cause: sprite URLs in `src/core/visualAssets.js` were constructed with `new URL(relativePath, import.meta.url)` and dynamic template paths. In production bundles, Vite could not statically include/copy those SVGs, so terrain/unit/city/fx texture URLs resolved to non-existent runtime paths.
+- Fix: replaced dynamic URL construction with `import.meta.glob("../assets/sprites/**/*.svg", { eager: true, import: "default" })` lookup and strict asset resolution helper. This makes Vite include/transform all sprite assets for production and keeps keys deterministic.
+- Verification:
+  - `npm run build -- --base=/hexfall-turn-based/` (pass)
+  - `npm test` (pass, 15 files / 86 tests)
+  - `npm run test:e2e` (pass)

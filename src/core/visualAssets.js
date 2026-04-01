@@ -6,7 +6,19 @@ const OWNERS = ["player", "enemy", "purple"];
 const UNIT_TYPES = ["warrior", "settler", "spearman", "archer"];
 const SPRITE_FRAME = { frameWidth: 64, frameHeight: 64, startFrame: 0, endFrame: 0 };
 
-const assetUrl = (relativePath) => new URL(relativePath, import.meta.url).href;
+const spriteAssetModules = import.meta.glob("../assets/sprites/**/*.svg", {
+  eager: true,
+  import: "default",
+});
+
+function assetUrl(spritePath) {
+  const modulePath = `../assets/sprites/${spritePath}`;
+  const resolvedUrl = spriteAssetModules[modulePath];
+  if (typeof resolvedUrl !== "string") {
+    throw new Error(`Missing sprite asset: ${modulePath}`);
+  }
+  return resolvedUrl;
+}
 
 export const TERRAIN_TEXTURE_KEYS = Object.fromEntries(
   TERRAIN_TYPES.map((terrainType) => [
@@ -50,25 +62,25 @@ export const VISUAL_ASSETS = [
     [0, 1, 2].map((variant) => ({
       key: `terrain-${terrainType}-${variant}`,
       kind: "image",
-      url: assetUrl(`../assets/sprites/terrain/${terrainType}-${variant}.svg`),
+      url: assetUrl(`terrain/${terrainType}-${variant}.svg`),
     }))
   ),
   ...UNIT_TYPES.map((unitType) => ({
     key: `unit-${unitType}`,
     kind: "image",
-    url: assetUrl(`../assets/sprites/units/${unitType}.svg`),
+    url: assetUrl(`units/${unitType}.svg`),
   })),
   ...OWNERS.map((owner) => ({
     key: `city-${owner}`,
     kind: "spritesheet",
     frameConfig: SPRITE_FRAME,
-    url: assetUrl(`../assets/sprites/cities/${owner}.svg`),
+    url: assetUrl(`cities/${owner}.svg`),
   })),
   ...Object.entries(FX_TEXTURE_KEYS).map(([, key]) => ({
     key,
     kind: "spritesheet",
     frameConfig: SPRITE_FRAME,
-    url: assetUrl(`../assets/sprites/fx/${key.replace("fx-", "")}.svg`),
+    url: assetUrl(`fx/${key.replace("fx-", "")}.svg`),
   })),
 ];
 
