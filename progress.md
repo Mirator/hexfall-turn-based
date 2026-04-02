@@ -644,3 +644,20 @@ Viewport support note (2026-03-27): legacy mentions of mobile checks/artifacts i
   - `npm test`
   - `npm run build`
   - `npm run test:e2e`
+## 2026-04-02 (Settler bootstrap soft-lock fix)
+- Fixed a pre-city upkeep soft-lock where a lone settler could be disabled on turn rollover (gold deficit), leaving movement at 0 and `hasActed=true` every turn.
+- Root cause: `applyOwnerGoldEconomy` could disable every unit while owner had zero cities and zero gold income; with settler-only starts, this could disable the only founding unit.
+- Change in `src/systems/citySystem.js`:
+  - when owner has no cities, preserve one settler from deficit disable selection (`bootstrapSettlerId`) so first-city founding remains possible.
+  - other units can still be deterministically disabled under deficit as before.
+- Added regression test in `tests/integration/citySystem.test.js`:
+  - `keeps one settler active before first city so bootstrap cannot soft-lock`.
+  - simulates acted settler + beginPlayerTurn + processTurn and asserts settler remains active with refreshed movement.
+- Verification:
+  - `npm test -- tests/integration/citySystem.test.js`
+  - `npm test -- tests/integration/unitActionSystem.test.js tests/integration/uiSurface.test.js`
+  - `npm test` (16 files, 94 tests passing)
+  - `npm run test:e2e` (pass)
+- Browser artifacts inspected:
+  - `tests/e2e/artifacts/smoke.png` (in-game frame validated)
+  - `output/web-game-start/state-0.json` (world state and active settler present after startup flow)

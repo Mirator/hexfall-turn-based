@@ -740,11 +740,16 @@ function applyOwnerGoldEconomy(owner, gameState, aggregatedOutput) {
 
   const availableBeforeUpkeep = economyBucket.goldBalance + income;
   let payableUpkeep = baseUnitUpkeep + buildingUpkeep;
+  const bootstrapSettlerId =
+    ownerCities.length === 0 ? ownerUnits.find((unit) => unit.type === "settler")?.id ?? null : null;
 
   /** @type {string[]} */
   const disabledUnitIds = [];
   for (let index = ownerUnits.length - 1; index >= 0 && availableBeforeUpkeep < payableUpkeep; index -= 1) {
     const unit = ownerUnits[index];
+    if (bootstrapSettlerId && unit.id === bootstrapSettlerId) {
+      continue;
+    }
     const upkeep = getUnitDefinition(unit.type)?.goldUpkeep ?? UNIT_GOLD_UPKEEP;
     payableUpkeep = Math.max(buildingUpkeep, payableUpkeep - upkeep);
     disabledUnitIds.push(unit.id);

@@ -13,6 +13,7 @@ import {
   removeCityQueueAt,
   rushBuyCityQueueFront,
 } from "../../src/systems/citySystem.js";
+import { beginPlayerTurn } from "../../src/systems/turnSystem.js";
 
 describe("city system resource rework", () => {
   it("founding initializes city-local growth and production progress fields", () => {
@@ -207,6 +208,27 @@ describe("city system resource rework", () => {
     expect(economy.goldNetLastTurn).toBe(economy.goldIncomeLastTurn - economy.goldUpkeepLastTurn);
     expect("productionStock" in economy).toBe(false);
     expect("foodStock" in economy).toBe(false);
+  });
+
+  it("keeps one settler active before first city so bootstrap cannot soft-lock", () => {
+    const gameState = createInitialGameState({ seed: 56 });
+    const playerSettler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
+    expect(playerSettler).toBeTruthy();
+    if (!playerSettler) {
+      return;
+    }
+
+    playerSettler.hasActed = true;
+    playerSettler.movementRemaining = 0;
+    gameState.economy.player.goldBalance = 0;
+
+    beginPlayerTurn(gameState);
+    processTurn(gameState, "player");
+
+    expect(gameState.economy.player.disabledUnitIds).toEqual([]);
+    expect(playerSettler.disabled).toBe(false);
+    expect(playerSettler.hasActed).toBe(false);
+    expect(playerSettler.movementRemaining).toBe(playerSettler.maxMovement);
   });
 
   it("allows negative gold and disables units deterministically on deficit", () => {
