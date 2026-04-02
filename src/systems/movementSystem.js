@@ -1,4 +1,4 @@
-import { getTileAt, getUnitAt, getUnitById, isInsideMap } from "../core/gameState.js";
+import { getCityAt, getTileAt, getUnitAt, getUnitById, isInsideMap } from "../core/gameState.js";
 import { axialKey, neighbors } from "../core/hexGrid.js";
 
 /**
@@ -91,6 +91,10 @@ export function canMoveUnitTo(unitId, destination, gameState) {
     return { ok: false, reason: "blocked-terrain" };
   }
 
+  if (getCityAt(gameState, destination.q, destination.r)) {
+    return { ok: false, reason: "occupied-city" };
+  }
+
   const occupant = getUnitAt(gameState, destination.q, destination.r);
   if (occupant && occupant.id !== unit.id) {
     return { ok: false, reason: "occupied" };
@@ -136,6 +140,10 @@ export function getPathTo(unitId, destination, gameState) {
   const tile = getTileAt(gameState.map, destination.q, destination.r);
   if (!tile || tile.blocksMovement) {
     return { ok: false, reason: "blocked-terrain" };
+  }
+
+  if (getCityAt(gameState, destination.q, destination.r)) {
+    return { ok: false, reason: "occupied-city" };
   }
 
   const occupant = getUnitAt(gameState, destination.q, destination.r);
@@ -208,6 +216,10 @@ function computeReachability(unit, gameState) {
     const currentKey = axialKey(current);
     for (const neighbor of neighbors(current)) {
       if (!isInsideMap(gameState.map, neighbor.q, neighbor.r)) {
+        continue;
+      }
+
+      if (getCityAt(gameState, neighbor.q, neighbor.r)) {
         continue;
       }
 

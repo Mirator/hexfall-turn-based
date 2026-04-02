@@ -661,3 +661,27 @@ Viewport support note (2026-03-27): legacy mentions of mobile checks/artifacts i
 - Browser artifacts inspected:
   - `tests/e2e/artifacts/smoke.png` (in-game frame validated)
   - `output/web-game-start/state-0.json` (world state and active settler present after startup flow)
+## 2026-04-02 (Documentation parity pass)
+- Reviewed repository docs against current runtime/system behavior and test contracts.
+- Updated top-level docs:
+  - `README.md`
+  - `docs/README.md`
+- Updated spec docs to remove stale references and align with current implementation:
+  - `docs/spec-002-core-map-turn-and-victory.md`:
+    - documented city-occupied tile movement blocking,
+    - replaced outdated "no diplomacy" gap with current player-managed diplomacy scope.
+  - `docs/spec-004-combat-siege-and-ranged.md`:
+    - documented overlap-safe city-attack edge case (`distance == 0`) for legacy/test recovery states.
+  - `docs/spec-005-city-economy-production-and-specialization.md`:
+    - refreshed to city-local growth/production progress model,
+    - documented gold upkeep/deficit disable rules and rush-buy contract,
+    - documented bootstrap settler protection before first city.
+  - `docs/spec-006-tech-tree-and-unlocks.md`:
+    - clarified that research UI has a read-only tech-tree modal (no interactive dedicated screen yet).
+  - `docs/spec-007-hud-context-panels-and-notifications.md`:
+    - aligned top-left HUD resources to `Food/Production/Gold`,
+    - documented stats-panel diplomacy controls and right-rail rush-buy behavior.
+  - `docs/spec-008-ai-personalities-and-strategy.md`:
+    - documented diplomacy-aware hostile targeting (AI attacks `war` relations only).
+  - `docs/spec-011-science-overhaul.md`:
+    - clarified current tech-tree modal scope in known gaps.

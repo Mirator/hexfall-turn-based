@@ -51,7 +51,7 @@ export function getAttackableCities(attackerId, gameState) {
     if (!areOwnersAtWar(attacker.owner, city.owner, gameState)) {
       return false;
     }
-    return isTargetInAttackRange(attacker, city);
+    return isCityInAttackRange(attacker, city);
   });
 }
 
@@ -126,7 +126,7 @@ export function canAttackCity(attackerId, cityId, gameState) {
     return { ok: false, reason: "unit-disabled" };
   }
 
-  if (!isTargetInAttackRange(attacker, city)) {
+  if (!isCityInAttackRange(attacker, city)) {
     return { ok: false, reason: "out-of-range" };
   }
 
@@ -488,6 +488,14 @@ function isTargetInAttackRange(attacker, target) {
   const minRange = getMinAttackRange(attacker);
   const maxRange = getMaxAttackRange(attacker, minRange);
   return distanceToTarget >= minRange && distanceToTarget <= maxRange;
+}
+
+function isCityInAttackRange(attacker, city) {
+  // Allow resolving legacy overlap states where a unit and city share a tile.
+  if (distance(attacker, city) === 0) {
+    return true;
+  }
+  return isTargetInAttackRange(attacker, city);
 }
 
 function buildCounterattackPreview(attacker, target, targetDefeated, gameState) {

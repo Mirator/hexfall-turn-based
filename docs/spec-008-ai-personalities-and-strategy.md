@@ -20,6 +20,7 @@
 - Chosen: AI queue priorities now include science infrastructure (`campus`, `library`, `university`, `researchLab`) while still honoring personality combat/expansion lean.
 - Chosen: AI research choice is recorded in turn summaries but does not mutate the player-authoritative active research state directly during enemy prelude execution.
 - Chosen: planning and targeting remain visibility-gated and encounter-memory-aware (`seenOwners`).
+- Chosen: hostile target selection is diplomacy-aware through hostile-owner resolution (`getHostileOwners`) so AI does not attack factions currently at peace.
 - Rejected for now: stochastic tie-breaks and mid-match personality changes.
 
 ## Interfaces/types added
@@ -47,6 +48,9 @@
 - Visibility behavior:
   - only visible hostile units/cities can be directly targeted
   - unseen hostile owners are excluded from direct priority inputs
+- Diplomacy behavior:
+  - AI hostility set is derived from current diplomacy status (`war` only)
+  - AI does not directly target or attack factions currently at peace
 - Turn summary behavior:
   - records goal, selected research target, queue refills, and scored actions for explainability
 - Player research safety:
@@ -57,6 +61,7 @@
 - Integration:
   - `tests/integration/enemyAi.test.js` (priority selection, boost-aware and progress-aware scoring)
   - `tests/integration/enemyTurn.test.js`
+  - `tests/integration/diplomacySystem.test.js`
   - `tests/integration/visibilitySystem.test.js`
 - E2E:
   - `tests/e2e/smoke.mjs` validates AI summary payload flow and personality override hooks.
@@ -65,4 +70,4 @@
 
 - AI does not maintain a separate full per-owner research progression model yet.
 - Exploration heuristics are still simple (yield + unseen bonus), not objective-graph driven.
-- No diplomacy/alliance layer between factions.
+- No AI-initiated diplomacy policy layer (current diplomacy actions are player-driven UI actions).

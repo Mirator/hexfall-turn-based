@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createInitialGameState, getUnitById } from "../../src/core/gameState.js";
-import { distance } from "../../src/core/hexGrid.js";
-import { getPathTo, getReachable, getReachableAnalysis, moveUnit } from "../../src/systems/movementSystem.js";
+import { createInitialGameState, getCityById, getTileAt, getUnitById } from "../../src/core/gameState.js";
+import { distance, neighbors } from "../../src/core/hexGrid.js";
+import { foundCity } from "../../src/systems/citySystem.js";
+import { canMoveUnitTo, getPathTo, getReachable, getReachableAnalysis, moveUnit } from "../../src/systems/movementSystem.js";
 import { beginEnemyTurn, beginPlayerTurn } from "../../src/systems/turnSystem.js";
 
 describe("movement and turn systems", () => {
@@ -92,6 +93,59 @@ describe("movement and turn systems", () => {
     const pathResult = getPathTo(unit.id, { q: destination.q, r: destination.r }, gameState);
     expect(pathResult.ok).toBe(true);
     expect(previewPath).toEqual(pathResult.path);
+  });
+
+  it("blocks movement/pathing onto city tiles and excludes them from reachable output", () => {
+    const gameState = createInitialGameState({ seed: 8124 });
+    const playerUnit = gameState.units.find((unit) => unit.owner === "player");
+    const enemySettler = gameState.units.find((unit) => unit.owner === "enemy");
+    expect(playerUnit && enemySettler).toBeTruthy();
+    if (!playerUnit || !enemySettler) {
+      return;
+    }
+
+    const founded = foundCity(enemySettler.id, gameState);
+    expect(founded.ok).toBe(true);
+    if (!founded.cityId) {
+      return;
+    }
+
+    const city = getCityById(gameState, founded.cityId);
+    expect(city).toBeTruthy();
+    if (!city) {
+      return;
+    }
+
+    const adjacentStart =
+      neighbors(city).find((hex) => {
+        const tile = getTileAt(gameState.map, hex.q, hex.r);
+        if (!tile || tile.blocksMovement) {
+          return false;
+        }
+        const occupant = gameState.units.find((unit) => unit.id !== playerUnit.id && unit.q === hex.q && unit.r === hex.r);
+        const cityOccupant = gameState.cities.find((candidate) => candidate.q === hex.q && candidate.r === hex.r);
+        return !occupant && !cityOccupant;
+      }) ?? null;
+
+    expect(adjacentStart).toBeTruthy();
+    if (!adjacentStart) {
+      return;
+    }
+
+    playerUnit.q = adjacentStart.q;
+    playerUnit.r = adjacentStart.r;
+    playerUnit.hasActed = false;
+    playerUnit.movementRemaining = playerUnit.maxMovement;
+
+    const destination = { q: city.q, r: city.r };
+    expect(canMoveUnitTo(playerUnit.id, destination, gameState)).toEqual({ ok: false, reason: "occupied-city" });
+    expect(getPathTo(playerUnit.id, destination, gameState)).toEqual({ ok: false, reason: "occupied-city" });
+
+    const analysis = getReachableAnalysis(playerUnit.id, gameState);
+    const cityKey = `${city.q},${city.r}`;
+    expect(analysis.costByHex.has(cityKey)).toBe(false);
+    expect(analysis.pathByHex.has(cityKey)).toBe(false);
+    expect(analysis.hexes.some((hex) => hex.q === city.q && hex.r === city.r)).toBe(false);
   });
 
   it("beginPlayerTurn resets movement and acted flags for player units", () => {

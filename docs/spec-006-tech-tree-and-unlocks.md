@@ -85,6 +85,6 @@
 
 ## Known gaps and next steps
 
-- No dedicated standalone research screen; research remains HUD/context driven.
+- No dedicated interactive research-management screen; current `Tech Tree` modal is read-only.
 - Research is currently single-player-authoritative in game-state ownership.
 - Specialist-driven science and advanced catch-up systems are intentionally deferred.

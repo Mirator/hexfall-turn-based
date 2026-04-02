@@ -3,16 +3,31 @@
 ## Goal and scope
 
 - Define city founding, city management, and per-owner economy behavior.
-- Keep production deterministic with typed queue items and explicit building prerequisites.
-- Define city-level science infrastructure (Campus + science buildings) that feeds the direct per-turn research model.
+- Keep city growth and production deterministic through local progress meters (no empire food/production stockpiles).
+- Define gold upkeep, deficit handling, rush-buy rules, and science infrastructure behavior.
 
 ## Decisions made (and alternatives rejected)
 
 - Chosen: all configured owners (`player` + active AI owners) start settler-only; no starting warriors.
 - Chosen: only settlers can found cities; AI owners auto-found first valid city opportunities.
-- Chosen: economy remains per-owner (`foodStock`, `productionStock`, `sciencePerTurn`) with deterministic processing order by city id.
-- Chosen: worked-tile assignment remains deterministic ring-1 selection by balanced food/production priority.
+- Chosen: worked-tile assignment remains deterministic ring-1 selection by combined local yield priority.
+- Chosen: city growth is local via `city.growthProgress` with threshold `8 + (population - 1) * 4`.
+- Chosen: city production is local via `city.productionProgress` and queue-front completion; overflow carries to subsequent queue items.
 - Chosen: city production queue is typed (`unit`/`building`) with max length `3` and deterministic reorder/remove semantics.
+- Chosen: owner economy buckets are gold-centric:
+  - `goldBalance`
+  - `goldIncomeLastTurn`
+  - `goldUpkeepLastTurn`
+  - `goldNetLastTurn`
+  - `disabledUnitIds`
+  - `outputLastTurn` (`food`, `production`, `gold`)
+  - `sciencePerTurn`
+- Chosen: upkeep pressure is active:
+  - units consume upkeep from unit definitions (default fallback `1`)
+  - buildings consume upkeep from building definitions (default fallback `1`)
+  - deficit disables deterministic unit subset until upkeep is payable
+- Chosen: pre-city bootstrap guard keeps one settler active when owner has zero cities so founding cannot soft-lock.
+- Chosen: rush-buy completes queue-front progress using gold at `remainingProduction * 3`.
 - Chosen: city-level Campus abstraction is queue-built infrastructure (no tile placement UI in this release).
 - Chosen: Campus adjacency is snapshotted once on Campus completion and stored in `city.campus`:
   - mountain neighbor: `+1`
@@ -23,22 +38,33 @@
   - `library` (unlock `writing`, requires `campus`, `+2 science`)
   - `university` (unlock `education`, requires `library`, `+4 science`)
   - `researchLab` (unlock `chemistry`, requires `university`, `+5 science`)
-- Chosen: specialists are out of scope for this release.
 - Chosen: duplicate building construction per city is blocked (already built or already queued).
-- Rejected for now: manual district tile placement UI, specialist slots, maintenance/upkeep system.
+- Rejected for now: manual district tile placement UI, specialist slots, trade-route economy, and per-city tax policies.
 
 ## Interfaces/types added
 
 - `City` schema:
+  - `growthProgress`
+  - `productionProgress`
+  - typed `queue: Array<{ kind: "unit"|"building", id: string }>`
   - `buildings` includes `campus/library/university/researchLab`
   - `campus: { built, adjacency, adjacencyBreakdown }`
-- Economy model:
-  - `EmpireEconomy.sciencePerTurn` (replaces `scienceStock` for research funding)
+- `EmpireEconomy` schema:
+  - `goldBalance`, `goldIncomeLastTurn`, `goldUpkeepLastTurn`, `goldNetLastTurn`
+  - `disabledUnitIds`
+  - `outputLastTurn`
+  - `sciencePerTurn`
 - City/production APIs:
+  - `setCityProductionTab(cityId, tab, gameState)`
+  - `enqueueCityQueueItem(cityId, queueItem, gameState)`
+  - `enqueueCityQueue(cityId, unitType, gameState)`
   - `enqueueCityBuilding(cityId, buildingId, gameState)`
-  - `getAvailableProductionBuildings(gameState)`
-  - `isBuildingUnlocked(buildingId, gameState)`
+  - `moveCityQueueItem(cityId, index, direction, gameState)`
+  - `removeCityQueueAt(cityId, index, gameState)`
   - `processTurn(gameState, owner)`
+- Gold/rush-buy APIs:
+  - `canRushBuyCityQueueFront(cityId, gameState)`
+  - `rushBuyCityQueueFront(cityId, gameState)`
 - Research-linked city science support:
   - `getCityScienceBreakdown(city, gameState)` in research system (population + Campus adjacency + science buildings)
 
@@ -47,19 +73,33 @@
 - Founding:
   - settler-only, valid passable/empty tile required
   - founding consumes settler and creates/selects city
-- Turn economy processing:
-  - `food` and `production` remain stock-based
-  - `sciencePerTurn` is recalculated each turn from city science outputs (not accumulated into research stock)
+  - disabled settlers cannot found cities
+- Per-turn city processing:
+  - city yields aggregate from worked hexes plus building yield bonuses
+  - growth increments `growthProgress` and can trigger multiple population gains if threshold is exceeded
+  - production increments `productionProgress`; front queue item completes when progress meets cost
+  - queue-front completion consumes only required progress and carries overflow to subsequent queue items
+  - queue-front unit completion requires valid spawn hex
+  - queue-front building completion requires unlocks/prerequisites and updates city building state
+- Queue behavior:
+  - queue max `3`, deterministic reorder/remove
+  - removing/moving queue-front resets `productionProgress` to prevent stale carry into a different front item
+  - duplicate building enqueue/build per city is blocked
+- Gold economy behavior:
+  - `goldIncomeLastTurn` derives from aggregated city gold output
+  - upkeep includes units + built buildings
+  - `goldNetLastTurn = income - payableUpkeep`; `goldBalance` updates by net
+  - deficit disables deterministic unit subset (`disabledUnitIds`) and disabled units are forced to `hasActed=true`, `movementRemaining=0`
+  - if owner has no cities, one settler is preserved from disable selection to keep first-city bootstrap possible
+- Rush-buy behavior:
+  - only queue-front item is rush-buyable
+  - cost uses `remainingProduction * 3`
+  - rush-buy spends gold, fills remaining production, then resolves normal queue completion flow
 - City science output formula:
   - `populationScience = population * 0.5`
   - `campusAdjacencyScience = city.campus.adjacency` when Campus exists
   - `buildingScience = library(2) + university(4) + researchLab(5)`
   - `cityScience = populationScience + campusAdjacencyScience + buildingScience`
-- Queue/building behavior:
-  - queue max `3`, deterministic reorder/remove
-  - front item consumed only on successful completion
-  - Campus/science buildings follow unlock + prerequisite rules
-  - duplicate building enqueue/build per city is blocked
 - City identity/specialization:
   - identity derives from current local yields
   - specialization priority remains `scholarly > industrial > agricultural > balanced`
@@ -69,11 +109,12 @@
 - Integration:
   - `tests/integration/citySystem.test.js`
   - `tests/integration/uiSurface.test.js`
+  - `tests/integration/unitActionSystem.test.js`
 - E2E:
-  - `tests/e2e/smoke.mjs` (queue flow + science payload presence + city science breakdown payload checks)
+  - `tests/e2e/smoke.mjs` (city queue flow, gold/upkeep payload shape, disabled-unit fields, and rush-buy action state)
 
 ## Known gaps and next steps
 
-- No manual district placement or adjacency preview UI (Campus is city-level abstraction only).
+- No manual district placement or adjacency preview UI (Campus remains city-level abstraction).
 - No specialist slots/assignment system.
-- No maintenance/upkeep pressure for building-heavy science strategies.
+- No additional treasury spend systems beyond queue-front rush-buy.

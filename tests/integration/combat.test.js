@@ -6,6 +6,7 @@ import { foundCity } from "../../src/systems/citySystem.js";
 import {
   canAttack,
   canAttackCity,
+  getAttackableCities,
   previewAttack,
   previewCityAttack,
   resolveAttack,
@@ -259,6 +260,47 @@ describe("combat system", () => {
       rawDamage: 3,
       damage: 3,
     });
+  });
+
+  it("allows city attacks from overlapping tiles to recover invalid overlap states", () => {
+    const gameState = createInitialGameState({ seed: 912 });
+    const attacker = gameState.units.find((unit) => unit.owner === "player");
+    const enemySettler = gameState.units.find((unit) => unit.owner === "enemy");
+    expect(attacker && enemySettler).toBeTruthy();
+    if (!attacker || !enemySettler) {
+      return;
+    }
+
+    const founded = foundCity(enemySettler.id, gameState);
+    expect(founded.ok).toBe(true);
+    if (!founded.cityId) {
+      return;
+    }
+
+    const city = getCityById(gameState, founded.cityId);
+    expect(city).toBeTruthy();
+    if (!city) {
+      return;
+    }
+
+    applyUnitType(attacker, "warrior");
+    attacker.q = city.q;
+    attacker.r = city.r;
+    attacker.hasActed = false;
+    attacker.movementRemaining = attacker.maxMovement;
+    city.health = city.maxHealth;
+
+    expect(canAttackCity(attacker.id, city.id, gameState)).toEqual({ ok: true });
+    expect(getAttackableCities(attacker.id, gameState).map((candidate) => candidate.id)).toContain(city.id);
+
+    const prediction = previewCityAttack(attacker.id, city.id, gameState);
+    expect(prediction.ok).toBe(true);
+    const cityHpBefore = city.health;
+
+    const result = resolveCityAttack(attacker.id, city.id, gameState);
+    expect(result.ok).toBe(true);
+    expect(city.health).toBeLessThan(cityHpBefore);
+    expect(result.damage).toBe(prediction.damage);
   });
 
   it("previewAttack matches resolver damage/counter without mutating state", () => {

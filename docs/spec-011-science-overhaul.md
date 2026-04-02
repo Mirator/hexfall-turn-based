@@ -93,6 +93,6 @@
 
 ## Known gaps and next steps
 
-- No full-screen dedicated tech-tree visualization yet.
+- No full-screen dedicated tech-tree screen yet (current implementation uses a read-only modal graph).
 - Specialists and advanced science systems (diffusion/decay/parallel) are intentionally deferred.
 - AI still records research intent without separate per-owner research progression simulation.

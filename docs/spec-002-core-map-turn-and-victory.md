@@ -13,8 +13,9 @@
 - Chosen: dynamic faction roster from owner pool (`enemy`, `purple`, `amber`, `teal`, `crimson`, `onyx`) plus `player`.
 - Chosen: seeded spawn metadata stores per-owner anchors/spawns (`anchorsByOwner`, `spawnByOwner`), distance constraints, and safe-terrain spawn normalization.
 - Chosen: movement reachability uses path cost (Dijkstra-style), not flat distance.
-- Chosen: terrain model separates passable high-cost tiles from blocked tiles.
+- Chosen: terrain model separates passable high-cost tiles from blocked tiles, and movement/pathing cannot enter city-occupied hexes.
 - Chosen: explored-memory fog-of-war is owner-specific (`visible`, `explored`, `seenOwners`) and updated from unit/city sight ranges.
+- Chosen: diplomacy status is authoritative for hostility; factions start at war and player can switch known-faction relations (`war`/`peace`) via stats-panel controls.
 - Chosen: turn flow remains `player -> enemy -> player`, where enemy phase is combined AI playback over all active `factions.aiOwners` in deterministic order.
 - Chosen: only domination victory (`eliminate all AI faction units and cities` across active AI owners); defeat is total player elimination.
 - Chosen: restart/new-game flow from pause menu confirm path supports map size + AI count reconfiguration and produces a fresh seeded match.
@@ -68,6 +69,7 @@
 - Player can select valid entities and move units to reachable hexes.
 - Reachable overlays reflect cumulative terrain movement cost.
 - Forest/hill are higher-cost passable terrain; mountain/water are blocked for current land units.
+- City-occupied hexes are excluded from movement/pathing reachability and cannot be selected as movement destinations.
 - Match generation honors startup/new-game config:
   - map size preset (`16/20/24`)
   - AI faction count (`1..6`)
@@ -79,6 +81,10 @@
   - explored but not currently visible tiles render dimmed,
   - hostile units/cities are interactable only while currently visible (unless dev reveal is enabled for player),
   - encounter memory (`seenOwners`) persists after visibility is lost.
+- Diplomacy rules:
+  - factions start at war by default,
+  - player diplomacy actions are first-contact gated,
+  - peace blocks hostile combat targeting between the involved factions until war is declared again.
 - Match state transitions to `won/lost` only through elimination checks (`player` vs all active AI factions).
 - Restart flow:
   - Esc opens pause menu.
@@ -103,5 +109,5 @@
 ## Known gaps and next steps
 
 - No roads/path preview UI for route planning yet.
-- No diplomacy/peace treaties between factions yet.
+- No AI-initiated diplomacy/alliance behavior yet (current diplomacy is player-managed relation toggling).
 - No alternate game modes beyond domination.
