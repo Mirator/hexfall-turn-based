@@ -321,10 +321,10 @@ async function run() {
           sample &&
           Number.isFinite(sample.displayWidth) &&
           Number.isFinite(sample.displayHeight) &&
-          Math.abs(sample.displayWidth - 40) < 0.01 &&
-          Math.abs(sample.displayHeight - 40) < 0.01
+          Math.abs(sample.displayWidth - 48) < 0.01 &&
+          Math.abs(sample.displayHeight - 48) < 0.01
       ),
-      "unit sprites should render with 40x40 base display size"
+      "unit sprites should render with 48x48 base display size"
     );
     assert.ok(
       unitSamples.every((sample) => /^unit-(warrior|settler|spearman|archer)$/.test(String(sample.textureKey ?? ""))),

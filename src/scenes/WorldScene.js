@@ -83,7 +83,7 @@ const FOUND_CITY_ANIMATION_MS = 390;
 const ENEMY_ACTION_GAP_MS = 110;
 const TERRAIN_DISPLAY_WIDTH = SQRT_3 * HEX_SIZE * 1.08;
 const TERRAIN_DISPLAY_HEIGHT = HEX_SIZE * 2 * 1.08;
-const UNIT_SPRITE_DISPLAY_SIZE = 40;
+const UNIT_SPRITE_DISPLAY_SIZE = 48;
 const HEX_UNIT_POINTS = Array.from({ length: 6 }, (_, index) => {
   const angle = Phaser.Math.DegToRad(60 * index - 30);
   return { x: Math.cos(angle), y: Math.sin(angle) };
