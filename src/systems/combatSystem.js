@@ -1,4 +1,5 @@
 import { getCityById, getTileAt, getUnitById, removeUnitById } from "../core/gameState.js";
+import { areOwnersAtWar } from "../core/factions.js";
 import { distance } from "../core/hexGrid.js";
 import { CITY_MAX_HEALTH } from "./citySystem.js";
 
@@ -25,6 +26,9 @@ export function getAttackableTargets(attackerId, gameState) {
     if (unit.id === attacker.id || unit.owner === attacker.owner || unit.health <= 0) {
       return false;
     }
+    if (!areOwnersAtWar(attacker.owner, unit.owner, gameState)) {
+      return false;
+    }
     return isTargetInAttackRange(attacker, unit);
   });
 }
@@ -42,6 +46,9 @@ export function getAttackableCities(attackerId, gameState) {
 
   return gameState.cities.filter((city) => {
     if (city.owner === attacker.owner || city.health <= 0) {
+      return false;
+    }
+    if (!areOwnersAtWar(attacker.owner, city.owner, gameState)) {
       return false;
     }
     return isTargetInAttackRange(attacker, city);
@@ -67,6 +74,9 @@ export function canAttack(attackerId, targetId, gameState) {
 
   if (attacker.owner === target.owner) {
     return { ok: false, reason: "same-owner" };
+  }
+  if (!areOwnersAtWar(attacker.owner, target.owner, gameState)) {
+    return { ok: false, reason: "not-at-war" };
   }
 
   if (attacker.hasActed) {
@@ -103,6 +113,9 @@ export function canAttackCity(attackerId, cityId, gameState) {
 
   if (attacker.owner === city.owner) {
     return { ok: false, reason: "same-owner" };
+  }
+  if (!areOwnersAtWar(attacker.owner, city.owner, gameState)) {
+    return { ok: false, reason: "not-at-war" };
   }
 
   if (attacker.hasActed) {

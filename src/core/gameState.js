@@ -1,4 +1,4 @@
-import { buildAiOwners, createFactionMetadata, getAiOwners } from "./factions.js";
+import { buildAiOwners, createFactionMetadata, createInitialDiplomacyState, getAiOwners } from "./factions.js";
 import { axialKey, distance, neighbors } from "./hexGrid.js";
 import { resolveMatchConfig } from "./matchConfig.js";
 import { createSeededRng, mixSeed, normalizeSeed, shuffleInPlace } from "./random.js";
@@ -111,6 +111,7 @@ export function createInitialGameState(options = {}) {
       purple: aiByOwner.purple ?? null,
       byOwner: aiByOwner,
     },
+    diplomacy: createInitialDiplomacyState(factions.allOwners),
     economy: {
       ...createInitialEconomy(factions.allOwners),
       researchIncomeThisTurn: 0,

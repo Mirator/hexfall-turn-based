@@ -125,6 +125,16 @@
  */
 
 /**
+ * @typedef {"self"|"war"|"peace"} DiplomacyStatus
+ */
+
+/**
+ * @typedef {Object} DiplomacyState
+ * @property {Record<Owner, Record<Owner, DiplomacyStatus>>} byOwner
+ * @property {number|null} lastChangeTurn
+ */
+
+/**
  * @typedef {Object} ResearchState
  * @property {string|null} currentTechId
  * @property {string|null} activeTechId
@@ -222,6 +232,7 @@
  * @property {{ units: string[] }} unlocks
  * @property {MatchState} match
  * @property {{ enemy?: EnemyAiState|null, purple?: EnemyAiState|null, byOwner: Record<AiOwner, EnemyAiState> }} ai
+ * @property {DiplomacyState} diplomacy
  * @property {Record<Owner, EmpireEconomy> & { researchIncomeThisTurn: number }} economy
  * @property {VisibilityState} visibility
  * @property {PendingCityResolution|null} pendingCityResolution

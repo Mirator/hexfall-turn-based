@@ -28,7 +28,7 @@ const CITY_PANEL_QUEUE_ITEM_WIDTH = 126;
 const CITY_PANEL_QUEUE_MOVE_WIDTH = 32;
 const CITY_PANEL_QUEUE_REMOVE_WIDTH = 32;
 const CITY_PANEL_BUTTON_HEIGHT = 32;
-const UNIT_PANEL_ACTION_WIDTH = 160;
+const UNIT_PANEL_ACTION_WIDTH = 108;
 const NEW_GAME_MODAL_WIDTH = 460;
 const NEW_GAME_MODAL_HEIGHT = 286;
 const NEW_GAME_MAP_PRESETS = [16, 20, 24];
@@ -487,6 +487,15 @@ export class UIScene extends Phaser.Scene {
         variant: "secondary",
         width: UNIT_PANEL_ACTION_WIDTH,
         height: BUTTON_HEIGHT - 6,
+      }
+    );
+    this.unitDiplomacyButton = this.createButton("Diplomacy", "unit-diplomacy-toggle", () =>
+      gameEvents.emit("unit-action-requested", { actionId: "toggleDiplomacy" }),
+      {
+        variant: "warning",
+        width: UNIT_PANEL_ACTION_WIDTH,
+        height: BUTTON_HEIGHT - 6,
+        fontSize: "13px",
       }
     );
     this.setCityControlsVisible(false);
@@ -1280,6 +1289,9 @@ export class UIScene extends Phaser.Scene {
     if (actionId === "unit-skip") {
       return this.latestState.uiActions?.skipUnitReason ?? "Cannot skip this unit right now.";
     }
+    if (actionId === "unit-diplomacy-toggle") {
+      return this.latestState.uiActions?.diplomacyActionReason ?? "Diplomacy is unavailable right now.";
+    }
     if (actionId.startsWith("city-enqueue-")) {
       return actionHints["city-queue-general"] ?? this.latestState.uiActions?.cityQueueReason ?? "Queue is unavailable right now.";
     }
@@ -1508,16 +1520,16 @@ export class UIScene extends Phaser.Scene {
       if (isTabletLayout) {
         this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY - 10, 8);
         this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 24, 6);
-        this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 30, 10);
+        this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton, this.unitDiplomacyButton], contextX, contextY + 30, 8);
       } else {
         this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY + 4, 8);
         this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 36, 6);
-        this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 24, 16);
+        this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton, this.unitDiplomacyButton], contextX, contextY + 24, 10);
       }
     } else {
       this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY + 36, 8);
       this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 36, 6);
-      this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 36, 16);
+      this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton, this.unitDiplomacyButton], contextX, contextY + 36, 10);
     }
 
     const selectedPanelWidth = isTabletLayout ? Math.max(154, Math.min(236, Math.floor(gameSize.width * 0.5))) : 432;
@@ -3076,17 +3088,28 @@ export class UIScene extends Phaser.Scene {
       this.setUnitControlsVisible(expanded);
       if (expanded) {
         const previewSummary = summarizePreview(gameState.uiPreview);
+        const diplomacyStatus =
+          gameState.uiActions?.diplomacyTargetLabel && gameState.uiActions?.diplomacyStatus
+            ? `${gameState.uiActions.diplomacyTargetLabel}: ${gameState.uiActions.diplomacyStatus === "war" ? "At War" : "At Peace"}`
+            : "No diplomacy target selected.";
         this.contextPanelMetaPrimary.setText(
           `Movement ${selectedUnit.movementRemaining}/${selectedUnit.maxMovement} | Attack ${selectedUnit.attack} | Range ${selectedUnit.minAttackRange}-${selectedUnit.attackRange} | Armor ${selectedUnit.armor}`
         );
-        this.contextPanelMetaSecondary.setText(previewSummary || "Hover reachable or attackable hexes for action previews.");
+        this.contextPanelMetaSecondary.setText(
+          previewSummary ? `${previewSummary}  Diplomacy ${diplomacyStatus}` : `Hover reachable or attackable hexes for action previews.  Diplomacy ${diplomacyStatus}`
+        );
       }
       this.setButtonEnabled(this.unitFoundCityButton, expanded && canIssueOrders && !!gameState.uiActions?.canFoundCity);
       this.setButtonEnabled(this.unitSkipButton, expanded && canIssueOrders && !!gameState.uiActions?.canSkipUnit);
+      const diplomacyLabel = gameState.uiActions?.diplomacyActionLabel ?? "Diplomacy";
+      this.setButtonLabel(this.unitDiplomacyButton, diplomacyLabel);
+      this.setButtonEnabled(this.unitDiplomacyButton, expanded && canIssueOrders && !!gameState.uiActions?.canToggleDiplomacy);
+      this.setButtonWarning(this.unitDiplomacyButton, !!gameState.uiActions?.canToggleDiplomacy && diplomacyLabel === "Declare War");
       if (expanded) {
         const disabledReason =
           (!gameState.uiActions?.canFoundCity && gameState.uiActions?.foundCityReason) ||
           (!gameState.uiActions?.canSkipUnit && gameState.uiActions?.skipUnitReason) ||
+          (!gameState.uiActions?.canToggleDiplomacy && gameState.uiActions?.diplomacyActionReason) ||
           "";
         this.contextPanelDisabledReason.setText(disabledReason ? `Blocked: ${disabledReason}` : "");
         this.contextPanelDisabledReason.setVisible(!!disabledReason);
@@ -3127,6 +3150,7 @@ export class UIScene extends Phaser.Scene {
   setUnitControlsVisible(visible) {
     this.setCompositeVisible(this.unitFoundCityButton, visible);
     this.setCompositeVisible(this.unitSkipButton, visible);
+    this.setCompositeVisible(this.unitDiplomacyButton, visible);
   }
 
   getSelectedInfoText(selectedUnit, selectedCity) {

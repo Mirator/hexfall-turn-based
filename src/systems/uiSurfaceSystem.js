@@ -1,4 +1,6 @@
 import { TECH_TREE } from "../core/techTree.js";
+import { areOwnersAtWar, getAiOwners, getOwnerLabel } from "../core/factions.js";
+import { distance } from "../core/hexGrid.js";
 import { getAllUnitTypes, getUnitDefinition } from "../core/unitData.js";
 import {
   CITY_QUEUE_MAX,
@@ -35,6 +37,19 @@ import { canSkipUnit, getSkipUnitReasonText } from "./unitActionSystem.js";
  *     contextMenuType: "city"|"unit"|null,
  *     foundCityReason: string|null,
  *     skipUnitReason: string|null,
+ *     canToggleDiplomacy: boolean,
+ *     diplomacyTargetOwner: string|null,
+ *     diplomacyTargetLabel: string|null,
+ *     diplomacyStatus: "war"|"peace"|null,
+ *     diplomacyActionLabel: string|null,
+ *     diplomacyActionReason: string|null,
+ *     diplomacyRelations: Array<{
+ *       owner: string,
+ *       label: string,
+ *       atWar: boolean,
+ *       status: "war"|"peace",
+ *       hasPresence: boolean
+ *     }>,
  *     cityQueueMax: number,
  *     cityQueueReason: string|null,
  *     cityProductionTab: "units"|"buildings",
@@ -101,6 +116,29 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
   const skipUnitReason = canSkip ? null : getSkipUnitReasonText(skipCheck.reason);
   const selectedPlayerCity = !!selectedCity && selectedCity.owner === playerOwner;
   const selectedPlayerUnit = !!selectedUnit && selectedUnit.owner === playerOwner;
+  const diplomacyRelations = getAiOwners(gameState).map((owner) => {
+    const atWar = areOwnersAtWar(playerOwner, owner, gameState);
+    const hasPresence = hasOwnerPresence(gameState, owner);
+    return {
+      owner,
+      label: getOwnerLabel(owner, gameState),
+      atWar,
+      status: atWar ? "war" : "peace",
+      hasPresence,
+    };
+  });
+  const diplomacyTargetOwner =
+    selectedPlayerUnit && selectedUnit ? pickDiplomacyTargetOwner(gameState, selectedUnit, diplomacyRelations) : null;
+  const diplomacyTarget = diplomacyTargetOwner ? diplomacyRelations.find((entry) => entry.owner === diplomacyTargetOwner) ?? null : null;
+  const canToggleDiplomacy = isPlayerTurn && selectedPlayerUnit && !!diplomacyTarget;
+  const diplomacyActionLabel = diplomacyTarget ? (diplomacyTarget.atWar ? "Offer Peace" : "Declare War") : null;
+  const diplomacyActionReason = !selectedPlayerUnit
+    ? "Select one of your units to manage diplomacy."
+    : !diplomacyTarget
+      ? "No rival faction available for diplomacy."
+      : !isPlayerTurn
+        ? "Wait for your turn to change diplomacy."
+        : null;
   const unlockedUnits = new Set(gameState.unlocks.units);
   const cityEconomyBucket = selectedCity ? gameState.economy[selectedCity.owner] : gameState.economy[playerOwner];
   const queueItems = selectedPlayerCity ? normalizeQueueItems(selectedCity.queue) : [];
@@ -244,6 +282,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
   const disabledActionHints = buildDisabledActionHints({
     foundCityReason,
     skipUnitReason,
+    diplomacyActionReason,
     cityQueueReason,
     cityProductionChoices,
     cityBuildingChoices,
@@ -296,6 +335,14 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
   } else if (selectedUnit && attackableTargets.length > 0) {
     uiHints.primary = "Hostile unit in range: click highlighted target to attack.";
     uiHints.level = "info";
+  } else if (selectedPlayerUnit && diplomacyTarget) {
+    uiHints.primary = diplomacyTarget.atWar
+      ? `${diplomacyTarget.label} is at war with you.`
+      : `${diplomacyTarget.label} is currently at peace with you.`;
+    uiHints.secondary = diplomacyTarget.atWar
+      ? "Use Diplomacy to offer peace from the unit command panel."
+      : "Use Diplomacy to declare war when you are ready.";
+    uiHints.level = "info";
   }
 
   return {
@@ -311,6 +358,13 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
       contextMenuType,
       foundCityReason,
       skipUnitReason,
+      canToggleDiplomacy,
+      diplomacyTargetOwner: diplomacyTarget?.owner ?? null,
+      diplomacyTargetLabel: diplomacyTarget?.label ?? null,
+      diplomacyStatus: diplomacyTarget?.status ?? null,
+      diplomacyActionLabel,
+      diplomacyActionReason,
+      diplomacyRelations,
       cityQueueMax: CITY_QUEUE_MAX,
       cityQueueReason,
       cityProductionTab,
@@ -507,6 +561,7 @@ function buildQueueSlots({ queueItems, productionProgress, productionRate, selec
 function buildDisabledActionHints({
   foundCityReason,
   skipUnitReason,
+  diplomacyActionReason,
   cityQueueReason,
   cityProductionChoices,
   cityBuildingChoices,
@@ -520,6 +575,9 @@ function buildDisabledActionHints({
   }
   if (skipUnitReason) {
     hints["unit-skip"] = skipUnitReason;
+  }
+  if (diplomacyActionReason) {
+    hints["unit-diplomacy-toggle"] = diplomacyActionReason;
   }
 
   for (const choice of cityProductionChoices) {
@@ -559,6 +617,58 @@ function buildDisabledActionHints({
     hints["city-queue-general"] = cityQueueReason;
   }
   return hints;
+}
+
+function hasOwnerPresence(gameState, owner) {
+  return (
+    gameState.units.some((unit) => unit.owner === owner && unit.health > 0) ||
+    gameState.cities.some((city) => city.owner === owner && city.health > 0)
+  );
+}
+
+function pickDiplomacyTargetOwner(gameState, selectedUnit, relations) {
+  const candidates = relations.filter((entry) => entry.hasPresence);
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const scored = candidates.map((entry) => {
+    const nearestDistance = findNearestDistanceToOwnerEntity(gameState, selectedUnit, entry.owner);
+    return {
+      owner: entry.owner,
+      atWar: entry.atWar,
+      distance: nearestDistance,
+    };
+  });
+
+  scored.sort((a, b) => {
+    if (a.atWar !== b.atWar) {
+      return Number(b.atWar) - Number(a.atWar);
+    }
+    if (a.distance !== b.distance) {
+      return a.distance - b.distance;
+    }
+    return a.owner.localeCompare(b.owner);
+  });
+
+  return scored[0]?.owner ?? null;
+}
+
+function findNearestDistanceToOwnerEntity(gameState, origin, owner) {
+  let minDistance = Number.POSITIVE_INFINITY;
+  for (const unit of gameState.units) {
+    if (unit.owner !== owner || unit.health <= 0) {
+      continue;
+    }
+    minDistance = Math.min(minDistance, distance(origin, unit));
+  }
+  for (const city of gameState.cities) {
+    if (city.owner !== owner || city.health <= 0) {
+      continue;
+    }
+    minDistance = Math.min(minDistance, distance(origin, city));
+  }
+  return Number.isFinite(minDistance) ? minDistance : Number.MAX_SAFE_INTEGER;
 }
 
 function computeEtaTurns(cost, stock, productionRate) {
