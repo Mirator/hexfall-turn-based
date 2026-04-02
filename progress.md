@@ -618,3 +618,29 @@ Viewport support note (2026-03-27): legacy mentions of mobile checks/artifacts i
   - `npm test` passed (15 files, 88 tests).
   - `npm run test:e2e` passed.
   - `npm run build` passed.
+## 2026-04-02 (Diplomacy UX rework: faction menu + first contact)
+- Reworked diplomacy UX to remove it from unit commands and move it to a dedicated section inside the Stats panel (per-faction actions).
+- Added per-faction diplomacy controls in `UIScene`:
+  - dynamic diplomacy rows in Stats panel,
+  - one action button per known faction (`Offer Peace` / `Declare War`),
+  - disabled reasons surfaced via button tooltips,
+  - no diplomacy button in the unit command panel anymore.
+- Added WorldScene event flow for diplomacy menu actions:
+  - new event: `diplomacy-action-requested`,
+  - new handler validates target relation and applies `offerPeace` / `declareWar`,
+  - old `toggleDiplomacy` unit action now shows guidance to use Stats panel.
+- Added first-contact diplomacy gate:
+  - diplomacy actions now require `seenOwners` contact (`owner-not-met`),
+  - `diplomacySystem` returns user-facing reason text for unknown factions,
+  - `uiSurfaceSystem` only exposes diplomacy relations for met factions.
+- Updated UI surface model:
+  - replaced unit-target diplomacy fields with menu-oriented data (`canManageDiplomacy`, `diplomacyMenuReason`, relation-level action metadata).
+- Updated integration tests (`tests/integration/diplomacySystem.test.js`):
+  - added/updated assertions for hidden diplomacy before contact,
+  - validated known-faction diplomacy metadata,
+  - ensured peace still blocks attacks and AI aggression.
+- Validation complete:
+  - `npm run lint`
+  - `npm test`
+  - `npm run build`
+  - `npm run test:e2e`

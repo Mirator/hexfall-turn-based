@@ -28,7 +28,7 @@ const CITY_PANEL_QUEUE_ITEM_WIDTH = 126;
 const CITY_PANEL_QUEUE_MOVE_WIDTH = 32;
 const CITY_PANEL_QUEUE_REMOVE_WIDTH = 32;
 const CITY_PANEL_BUTTON_HEIGHT = 32;
-const UNIT_PANEL_ACTION_WIDTH = 108;
+const UNIT_PANEL_ACTION_WIDTH = 160;
 const NEW_GAME_MODAL_WIDTH = 460;
 const NEW_GAME_MODAL_HEIGHT = 286;
 const NEW_GAME_MAP_PRESETS = [16, 20, 24];
@@ -160,7 +160,9 @@ export class UIScene extends Phaser.Scene {
       techCompleted: 0,
       activeTech: null,
       exploredPercent: 0,
+      diplomacyRelations: [],
     };
+    this.statsDiplomacyRows = [];
     this.latestTechTreeModalPayload = {
       open: false,
       summary: {
@@ -271,6 +273,25 @@ export class UIScene extends Phaser.Scene {
     this.statsUnitsLabel = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textStrong, 11).setVisible(false);
     this.statsTechLabel = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textInfo, 11).setVisible(false);
     this.statsExploreLabel = this.createLabel("", 0, 0, "12px", SEMANTIC_COLORS.textPositive, 11).setVisible(false);
+    this.statsDiplomacyTitle = this.createLabel("Diplomacy", 0, 0, "12px", SEMANTIC_COLORS.textStrong, 11).setVisible(false);
+    this.statsDiplomacyEmpty = this.createLabel("", 0, 0, "11px", SEMANTIC_COLORS.textMuted, 11).setVisible(false);
+    this.statsDiplomacyRows = Array.from({ length: NEW_GAME_AI_MAX }, (_unused, index) => {
+      const label = this.createLabel("", 0, 0, "11px", SEMANTIC_COLORS.textStrong, 11).setVisible(false);
+      const button = this.createButton("Diplomacy", `stats-diplomacy-${index}`, () => this.handleStatsDiplomacyAction(index), {
+        variant: "warning",
+        width: 108,
+        height: 22,
+        fontSize: "10px",
+      });
+      button.rectangle.setDepth(11);
+      button.label.setDepth(12);
+      this.setCompositeVisible(button, false);
+      return {
+        owner: null,
+        label,
+        button,
+      };
+    });
     this.minimapPanel = this.add
       .rectangle(0, 0, MINIMAP_PANEL_WIDTH, MINIMAP_PANEL_HEIGHT, SEMANTIC_COLORS.panelSoftBg, 0.97)
       .setOrigin(0, 0)
@@ -487,15 +508,6 @@ export class UIScene extends Phaser.Scene {
         variant: "secondary",
         width: UNIT_PANEL_ACTION_WIDTH,
         height: BUTTON_HEIGHT - 6,
-      }
-    );
-    this.unitDiplomacyButton = this.createButton("Diplomacy", "unit-diplomacy-toggle", () =>
-      gameEvents.emit("unit-action-requested", { actionId: "toggleDiplomacy" }),
-      {
-        variant: "warning",
-        width: UNIT_PANEL_ACTION_WIDTH,
-        height: BUTTON_HEIGHT - 6,
-        fontSize: "13px",
       }
     );
     this.setCityControlsVisible(false);
@@ -1184,6 +1196,12 @@ export class UIScene extends Phaser.Scene {
     this.statsUnitsLabel.setVisible(show);
     this.statsTechLabel.setVisible(show);
     this.statsExploreLabel.setVisible(show);
+    this.statsDiplomacyTitle.setVisible(show);
+    this.statsDiplomacyEmpty.setVisible(false);
+    for (const row of this.statsDiplomacyRows) {
+      row.label.setVisible(false);
+      this.setCompositeVisible(row.button, false);
+    }
     this.setButtonActive(this.statsToggleButton, show);
     if (this.latestState) {
       this.layout(this.scale.gameSize);
@@ -1192,8 +1210,25 @@ export class UIScene extends Phaser.Scene {
 
   toggleStatsPanel() {
     this.setStatsPanelVisible(!this.statsPanelOpen);
+    if (this.latestState) {
+      this.updateFromState(this.latestState);
+    }
     this.playUiSfx(this.statsPanelOpen ? "confirm" : "select");
     return this.statsPanelOpen;
+  }
+
+  handleStatsDiplomacyAction(index) {
+    if (!this.latestState) {
+      return false;
+    }
+    const relation = this.latestState.uiActions?.diplomacyRelations?.[index] ?? null;
+    if (!relation?.owner) {
+      return false;
+    }
+    gameEvents.emit("diplomacy-action-requested", {
+      targetOwner: relation.owner,
+    });
+    return true;
   }
 
   setTechTreeModalVisible(visible) {
@@ -1262,6 +1297,7 @@ export class UIScene extends Phaser.Scene {
       actionId === "attention-queue" ||
       actionId.startsWith("unit-") ||
       actionId.startsWith("city-") ||
+      actionId.startsWith("stats-diplomacy-") ||
       actionId === "context-expand-toggle" ||
       actionId === "context-pin-toggle";
     if (this.latestState.animationState?.busy && isGameplayAction) {
@@ -1289,8 +1325,13 @@ export class UIScene extends Phaser.Scene {
     if (actionId === "unit-skip") {
       return this.latestState.uiActions?.skipUnitReason ?? "Cannot skip this unit right now.";
     }
-    if (actionId === "unit-diplomacy-toggle") {
-      return this.latestState.uiActions?.diplomacyActionReason ?? "Diplomacy is unavailable right now.";
+    if (actionId.startsWith("stats-diplomacy-")) {
+      const index = Number.parseInt(actionId.replace("stats-diplomacy-", ""), 10);
+      const relation = Number.isInteger(index) ? this.latestState.uiActions?.diplomacyRelations?.[index] ?? null : null;
+      if (relation) {
+        return relation.actionReason ?? this.latestState.uiActions?.diplomacyMenuReason ?? "Diplomacy is unavailable right now.";
+      }
+      return this.latestState.uiActions?.diplomacyMenuReason ?? "Make first contact before opening diplomacy.";
     }
     if (actionId.startsWith("city-enqueue-")) {
       return actionHints["city-queue-general"] ?? this.latestState.uiActions?.cityQueueReason ?? "Queue is unavailable right now.";
@@ -1399,7 +1440,11 @@ export class UIScene extends Phaser.Scene {
     this.forecastLineSecondary.setPosition(forecastPosition.x + 10, forecastPosition.y + 42);
     this.forecastLineTertiary.setPosition(forecastPosition.x + 10, forecastPosition.y + (isTabletLayout ? 56 : 58));
     const statsWidth = forecastWidth;
-    const statsHeight = isTabletLayout ? STATS_PANEL_HEIGHT_TABLET : STATS_PANEL_HEIGHT;
+    const diplomacyRows = this.latestState?.uiActions?.diplomacyRelations ?? [];
+    const diplomacyRowCount = Math.min(this.statsDiplomacyRows.length, diplomacyRows.length);
+    const diplomacySectionRows = diplomacyRowCount > 0 ? diplomacyRowCount : 1;
+    const diplomacySectionHeight = 22 + diplomacySectionRows * 24;
+    const statsHeight = (isTabletLayout ? STATS_PANEL_HEIGHT_TABLET : STATS_PANEL_HEIGHT) + diplomacySectionHeight;
     const statsTop = forecastPosition.y + forecastHeight + 6;
     const statsPosition = this.clampPanelTopLeft(forecastPosition.x, statsTop, statsWidth, statsHeight, edgePadding);
     this.statsPanel.setPosition(statsPosition.x, statsPosition.y);
@@ -1410,6 +1455,19 @@ export class UIScene extends Phaser.Scene {
     this.statsUnitsLabel.setPosition(statsPosition.x + 10, statsPosition.y + 46);
     this.statsTechLabel.setPosition(statsPosition.x + 10, statsPosition.y + 64);
     this.statsExploreLabel.setPosition(statsPosition.x + 10, statsPosition.y + 82);
+    const diplomacyTop = statsPosition.y + 104;
+    this.statsDiplomacyTitle.setPosition(statsPosition.x + 10, diplomacyTop);
+    this.statsDiplomacyEmpty.setPosition(statsPosition.x + 10, diplomacyTop + 20);
+    this.statsDiplomacyEmpty.setWordWrapWidth(Math.max(120, statsWidth - 20), true);
+    for (let i = 0; i < this.statsDiplomacyRows.length; i += 1) {
+      const row = this.statsDiplomacyRows[i];
+      const rowY = diplomacyTop + 20 + i * 24;
+      row.label.setPosition(statsPosition.x + 10, rowY + 2);
+      row.label.setWordWrapWidth(Math.max(72, statsWidth - row.button.width - 36), true);
+      const buttonX = statsPosition.x + statsWidth - row.button.width / 2 - 10;
+      row.button.rectangle.setPosition(buttonX, rowY + row.button.height / 2);
+      row.button.label.setPosition(buttonX, rowY + row.button.height / 2);
+    }
     if (this.statsPanelOpen && statsPosition.y + statsHeight > this.scale.height - edgePadding) {
       this.setStatsPanelVisible(false);
     }
@@ -1520,16 +1578,16 @@ export class UIScene extends Phaser.Scene {
       if (isTabletLayout) {
         this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY - 10, 8);
         this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 24, 6);
-        this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton, this.unitDiplomacyButton], contextX, contextY + 30, 8);
+        this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 30, 8);
       } else {
         this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY + 4, 8);
         this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 36, 6);
-        this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton, this.unitDiplomacyButton], contextX, contextY + 24, 10);
+        this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 24, 10);
       }
     } else {
       this.layoutButtonRow(this.cityProductionTabButtons, contextX, contextY + 36, 8);
       this.layoutButtonRow(activeCityProductionButtons, contextX, contextY + 36, 6);
-      this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton, this.unitDiplomacyButton], contextX, contextY + 36, 10);
+      this.layoutButtonRow([this.unitFoundCityButton, this.unitSkipButton], contextX, contextY + 36, 10);
     }
 
     const selectedPanelWidth = isTabletLayout ? Math.max(154, Math.min(236, Math.floor(gameSize.width * 0.5))) : 432;
@@ -2635,6 +2693,8 @@ export class UIScene extends Phaser.Scene {
     const exploredHexes = gameState.visibility?.byOwner?.[playerOwner]?.exploredHexes?.length ?? 0;
     const totalHexes = Math.max(1, (gameState.map?.width ?? 1) * (gameState.map?.height ?? 1));
     const exploredPercent = Math.round((exploredHexes / totalHexes) * 100);
+    const diplomacyRelations = (gameState.uiActions?.diplomacyRelations ?? []).slice(0, this.statsDiplomacyRows.length);
+    const diplomacyMenuReason = gameState.uiActions?.diplomacyMenuReason ?? "Make first contact with a faction to unlock diplomacy.";
     this.latestStatsPayload = {
       cities: playerCities,
       units: playerUnits,
@@ -2642,7 +2702,14 @@ export class UIScene extends Phaser.Scene {
       techCompleted: completedTech,
       activeTech,
       exploredPercent,
+      diplomacyRelations: diplomacyRelations.map((relation) => ({
+        owner: relation.owner,
+        label: relation.label,
+        status: relation.status,
+        atWar: relation.atWar,
+      })),
     };
+    this.statsTitle.setText("Progress & Diplomacy");
     this.statsCitiesLabel.setText(`Cities: ${playerCities}`);
     this.statsUnitsLabel.setText(`Units: ${playerUnits} (Ready ${readyUnits})`);
     this.statsTechLabel.setText(
@@ -2651,6 +2718,27 @@ export class UIScene extends Phaser.Scene {
       } | ${boostLabel}`
     );
     this.statsExploreLabel.setText(`Explored: ${exploredPercent}%`);
+    this.statsDiplomacyTitle.setText("Known Factions");
+    this.statsDiplomacyEmpty.setText(diplomacyMenuReason);
+    this.statsDiplomacyEmpty.setVisible(this.statsPanelOpen && diplomacyRelations.length === 0);
+    for (let i = 0; i < this.statsDiplomacyRows.length; i += 1) {
+      const row = this.statsDiplomacyRows[i];
+      const relation = diplomacyRelations[i] ?? null;
+      row.owner = relation?.owner ?? null;
+      const rowVisible = this.statsPanelOpen && !!relation;
+      row.label.setVisible(rowVisible);
+      this.setCompositeVisible(row.button, rowVisible);
+      if (!relation) {
+        this.setButtonEnabled(row.button, false);
+        this.setButtonWarning(row.button, false);
+        continue;
+      }
+      row.label.setText(`${relation.label}: ${relation.atWar ? "At War" : "At Peace"}`);
+      row.label.setColor(relation.atWar ? SEMANTIC_COLORS.textWarning : SEMANTIC_COLORS.textPositive);
+      this.setButtonLabel(row.button, relation.actionLabel);
+      this.setButtonEnabled(row.button, rowVisible && canIssueOrders && !!relation.canToggle);
+      this.setButtonWarning(row.button, rowVisible && canIssueOrders && !!relation.canToggle && relation.actionLabel === "Declare War");
+    }
     this.updateTechTreeModalPayload(gameState);
     this.layoutResourceDeltas();
 
@@ -2956,7 +3044,10 @@ export class UIScene extends Phaser.Scene {
               .join(","),
           ].join(":")
         : "none";
-    return [selectionKey, contextType, turnState, matchState, blockers, mapSize, localUi, modals, cityUi].join("|");
+    const diplomacyUi = (gameState.uiActions?.diplomacyRelations ?? [])
+      .map((relation) => `${relation.owner}:${relation.status}`)
+      .join(",");
+    return [selectionKey, contextType, turnState, matchState, blockers, mapSize, localUi, modals, cityUi, diplomacyUi].join("|");
   }
 
   syncContextMenu(gameState, selectedUnit, selectedCity, canIssueOrders) {
@@ -3088,28 +3179,19 @@ export class UIScene extends Phaser.Scene {
       this.setUnitControlsVisible(expanded);
       if (expanded) {
         const previewSummary = summarizePreview(gameState.uiPreview);
-        const diplomacyStatus =
-          gameState.uiActions?.diplomacyTargetLabel && gameState.uiActions?.diplomacyStatus
-            ? `${gameState.uiActions.diplomacyTargetLabel}: ${gameState.uiActions.diplomacyStatus === "war" ? "At War" : "At Peace"}`
-            : "No diplomacy target selected.";
         this.contextPanelMetaPrimary.setText(
           `Movement ${selectedUnit.movementRemaining}/${selectedUnit.maxMovement} | Attack ${selectedUnit.attack} | Range ${selectedUnit.minAttackRange}-${selectedUnit.attackRange} | Armor ${selectedUnit.armor}`
         );
         this.contextPanelMetaSecondary.setText(
-          previewSummary ? `${previewSummary}  Diplomacy ${diplomacyStatus}` : `Hover reachable or attackable hexes for action previews.  Diplomacy ${diplomacyStatus}`
+          previewSummary ? previewSummary : "Hover reachable or attackable hexes for action previews."
         );
       }
       this.setButtonEnabled(this.unitFoundCityButton, expanded && canIssueOrders && !!gameState.uiActions?.canFoundCity);
       this.setButtonEnabled(this.unitSkipButton, expanded && canIssueOrders && !!gameState.uiActions?.canSkipUnit);
-      const diplomacyLabel = gameState.uiActions?.diplomacyActionLabel ?? "Diplomacy";
-      this.setButtonLabel(this.unitDiplomacyButton, diplomacyLabel);
-      this.setButtonEnabled(this.unitDiplomacyButton, expanded && canIssueOrders && !!gameState.uiActions?.canToggleDiplomacy);
-      this.setButtonWarning(this.unitDiplomacyButton, !!gameState.uiActions?.canToggleDiplomacy && diplomacyLabel === "Declare War");
       if (expanded) {
         const disabledReason =
           (!gameState.uiActions?.canFoundCity && gameState.uiActions?.foundCityReason) ||
           (!gameState.uiActions?.canSkipUnit && gameState.uiActions?.skipUnitReason) ||
-          (!gameState.uiActions?.canToggleDiplomacy && gameState.uiActions?.diplomacyActionReason) ||
           "";
         this.contextPanelDisabledReason.setText(disabledReason ? `Blocked: ${disabledReason}` : "");
         this.contextPanelDisabledReason.setVisible(!!disabledReason);
@@ -3150,7 +3232,6 @@ export class UIScene extends Phaser.Scene {
   setUnitControlsVisible(visible) {
     this.setCompositeVisible(this.unitFoundCityButton, visible);
     this.setCompositeVisible(this.unitSkipButton, visible);
-    this.setCompositeVisible(this.unitDiplomacyButton, visible);
   }
 
   getSelectedInfoText(selectedUnit, selectedCity) {

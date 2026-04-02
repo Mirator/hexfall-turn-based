@@ -19,6 +19,9 @@ export function canDeclareWar(initiator, target, gameState) {
   if (initiator === target) {
     return { ok: false, reason: "same-owner" };
   }
+  if (!haveOwnersMet(initiator, target, gameState)) {
+    return { ok: false, reason: "owner-not-met" };
+  }
   if (areOwnersAtWar(initiator, target, gameState)) {
     return { ok: false, reason: "already-at-war" };
   }
@@ -56,6 +59,9 @@ export function canOfferPeace(initiator, target, gameState) {
   if (initiator === target) {
     return { ok: false, reason: "same-owner" };
   }
+  if (!haveOwnersMet(initiator, target, gameState)) {
+    return { ok: false, reason: "owner-not-met" };
+  }
   if (!areOwnersAtWar(initiator, target, gameState)) {
     return { ok: false, reason: "already-at-peace" };
   }
@@ -88,6 +94,9 @@ export function getDiplomacyActionReasonText(reason) {
   if (reason === "owner-not-found") {
     return "Diplomacy target is unavailable.";
   }
+  if (reason === "owner-not-met") {
+    return "You have not made contact with that faction yet.";
+  }
   if (reason === "same-owner") {
     return "Cannot negotiate with your own faction.";
   }
@@ -100,3 +109,16 @@ export function getDiplomacyActionReasonText(reason) {
   return "Diplomacy action is unavailable right now.";
 }
 
+/**
+ * @param {import("../core/types.js").Owner} initiator
+ * @param {import("../core/types.js").Owner} target
+ * @param {import("../core/types.js").GameState} gameState
+ * @returns {boolean}
+ */
+function haveOwnersMet(initiator, target, gameState) {
+  const seenOwners = gameState.visibility?.byOwner?.[initiator]?.seenOwners;
+  if (!Array.isArray(seenOwners)) {
+    return true;
+  }
+  return seenOwners.includes(target);
+}

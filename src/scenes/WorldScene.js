@@ -419,6 +419,7 @@ export class WorldScene extends Phaser.Scene {
     gameEvents.on("found-city-requested", this.handleFoundCityRequested, this);
     gameEvents.on("research-cycle-requested", this.handleResearchCycleRequested, this);
     gameEvents.on("unit-action-requested", this.handleUnitActionRequested, this);
+    gameEvents.on("diplomacy-action-requested", this.handleDiplomacyActionRequested, this);
     gameEvents.on("city-production-tab-set-requested", this.handleCityProductionTabSetRequested, this);
     gameEvents.on("city-queue-enqueue-requested", this.handleCityQueueEnqueueRequested, this);
     gameEvents.on("city-queue-rush-buy-requested", this.handleCityQueueRushBuyRequested, this);
@@ -446,6 +447,7 @@ export class WorldScene extends Phaser.Scene {
       gameEvents.off("found-city-requested", this.handleFoundCityRequested, this);
       gameEvents.off("research-cycle-requested", this.handleResearchCycleRequested, this);
       gameEvents.off("unit-action-requested", this.handleUnitActionRequested, this);
+      gameEvents.off("diplomacy-action-requested", this.handleDiplomacyActionRequested, this);
       gameEvents.off("city-production-tab-set-requested", this.handleCityProductionTabSetRequested, this);
       gameEvents.off("city-queue-enqueue-requested", this.handleCityQueueEnqueueRequested, this);
       gameEvents.off("city-queue-rush-buy-requested", this.handleCityQueueRushBuyRequested, this);
@@ -527,14 +529,14 @@ export class WorldScene extends Phaser.Scene {
       if (!clickedUnitVisible) {
         return;
       }
-      if (!this.attackableLookup.has(clickedUnit.id)) {
-        if (!areOwnersAtWar(selectedUnit.owner, clickedUnit.owner, this.gameState)) {
-          this.emitNotification(`You are at peace with ${getOwnerLabel(clickedUnit.owner, this.gameState)}. Declare war before attacking.`, {
-            level: "warning",
-            category: "System",
-            focus: { unitId: clickedUnit.id, q: clickedUnit.q, r: clickedUnit.r },
-          });
-        }
+        if (!this.attackableLookup.has(clickedUnit.id)) {
+          if (!areOwnersAtWar(selectedUnit.owner, clickedUnit.owner, this.gameState)) {
+            this.emitNotification(`You are at peace with ${getOwnerLabel(clickedUnit.owner, this.gameState)}. Open Stats and declare war before attacking.`, {
+              level: "warning",
+              category: "System",
+              focus: { unitId: clickedUnit.id, q: clickedUnit.q, r: clickedUnit.r },
+            });
+          }
         return;
       }
       void this.handlePlayerUnitAttack(selectedUnit.id, clickedUnit.id);
@@ -756,21 +758,32 @@ export class WorldScene extends Phaser.Scene {
     }
   };
 
-  handleDiplomacyToggleRequested = () => {
+  handleDiplomacyActionRequested = (payload) => {
+    if (!this.canAcceptPlayerCommands()) {
+      return false;
+    }
     const playerOwner = this.gameState.factions?.playerOwner ?? "player";
     const selectedUnit = getUnitById(this.gameState, this.gameState.selectedUnitId);
-    if (!selectedUnit || selectedUnit.owner !== playerOwner) {
-      this.emitNotification("Select one of your units to manage diplomacy.", {
+    const selectedCity = this.gameState.cities.find((city) => city.id === this.gameState.selectedCityId) ?? null;
+    const uiSurface = this.getUiSurface(selectedUnit, selectedCity);
+    const targetOwner = typeof payload?.targetOwner === "string" ? payload.targetOwner : null;
+    if (!targetOwner) {
+      this.emitNotification(uiSurface.uiActions.diplomacyMenuReason ?? "No diplomacy target available.", {
         level: "warning",
         category: "System",
       });
       return false;
     }
-
-    const uiSurface = this.getUiSurface(selectedUnit, null);
-    const targetOwner = uiSurface.uiActions.diplomacyTargetOwner;
-    if (!targetOwner) {
-      this.emitNotification(uiSurface.uiActions.diplomacyActionReason ?? "No diplomacy target available.", {
+    const relation = (uiSurface.uiActions.diplomacyRelations ?? []).find((entry) => entry.owner === targetOwner) ?? null;
+    if (!relation) {
+      this.emitNotification(uiSurface.uiActions.diplomacyMenuReason ?? "You have not met that faction yet.", {
+        level: "warning",
+        category: "System",
+      });
+      return false;
+    }
+    if (!relation.canToggle) {
+      this.emitNotification(relation.actionReason ?? "Diplomacy is unavailable right now.", {
         level: "warning",
         category: "System",
       });
@@ -821,7 +834,11 @@ export class WorldScene extends Phaser.Scene {
       return this.handleFoundCityRequested();
     }
     if (actionId === "toggleDiplomacy") {
-      return this.handleDiplomacyToggleRequested();
+      this.emitNotification("Use the Stats panel diplomacy section to change relations.", {
+        level: "warning",
+        category: "System",
+      });
+      return false;
     }
     if (actionId === "skipUnit") {
       const selectedUnitId = this.gameState.selectedUnitId;
@@ -3645,12 +3662,6 @@ export class WorldScene extends Phaser.Scene {
         foundCityReason: uiSurface.uiActions.foundCityReason,
         canSkipUnit: uiSurface.uiActions.canSkipUnit,
         skipUnitReason: uiSurface.uiActions.skipUnitReason,
-        canToggleDiplomacy: uiSurface.uiActions.canToggleDiplomacy,
-        diplomacyTargetOwner: uiSurface.uiActions.diplomacyTargetOwner,
-        diplomacyTargetLabel: uiSurface.uiActions.diplomacyTargetLabel,
-        diplomacyStatus: uiSurface.uiActions.diplomacyStatus,
-        diplomacyActionLabel: uiSurface.uiActions.diplomacyActionLabel,
-        diplomacyActionReason: uiSurface.uiActions.diplomacyActionReason,
       };
     }
     return { type: "none" };
@@ -3678,12 +3689,14 @@ export class WorldScene extends Phaser.Scene {
   buildDiplomacyPayload() {
     const playerOwner = this.gameState.factions?.playerOwner ?? "player";
     const aiOwners = this.gameState.factions?.aiOwners ?? [];
+    const seenOwners = new Set(this.gameState.visibility?.byOwner?.[playerOwner]?.seenOwners ?? [playerOwner]);
     return {
       lastChangeTurn: this.gameState.diplomacy?.lastChangeTurn ?? null,
       byOwner: structuredClone(this.gameState.diplomacy?.byOwner ?? {}),
       playerRelations: aiOwners.map((owner) => ({
         owner,
         label: getOwnerLabel(owner, this.gameState),
+        met: seenOwners.has(owner),
         hasPresence:
           this.gameState.units.some((unit) => unit.owner === owner && unit.health > 0) ||
           this.gameState.cities.some((city) => city.owner === owner && city.health > 0),

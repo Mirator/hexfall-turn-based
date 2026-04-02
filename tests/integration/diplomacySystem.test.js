@@ -6,6 +6,7 @@ import { declareWar, offerPeace } from "../../src/systems/diplomacySystem.js";
 import { runEnemyTurn } from "../../src/systems/enemyTurnSystem.js";
 import { beginEnemyTurn } from "../../src/systems/turnSystem.js";
 import { deriveUiSurface } from "../../src/systems/uiSurfaceSystem.js";
+import { recomputeVisibility } from "../../src/systems/visibilitySystem.js";
 
 describe("diplomacy system", () => {
   it("starts at war by default and allows peace to block attacks", () => {
@@ -21,6 +22,7 @@ describe("diplomacy system", () => {
     playerUnit.r = 2;
     enemyUnit.q = 4;
     enemyUnit.r = 2;
+    recomputeVisibility(gameState);
 
     expect(areOwnersAtWar("player", "enemy", gameState)).toBe(true);
     expect(canAttack(playerUnit.id, enemyUnit.id, gameState)).toEqual({ ok: true });
@@ -44,6 +46,7 @@ describe("diplomacy system", () => {
     playerUnit.r = 2;
     enemyUnit.q = 4;
     enemyUnit.r = 2;
+    recomputeVisibility(gameState);
 
     expect(offerPeace("player", "enemy", gameState).ok).toBe(true);
     expect(canAttack(playerUnit.id, enemyUnit.id, gameState)).toEqual({ ok: false, reason: "not-at-war" });
@@ -54,23 +57,50 @@ describe("diplomacy system", () => {
     expect(canAttack(playerUnit.id, enemyUnit.id, gameState)).toEqual({ ok: true });
   });
 
-  it("exposes diplomacy action metadata for unit command UI", () => {
+  it("hides diplomacy controls before first contact", () => {
     const gameState = createInitialGameState({ seed: 4103, aiFactionCount: 1 });
     const playerUnit = gameState.units.find((unit) => unit.owner === "player");
-    expect(playerUnit).toBeTruthy();
-    if (!playerUnit) {
+    const enemyUnit = gameState.units.find((unit) => unit.owner === "enemy");
+    expect(playerUnit && enemyUnit).toBeTruthy();
+    if (!playerUnit || !enemyUnit) {
       return;
     }
+    enemyUnit.q = playerUnit.q <= gameState.map.width / 2 ? gameState.map.width - 1 : 0;
+    enemyUnit.r = playerUnit.r <= gameState.map.height / 2 ? gameState.map.height - 1 : 0;
+    if (gameState.visibility?.byOwner?.player) {
+      gameState.visibility.byOwner.player.seenOwners = ["player"];
+    }
+    recomputeVisibility(gameState);
+
+    const ui = deriveUiSurface(gameState, playerUnit, null, [], []);
+    expect(ui.uiActions.diplomacyRelations).toEqual([]);
+    expect(ui.uiActions.canManageDiplomacy).toBe(false);
+  });
+
+  it("exposes diplomacy action metadata for known factions in stats panel", () => {
+    const gameState = createInitialGameState({ seed: 4105, aiFactionCount: 1 });
+    const playerUnit = gameState.units.find((unit) => unit.owner === "player");
+    const enemyUnit = gameState.units.find((unit) => unit.owner === "enemy");
+    expect(playerUnit && enemyUnit).toBeTruthy();
+    if (!playerUnit || !enemyUnit) {
+      return;
+    }
+    playerUnit.q = 3;
+    playerUnit.r = 2;
+    enemyUnit.q = 4;
+    enemyUnit.r = 2;
+    recomputeVisibility(gameState);
 
     const uiAtWar = deriveUiSurface(gameState, playerUnit, null, [], []);
-    expect(uiAtWar.uiActions.canToggleDiplomacy).toBe(true);
-    expect(uiAtWar.uiActions.diplomacyTargetOwner).toBe("enemy");
-    expect(uiAtWar.uiActions.diplomacyActionLabel).toBe("Offer Peace");
+    expect(uiAtWar.uiActions.canManageDiplomacy).toBe(true);
+    expect(uiAtWar.uiActions.diplomacyRelations.length).toBe(1);
+    expect(uiAtWar.uiActions.diplomacyRelations[0].owner).toBe("enemy");
+    expect(uiAtWar.uiActions.diplomacyRelations[0].actionLabel).toBe("Offer Peace");
 
     expect(offerPeace("player", "enemy", gameState).ok).toBe(true);
     const uiAtPeace = deriveUiSurface(gameState, playerUnit, null, [], []);
-    expect(uiAtPeace.uiActions.diplomacyStatus).toBe("peace");
-    expect(uiAtPeace.uiActions.diplomacyActionLabel).toBe("Declare War");
+    expect(uiAtPeace.uiActions.diplomacyRelations[0].status).toBe("peace");
+    expect(uiAtPeace.uiActions.diplomacyRelations[0].actionLabel).toBe("Declare War");
   });
 
   it("keeps enemy AI from attacking player units while at peace", () => {
@@ -101,6 +131,7 @@ describe("diplomacy system", () => {
     enemyUnit.minAttackRange = 1;
     enemyUnit.q = 4;
     enemyUnit.r = 2;
+    recomputeVisibility(gameState);
 
     gameState.cities.push(createCity("enemy-city-safe", "enemy", 8, 8));
     const healthBefore = playerUnit.health;
@@ -138,4 +169,3 @@ function createCity(id, owner, q, r) {
     queue: [{ kind: "unit", id: "warrior" }],
   };
 }
-
