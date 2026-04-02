@@ -5,6 +5,7 @@ import {
   CITY_QUEUE_MAX,
   canFoundCity,
   canRushBuyCityQueueFront,
+  computeCityYield,
   getAllProductionBuildings,
   getBuildingDefinition,
   getFoundCityReasonText,
@@ -15,6 +16,7 @@ import { canSkipUnit, getSkipUnitReasonText } from "./unitActionSystem.js";
 /**
  * @typedef {{ kind: "unit"|"building", id: string }} QueueItem
  */
+const ETA_SIM_MAX_TURNS = 24;
 
 /**
  * @param {import("../core/types.js").GameState} gameState
@@ -160,6 +162,11 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
   const growthRemaining = selectedPlayerCity ? Math.max(0, growthThreshold - Math.max(0, selectedCity.growthProgress ?? 0)) : 0;
   const goldBalance = cityEconomyBucket?.goldBalance ?? 0;
   const productionRate = Math.max(1, localProduction);
+  const estimateChoiceEtaTurns =
+    selectedPlayerCity && selectedCity
+      ? (cost, stock = 0) => estimateTurnsWithCitySimulation(gameState, selectedCity.id, cost, stock, productionRate)
+      : (cost, stock = 0) => computeEtaTurns(cost, stock, productionRate);
+  const queueEtaSimulation = selectedPlayerCity && selectedCity ? createCityEtaSimulation(gameState, selectedCity.id) : null;
   const rushBuyCheck = selectedPlayerCity ? canRushBuyCityQueueFront(selectedCity.id, gameState) : { ok: false, reason: "city-not-selected" };
   const disabledUnitIds = new Set(cityEconomyBucket?.disabledUnitIds ?? []);
   const selectedUnitDisabled = !!selectedUnit && disabledUnitIds.has(selectedUnit.id);
@@ -179,7 +186,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
       unlocked,
       unlockTechId: definition.unlockedByTech ?? null,
     });
-    const etaTurns = computeEtaTurns(cost, 0, productionRate);
+    const etaTurns = estimateChoiceEtaTurns(cost, 0);
     return {
       type,
       cost,
@@ -231,7 +238,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
       missingRequiredBuilding,
       unlockTechId: definition?.unlockedByTech ?? null,
     });
-    const etaTurns = computeEtaTurns(cost, 0, productionRate);
+    const etaTurns = estimateChoiceEtaTurns(cost, 0);
     return {
       id,
       cost,
@@ -284,6 +291,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
     productionProgress,
     productionRate,
     selectedPlayerCity,
+    queueEtaSimulation,
   });
 
   const disabledActionHints = buildDisabledActionHints({
@@ -501,7 +509,7 @@ function getBuildingQueueReason({
   return { code: null, text: null, tag: null };
 }
 
-function buildQueueSlots({ queueItems, productionProgress, productionRate, selectedPlayerCity }) {
+function buildQueueSlots({ queueItems, productionProgress, productionRate, selectedPlayerCity, queueEtaSimulation }) {
   const slots = [];
   let runningProgress = Math.max(0, productionProgress);
 
@@ -527,9 +535,11 @@ function buildQueueSlots({ queueItems, productionProgress, productionRate, selec
     }
 
     const cost = getQueueItemCost(queueItem);
-    const etaTurns = computeEtaTurns(cost, runningProgress, productionRate);
-    const requiredTurns = etaTurns;
-    runningProgress = Math.max(0, runningProgress + requiredTurns * productionRate - cost);
+    const etaEstimate = queueEtaSimulation
+      ? simulateTurnsForCost(queueEtaSimulation, cost, runningProgress, productionRate)
+      : buildLinearEtaEstimate(cost, runningProgress, productionRate);
+    const etaTurns = etaEstimate.turns;
+    runningProgress = etaEstimate.remainingProgress;
 
     const label = formatQueueItemLabel(queueItem);
     slots.push({
@@ -618,6 +628,104 @@ function hasOwnerPresence(gameState, owner) {
 
 function computeEtaTurns(cost, stock, productionRate) {
   return Math.max(0, Math.ceil(Math.max(0, cost - stock) / Math.max(1, productionRate)));
+}
+
+function estimateTurnsWithCitySimulation(gameState, cityId, cost, stock, fallbackRate) {
+  const simulation = createCityEtaSimulation(gameState, cityId);
+  if (!simulation) {
+    return computeEtaTurns(cost, stock, fallbackRate);
+  }
+  return simulateTurnsForCost(simulation, cost, stock, fallbackRate).turns;
+}
+
+function buildLinearEtaEstimate(cost, stock, productionRate) {
+  const turns = computeEtaTurns(cost, stock, productionRate);
+  const remainingProgress = Math.max(0, Math.max(0, stock) + turns * Math.max(1, productionRate) - Math.max(0, cost));
+  return { turns, remainingProgress };
+}
+
+function createCityEtaSimulation(gameState, cityId) {
+  const simulationState = structuredClone(gameState);
+  const city = simulationState.cities.find((candidate) => candidate.id === cityId) ?? null;
+  if (!city) {
+    return null;
+  }
+
+  city.population = Math.max(1, Math.round(Number(city.population) || 1));
+  city.growthProgress = Math.max(0, Number(city.growthProgress) || 0);
+  if (!Array.isArray(city.workedHexes)) {
+    city.workedHexes = [];
+  }
+  if (!city.yieldLastTurn || typeof city.yieldLastTurn !== "object") {
+    city.yieldLastTurn = {
+      food: 0,
+      production: 0,
+      gold: 0,
+      science: 0,
+    };
+  }
+
+  return {
+    gameState: simulationState,
+    city,
+  };
+}
+
+function simulateTurnsForCost(simulation, cost, stock, fallbackRate) {
+  const normalizedCost = Math.max(0, Number(cost) || 0);
+  let progress = Math.max(0, Number(stock) || 0);
+  if (normalizedCost <= 0) {
+    return { turns: 0, remainingProgress: progress };
+  }
+
+  let turns = 0;
+  while (progress < normalizedCost && turns < ETA_SIM_MAX_TURNS) {
+    progress += advanceCityEtaSimulationTurn(simulation);
+    turns += 1;
+  }
+
+  if (progress < normalizedCost) {
+    const remaining = normalizedCost - progress;
+    const fallbackTurns = computeEtaTurns(remaining, 0, resolveSimulationProductionRate(simulation, fallbackRate));
+    turns += fallbackTurns;
+    progress += fallbackTurns * resolveSimulationProductionRate(simulation, fallbackRate);
+  }
+
+  return {
+    turns,
+    remainingProgress: Math.max(0, progress - normalizedCost),
+  };
+}
+
+function advanceCityEtaSimulationTurn(simulation) {
+  const city = simulation.city;
+  if (!city) {
+    return 0;
+  }
+
+  const cityYield = computeCityYield(city.id, simulation.gameState);
+  const productionIncome = Math.max(0, Number(cityYield.production) || 0);
+  const foodIncome = Math.max(0, Number(cityYield.food) || 0);
+
+  city.growthProgress = Math.max(0, Number(city.growthProgress) || 0) + foodIncome;
+  let growthThreshold = getGrowthThreshold(city.population);
+  while (city.growthProgress >= growthThreshold) {
+    city.growthProgress -= growthThreshold;
+    city.population += 1;
+    growthThreshold = getGrowthThreshold(city.population);
+  }
+
+  city.yieldLastTurn = computeCityYield(city.id, simulation.gameState);
+  return productionIncome;
+}
+
+function resolveSimulationProductionRate(simulation, fallbackRate) {
+  const simulatedRate = Math.max(0, Number(simulation.city?.yieldLastTurn?.production) || 0);
+  return Math.max(1, simulatedRate, Number(fallbackRate) || 0);
+}
+
+function getGrowthThreshold(population) {
+  return 8 + (Math.max(1, Number(population) || 1) - 1) * 4;
 }
 
 function getRushBuyReasonText(reason) {

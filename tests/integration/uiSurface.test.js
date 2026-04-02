@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createInitialGameState } from "../../src/core/gameState.js";
+import { createInitialGameState, getTileAt } from "../../src/core/gameState.js";
 import { getAttackableTargets } from "../../src/systems/combatSystem.js";
 import { foundCity, getFoundCityReasonText } from "../../src/systems/citySystem.js";
 import { deriveUiSurface } from "../../src/systems/uiSurfaceSystem.js";
@@ -97,6 +97,38 @@ describe("UI surface hints/actions", () => {
     expect(ui.uiActions.canRushBuyCityQueueFront).toBe(false);
     expect(ui.uiActions.cityRushBuyReason).toContain("Queue is empty");
     expect(ui.uiHints.primary).toContain("City selected");
+  });
+
+  it("simulates early-turn production for eta even when local yield cache is stale", () => {
+    const gameState = createInitialGameState({ seed: 144 });
+    const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
+    expect(settler).toBeTruthy();
+    if (!settler) {
+      return;
+    }
+
+    const founded = foundCity(settler.id, gameState);
+    expect(founded.ok).toBe(true);
+
+    const city = gameState.cities[0];
+    for (const hex of city.workedHexes) {
+      const tile = getTileAt(gameState.map, hex.q, hex.r);
+      if (!tile) {
+        continue;
+      }
+      tile.yields.food = 1;
+      tile.yields.production = 2;
+      tile.yields.gold = 0;
+    }
+    city.yieldLastTurn.production = 1;
+    city.queue = [{ kind: "unit", id: "warrior" }];
+    city.productionProgress = 0;
+
+    const ui = deriveUiSurface(gameState, null, city, [], []);
+    const warriorChoice = ui.uiActions.cityProductionChoices.find((choice) => choice.type === "warrior");
+    expect(ui.uiActions.cityLocalProduction).toBe(1);
+    expect(warriorChoice?.etaTurns).toBe(3);
+    expect(ui.uiActions.cityQueueSlots[0]?.etaTurns).toBe(3);
   });
 
   it("enables rush-buy for front queue item when city has enough gold", () => {
