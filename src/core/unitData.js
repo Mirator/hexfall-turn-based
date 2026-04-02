@@ -10,6 +10,7 @@ const UNIT_DEFINITIONS = {
     maxMovement: 2,
     canFoundCity: false,
     productionCost: 6,
+    goldUpkeep: 1,
     unlockedByDefault: true,
   },
   settler: {
@@ -23,6 +24,7 @@ const UNIT_DEFINITIONS = {
     maxMovement: 2,
     canFoundCity: true,
     productionCost: 8,
+    goldUpkeep: 1,
     unlockedByDefault: true,
   },
   spearman: {
@@ -36,6 +38,7 @@ const UNIT_DEFINITIONS = {
     maxMovement: 2,
     canFoundCity: false,
     productionCost: 10,
+    goldUpkeep: 1,
     unlockedByDefault: false,
     unlockedByTech: "bronzeWorking",
   },
@@ -50,6 +53,7 @@ const UNIT_DEFINITIONS = {
     maxMovement: 2,
     canFoundCity: false,
     productionCost: 9,
+    goldUpkeep: 1,
     unlockedByDefault: false,
     unlockedByTech: "archery",
   },
@@ -89,6 +93,7 @@ export function createUnit(params) {
     movementRemaining: definition.maxMovement,
     maxMovement: definition.maxMovement,
     hasActed: false,
+    disabled: false,
   };
 }
 

@@ -6,35 +6,35 @@ export const TERRAIN = {
     moveCost: 1,
     blocksMovement: false,
     fillColor: 0xdbc79a,
-    yields: { food: 2, production: 1, science: 0 },
+    yields: { food: 2, production: 1, gold: 1, science: 0 },
   },
   forest: {
     terrainType: "forest",
     moveCost: 2,
     blocksMovement: false,
     fillColor: 0x93b274,
-    yields: { food: 1, production: 2, science: 0 },
+    yields: { food: 1, production: 2, gold: 0, science: 0 },
   },
   hill: {
     terrainType: "hill",
     moveCost: 2,
     blocksMovement: false,
     fillColor: 0xb69365,
-    yields: { food: 0, production: 2, science: 1 },
+    yields: { food: 0, production: 2, gold: 1, science: 0 },
   },
   mountain: {
     terrainType: "mountain",
     moveCost: 99,
     blocksMovement: true,
     fillColor: 0x7b7a7a,
-    yields: { food: 0, production: 0, science: 0 },
+    yields: { food: 0, production: 0, gold: 0, science: 0 },
   },
   water: {
     terrainType: "water",
     moveCost: 99,
     blocksMovement: true,
     fillColor: 0x6ba4cf,
-    yields: { food: 0, production: 0, science: 0 },
+    yields: { food: 0, production: 0, gold: 0, science: 0 },
   },
 };
 
@@ -50,7 +50,7 @@ export function generateTerrainTiles(width, height, options = {}) {
   for (let q = 0; q < width; q += 1) {
     for (let r = 0; r < height; r += 1) {
       const terrainType = getGeneratedTerrainType(q, r, seed);
-      const tile = { q, r, terrainType, moveCost: 0, blocksMovement: false, yields: { food: 0, production: 0, science: 0 } };
+      const tile = { q, r, terrainType, moveCost: 0, blocksMovement: false, yields: { food: 0, production: 0, gold: 0, science: 0 } };
       applyTerrainDefinition(tile, terrainType);
       tiles.push(tile);
     }

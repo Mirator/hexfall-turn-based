@@ -204,14 +204,17 @@ function createInitialEconomy(owners) {
 
 function createEmptyEconomyBucket() {
   return {
-    foodStock: 0,
-    productionStock: 0,
-    sciencePerTurn: 0,
-    lastTurnIncome: {
+    goldBalance: 0,
+    goldIncomeLastTurn: 0,
+    goldUpkeepLastTurn: 0,
+    goldNetLastTurn: 0,
+    disabledUnitIds: [],
+    outputLastTurn: {
       food: 0,
       production: 0,
-      science: 0,
+      gold: 0,
     },
+    sciencePerTurn: 0,
   };
 }
 

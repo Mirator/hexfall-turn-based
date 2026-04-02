@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cloneGameState, createInitialGameState } from "../../src/core/gameState.js";
+import { createUnit } from "../../src/core/unitData.js";
 import {
   executeEnemyTurnPrelude,
   executeEnemyTurnStep,
@@ -14,11 +15,9 @@ describe("enemy turn flow", () => {
   it("enemy can counter-attack adjacent player units", () => {
     const gameState = createInitialGameState();
     const playerUnit = gameState.units.find((unit) => unit.owner === "player");
-    const enemyUnit = gameState.units.find((unit) => unit.owner === "enemy");
 
     expect(playerUnit).toBeTruthy();
-    expect(enemyUnit).toBeTruthy();
-    if (!playerUnit || !enemyUnit) {
+    if (!playerUnit) {
       return;
     }
 
@@ -30,28 +29,99 @@ describe("enemy turn flow", () => {
       r: 8,
       population: 1,
       workedHexes: [{ q: 8, r: 8 }],
-      yieldLastTurn: { food: 0, production: 0, science: 0 },
+      yieldLastTurn: { food: 0, production: 0, gold: 0, science: 0 },
       identity: "balanced",
+      specialization: "balanced",
       growthProgress: 0,
+      productionProgress: 0,
       health: 12,
       maxHealth: 12,
-      queue: ["warrior"],
+      productionTab: "units",
+      buildings: [],
+      campus: {
+        built: false,
+        adjacency: 0,
+        adjacencyBreakdown: { mountains: 0, forests: 0, nearbyCampuses: 0 },
+      },
+      queue: [{ kind: "unit", id: "warrior" }],
     });
+
+    gameState.units = gameState.units.filter((unit) => unit.owner !== "enemy");
+    const enemyUnit = createUnit({
+      id: "enemy-2",
+      owner: "enemy",
+      type: "warrior",
+      q: 4,
+      r: 2,
+    });
+    gameState.units.push(enemyUnit);
 
     // Position units as adjacent to force attack behavior.
     playerUnit.q = 3;
     playerUnit.r = 2;
-    enemyUnit.q = 4;
-    enemyUnit.r = 2;
 
     const healthBefore = playerUnit.health;
     beginEnemyTurn(gameState);
-    runEnemyTurn(gameState);
+    runEnemyTurn(gameState, "enemy");
     beginPlayerTurn(gameState);
 
     expect(playerUnit.health).toBeLessThan(healthBefore);
     expect(gameState.turnState.phase).toBe("player");
     expect(gameState.turnState.turn).toBe(2);
+  });
+
+  it("disabled enemy units are gated and cannot attack", () => {
+    const gameState = createInitialGameState({ seed: 7001 });
+    const playerUnit = gameState.units.find((unit) => unit.owner === "player");
+    expect(playerUnit).toBeTruthy();
+    if (!playerUnit) {
+      return;
+    }
+
+    gameState.cities.push({
+      id: "enemy-city-test",
+      owner: "enemy",
+      q: 8,
+      r: 8,
+      population: 1,
+      workedHexes: [{ q: 8, r: 8 }],
+      yieldLastTurn: { food: 0, production: 0, gold: 0, science: 0 },
+      identity: "balanced",
+      specialization: "balanced",
+      growthProgress: 0,
+      productionProgress: 0,
+      health: 12,
+      maxHealth: 12,
+      productionTab: "units",
+      buildings: [],
+      campus: {
+        built: false,
+        adjacency: 0,
+        adjacencyBreakdown: { mountains: 0, forests: 0, nearbyCampuses: 0 },
+      },
+      queue: [{ kind: "unit", id: "warrior" }],
+    });
+
+    gameState.units = gameState.units.filter((unit) => unit.owner !== "enemy");
+    const enemyUnit = createUnit({
+      id: "enemy-2",
+      owner: "enemy",
+      type: "warrior",
+      q: 4,
+      r: 2,
+    });
+    enemyUnit.disabled = true;
+    gameState.units.push(enemyUnit);
+
+    playerUnit.q = 3;
+    playerUnit.r = 2;
+    const healthBefore = playerUnit.health;
+
+    beginEnemyTurn(gameState);
+    runEnemyTurn(gameState, "enemy");
+    beginPlayerTurn(gameState);
+
+    expect(playerUnit.health).toBe(healthBefore);
   });
 
   it("auto-founds first enemy city from settler start", () => {

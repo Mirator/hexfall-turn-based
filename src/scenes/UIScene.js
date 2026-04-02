@@ -540,6 +540,15 @@ export class UIScene extends Phaser.Scene {
     this.cityQueueRailDetailsPrimary = this.createLabel("", 0, 0, "13px", "#3b2a16", 17).setVisible(false);
     this.cityQueueRailDetailsSecondary = this.createLabel("", 0, 0, "13px", "#5d4b34", 17).setVisible(false);
     this.cityQueueRailDetailsTertiary = this.createLabel("", 0, 0, "12px", "#5d4b34", 17).setVisible(false);
+    this.cityQueueRushBuyButton = this.createButton("Rush Buy", "city-rush-buy", () => gameEvents.emit("city-queue-rush-buy-requested"), {
+      variant: "warning",
+      width: 128,
+      height: 26,
+      fontSize: "12px",
+    });
+    this.cityQueueRushBuyButton.rectangle.setDepth(18);
+    this.cityQueueRushBuyButton.label.setDepth(19);
+    this.setCompositeVisible(this.cityQueueRushBuyButton, false);
 
     this.techTreeModalPanel = this.add
       .rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelElevatedBg, 0.98)
@@ -1231,6 +1240,13 @@ export class UIScene extends Phaser.Scene {
     }
     if (actionId.startsWith("city-queue-slot-")) {
       return null;
+    }
+    if (actionId === "city-rush-buy") {
+      return (
+        actionHints["city-rush-buy"] ??
+        this.latestState.uiActions?.cityRushBuyReason ??
+        "Rush-buy is unavailable right now."
+      );
     }
     if (
       actionId.startsWith("city-queue-move-up-") ||
@@ -2285,10 +2301,14 @@ export class UIScene extends Phaser.Scene {
   setCityQueueRailVisible(visible) {
     this.cityQueueRailPanel.setVisible(visible);
     this.cityQueueRailTitle.setVisible(visible);
+    this.setCompositeVisible(this.cityQueueRushBuyButton, visible);
     if (!visible) {
       this.cityQueueRailDetailsPrimary.setVisible(false);
       this.cityQueueRailDetailsSecondary.setVisible(false);
       this.cityQueueRailDetailsTertiary.setVisible(false);
+      this.setButtonEnabled(this.cityQueueRushBuyButton, false);
+      this.setButtonWarning(this.cityQueueRushBuyButton, false);
+      this.setButtonLabel(this.cityQueueRushBuyButton, "Rush Buy");
     }
   }
 
@@ -2316,6 +2336,21 @@ export class UIScene extends Phaser.Scene {
     this.cityQueueRailPanel.setDisplaySize(notificationWidth, panelHeight);
     this.cityQueueRailTitle.setPosition(notificationLeft + 12, queueTop + 10);
     this.setCityQueueRailVisible(true);
+    const rushBuyButtonX = notificationLeft + notificationWidth - this.cityQueueRushBuyButton.width / 2 - 10;
+    const rushBuyButtonY = queueTop + 17;
+    this.cityQueueRushBuyButton.rectangle.setPosition(rushBuyButtonX, rushBuyButtonY);
+    this.cityQueueRushBuyButton.label.setPosition(rushBuyButtonX, rushBuyButtonY);
+    const canIssueOrders =
+      this.latestState.turnState?.phase === "player" &&
+      this.latestState.match?.status === "ongoing" &&
+      !this.latestState.pendingCityResolution &&
+      !this.latestState.turnPlayback?.active &&
+      !this.latestState.animationState?.busy;
+    const canRushBuy = !!this.latestState.uiActions?.canRushBuyCityQueueFront;
+    const rushBuyCost = Math.max(0, Number(this.latestState.uiActions?.cityRushBuyCost ?? 0));
+    this.setButtonLabel(this.cityQueueRushBuyButton, canRushBuy ? `Rush Buy (${rushBuyCost}g)` : "Rush Buy");
+    this.setButtonEnabled(this.cityQueueRushBuyButton, canIssueOrders && canRushBuy);
+    this.setButtonWarning(this.cityQueueRushBuyButton, !canRushBuy);
     const queueControlLayout = this.resizeQueueRailControls(notificationWidth, isTabletLayout);
 
     const lineWrap = Math.max(120, notificationWidth - 22);
@@ -2376,6 +2411,11 @@ export class UIScene extends Phaser.Scene {
       this.cityQueueRailDetailsPrimary.setPosition(correctedX - notificationWidth / 2 + 12, this.cityQueueRailDetailsPrimary.y);
       this.cityQueueRailDetailsSecondary.setPosition(correctedX - notificationWidth / 2 + 12, this.cityQueueRailDetailsSecondary.y);
       this.cityQueueRailDetailsTertiary.setPosition(correctedX - notificationWidth / 2 + 12, this.cityQueueRailDetailsTertiary.y);
+      this.cityQueueRushBuyButton.rectangle.setPosition(correctedX + notificationWidth / 2 - this.cityQueueRushBuyButton.width / 2 - 10, rushBuyButtonY);
+      this.cityQueueRushBuyButton.label.setPosition(
+        this.cityQueueRushBuyButton.rectangle.x,
+        this.cityQueueRushBuyButton.rectangle.y
+      );
       this.layoutQueueVerticalStack(correctedX, queueStackStartY, queueControlLayout.innerGap, queueControlLayout.rowGap);
     }
   }
@@ -2417,8 +2457,10 @@ export class UIScene extends Phaser.Scene {
     const readyUnits = turnAssistant.readyUnits ?? turnAssistant.readyCount ?? 0;
     const pendingQueues = turnAssistant.emptyQueues ?? turnAssistant.emptyQueueCityCount ?? 0;
     const pendingOrders = readyUnits + pendingQueues;
-    const projected = gameState.projectedNetIncome ?? gameState.projectedIncome ?? { food: 0, production: 0, science: 0 };
-    const economy = gameState.economy?.player ?? { foodStock: 0, productionStock: 0, sciencePerTurn: 0 };
+    const projected = gameState.projectedNetIncome ?? gameState.projectedIncome ?? { food: 0, production: 0, gold: 0, science: 0 };
+    const economy = gameState.economy?.player ?? { goldBalance: 0, goldNetLastTurn: 0 };
+    const growthSummary = buildGrowthSummary(gameState);
+    const queueSummary = buildQueueSummary(gameState);
 
     if (!this.contextPanelPinned && selectionKey !== this.lastContextSelectionKey && selectionKey !== "none") {
       this.contextPanelExpanded = true;
@@ -2430,16 +2472,15 @@ export class UIScene extends Phaser.Scene {
     const turnMinFontSize = this.scale.width < TABLET_LAYOUT_BREAKPOINT ? 17 : 19;
     const turnMaxWidth = Math.max(140, this.topHudPanel.displayWidth - 24);
     this.fitTextSizeToWidth(this.turnLabel, turnPreferredFontSize, turnMinFontSize, turnMaxWidth);
-    this.foodLabel.setText(`Food: ${economy.foodStock}`);
-    this.foodDeltaLabel.setText(`(${formatSigned(projected.food)})`);
-    this.foodDeltaLabel.setColor(getDeltaColor(projected.food));
-    this.productionLabel.setText(`Production: ${economy.productionStock}`);
-    this.productionDeltaLabel.setText(`(${formatSigned(projected.production)})`);
-    this.productionDeltaLabel.setColor(getDeltaColor(projected.production));
-    const sciencePerTurn = economy.sciencePerTurn ?? gameState.research?.sciencePerTurn ?? 0;
-    this.scienceLabel.setText(`Science/Turn: ${formatMetric(sciencePerTurn)}`);
-    this.scienceDeltaLabel.setText(`(${formatSigned(projected.science)})`);
-    this.scienceDeltaLabel.setColor(getDeltaColor(projected.science));
+    this.foodLabel.setText(`Food: ${formatSigned(projected.food)}/turn`);
+    this.foodDeltaLabel.setText(`(${growthSummary})`);
+    this.foodDeltaLabel.setColor(SEMANTIC_COLORS.textMuted);
+    this.productionLabel.setText(`Production: ${formatSigned(projected.production)}/turn`);
+    this.productionDeltaLabel.setText(`(${queueSummary})`);
+    this.productionDeltaLabel.setColor(SEMANTIC_COLORS.textMuted);
+    this.scienceLabel.setText(`Gold: ${formatMetric(economy.goldBalance ?? 0)}`);
+    this.scienceDeltaLabel.setText(`(${formatSigned(projected.gold ?? economy.goldNetLastTurn ?? 0)})`);
+    this.scienceDeltaLabel.setColor(getDeltaColor(projected.gold ?? economy.goldNetLastTurn ?? 0));
     this.devVisionLabel.setText(`Dev Vision: ${gameState.devVisionEnabled ? "ON (V)" : "OFF (V)"}`);
     this.devVisionLabel.setColor(gameState.devVisionEnabled ? "#2f7a41" : "#5a4224");
     this.setSfxMuted(this.uiSfxMuted);
@@ -2451,11 +2492,11 @@ export class UIScene extends Phaser.Scene {
           ? `${pendingOrders} actions still waiting`
           : "Ready to end turn";
     this.forecastLinePrimary.setText(
-      `Net: F ${formatSigned(projected.food)} | P ${formatSigned(projected.production)} | S ${formatSigned(projected.science)}`
+      `Net: F ${formatSigned(projected.food)} | P ${formatSigned(projected.production)} | G ${formatSigned(projected.gold ?? 0)}`
     );
     this.forecastLineSecondary.setText(`Pending: Units ${readyUnits}, Queues ${pendingQueues}`);
     this.forecastLineTertiary.setText(`Status: ${forecastStatus}`);
-    const forecastWarning = pendingOrders > 0 || projected.food < 0 || projected.production < 0 || projected.science < 0;
+    const forecastWarning = pendingOrders > 0 || projected.food < 0 || projected.production < 0 || (projected.gold ?? 0) < 0;
     this.forecastPanel.setFillStyle(forecastWarning ? 0xf2e1c8 : SEMANTIC_COLORS.panelElevatedBg, 0.95);
     this.forecastPanel.setStrokeStyle(PANEL_STROKE_WIDTH, forecastWarning ? 0x8f3a2a : SEMANTIC_COLORS.panelBorder, 0.86);
     this.forecastLineTertiary.setColor(
@@ -2788,7 +2829,19 @@ export class UIScene extends Phaser.Scene {
     const modals = `${this.techTreeModalOpen ? 1 : 0}:${this.pauseMenuOpen ? 1 : 0}:${this.restartConfirmOpen ? 1 : 0}:${
       this.cityResolutionOpen ? 1 : 0
     }`;
-    return [selectionKey, contextType, turnState, matchState, blockers, mapSize, localUi, modals].join("|");
+    const cityUi =
+      gameState.uiActions?.contextMenuType === "city"
+        ? [
+            gameState.uiActions?.cityProductionProgress ?? 0,
+            gameState.uiActions?.cityQueueFrontRemainingProduction ?? 0,
+            gameState.uiActions?.cityRushBuyCost ?? 0,
+            gameState.uiActions?.canRushBuyCityQueueFront ? 1 : 0,
+            (gameState.uiActions?.cityQueueSlots ?? [])
+              .map((slot) => (slot.empty ? "-" : `${slot.kind ?? "item"}:${slot.id ?? "?"}`))
+              .join(","),
+          ].join(":")
+        : "none";
+    return [selectionKey, contextType, turnState, matchState, blockers, mapSize, localUi, modals, cityUi].join("|");
   }
 
   syncContextMenu(gameState, selectedUnit, selectedCity, canIssueOrders) {
@@ -2825,20 +2878,32 @@ export class UIScene extends Phaser.Scene {
       this.setCityControlsVisible(expanded);
       this.setUnitControlsVisible(false);
 
-        if (expanded) {
-          const localYield = selectedCity.yieldLastTurn ?? { food: 0, production: 0, science: 0 };
-          const productionStock = gameState.uiActions?.cityProductionStock ?? 0;
-          const localProduction = gameState.uiActions?.cityLocalProduction ?? 0;
-          const scienceBreakdown = formatCityScienceBreakdown(selectedCity.id, gameState);
-          this.contextPanelMetaPrimary.setText(
-            `Local Food ${localYield.food} | Local Production ${localYield.production} | Local Science ${localYield.science} | Identity ${selectedCity.identity}`
-          );
-          this.contextPanelMetaSecondary.setText(
-            scienceBreakdown
-              ? `${scienceBreakdown} | Production stock ${productionStock} | Local production per turn +${localProduction}`
-              : `Production stock ${productionStock} | Local production per turn +${localProduction}`
-          );
-        }
+      if (expanded) {
+        const localYield = selectedCity.yieldLastTurn ?? { food: 0, production: 0, science: 0, gold: 0 };
+        const productionProgress = Math.max(0, gameState.uiActions?.cityProductionProgress ?? 0);
+        const queueFrontRemaining = Math.max(0, gameState.uiActions?.cityQueueFrontRemainingProduction ?? 0);
+        const queueHasFront = (gameState.uiActions?.cityQueueSlots ?? []).some((slot) => !slot.empty);
+        const queueFrontCost = queueHasFront ? productionProgress + queueFrontRemaining : 0;
+        const localProduction = Math.max(0, gameState.uiActions?.cityLocalProduction ?? 0);
+        const scienceBreakdown = formatCityScienceBreakdown(selectedCity.id, gameState);
+        const rushBuyEnabled = !!gameState.uiActions?.canRushBuyCityQueueFront;
+        const rushBuyCost = Math.max(0, gameState.uiActions?.cityRushBuyCost ?? 0);
+        const rushBuyReason = gameState.uiActions?.cityRushBuyReason ?? null;
+        const rushBuyText = queueHasFront
+          ? rushBuyEnabled
+            ? `Rush buy ${rushBuyCost}g`
+            : `Rush buy blocked: ${rushBuyReason ?? "Unavailable"}`
+          : "Rush buy unavailable (queue empty)";
+        const progressText = queueHasFront ? `${productionProgress}/${queueFrontCost}` : "0 (queue empty)";
+        this.contextPanelMetaPrimary.setText(
+          `Local Food ${localYield.food} | Local Production ${localYield.production} | Local Gold ${localYield.gold ?? 0} | Local Science ${localYield.science} | Identity ${selectedCity.identity}`
+        );
+        this.contextPanelMetaSecondary.setText(
+          scienceBreakdown
+            ? `${scienceBreakdown} | Production progress ${progressText} | Local production per turn +${localProduction} | ${rushBuyText}`
+            : `Production progress ${progressText} | Local production per turn +${localProduction} | ${rushBuyText}`
+        );
+      }
 
       const productionTab = gameState.uiActions?.cityProductionTab ?? "units";
       for (let i = 0; i < this.cityProductionTabButtons.length; i += 1) {
@@ -2963,11 +3028,12 @@ export class UIScene extends Phaser.Scene {
 
   getSelectedInfoText(selectedUnit, selectedCity) {
     if (selectedUnit) {
-      return `Unit ${formatUnitLabel(selectedUnit.type)} | Health ${selectedUnit.health}/${selectedUnit.maxHealth} | Movement ${selectedUnit.movementRemaining}/${selectedUnit.maxMovement} | Attack ${selectedUnit.attack} | ${selectedUnit.hasActed ? "Acted" : "Ready"}`;
+      const status = selectedUnit.disabled ? "Disabled" : selectedUnit.hasActed ? "Acted" : "Ready";
+      return `Unit ${formatUnitLabel(selectedUnit.type)} | Health ${selectedUnit.health}/${selectedUnit.maxHealth} | Movement ${selectedUnit.movementRemaining}/${selectedUnit.maxMovement} | Attack ${selectedUnit.attack} | ${status}`;
     }
     if (selectedCity) {
-      const localYield = selectedCity.yieldLastTurn ?? { food: 0, production: 0, science: 0 };
-      return `City Population ${selectedCity.population} | Health ${selectedCity.health}/${selectedCity.maxHealth} | Identity ${selectedCity.identity} | Specialization ${selectedCity.specialization ?? "balanced"} | Local Food ${localYield.food} | Local Production ${localYield.production} | Local Science ${localYield.science}`;
+      const localYield = selectedCity.yieldLastTurn ?? { food: 0, production: 0, gold: 0, science: 0 };
+      return `City Population ${selectedCity.population} | Health ${selectedCity.health}/${selectedCity.maxHealth} | Identity ${selectedCity.identity} | Specialization ${selectedCity.specialization ?? "balanced"} | Local Food ${localYield.food} | Local Production ${localYield.production} | Local Gold ${localYield.gold ?? 0} | Local Science ${localYield.science}`;
     }
     return "No unit or city selected.";
   }
@@ -2986,12 +3052,23 @@ export class UIScene extends Phaser.Scene {
   }
 
   buildCityQueueRailDetails(selectedCity, gameState) {
-    const localYield = selectedCity.yieldLastTurn ?? { food: 0, production: 0, science: 0 };
-    const productionStock = gameState.uiActions?.cityProductionStock ?? 0;
-    const localProduction = gameState.uiActions?.cityLocalProduction ?? 0;
+    const localYield = selectedCity.yieldLastTurn ?? { food: 0, production: 0, gold: 0, science: 0 };
+    const productionProgress = Math.max(0, gameState.uiActions?.cityProductionProgress ?? 0);
+    const queueFrontRemaining = Math.max(0, gameState.uiActions?.cityQueueFrontRemainingProduction ?? 0);
+    const localProduction = Math.max(0, gameState.uiActions?.cityLocalProduction ?? 0);
     const scienceBreakdown = formatCityScienceBreakdown(selectedCity.id, gameState);
     const queueSlots = gameState.uiActions?.cityQueueSlots ?? [];
     const nextSlot = queueSlots.find((slot) => !slot.empty) ?? null;
+    const queueFrontCost = nextSlot ? productionProgress + queueFrontRemaining : 0;
+    const progressText = nextSlot ? `${productionProgress}/${queueFrontCost}` : "0 (queue empty)";
+    const rushBuyEnabled = !!gameState.uiActions?.canRushBuyCityQueueFront;
+    const rushBuyCost = Math.max(0, gameState.uiActions?.cityRushBuyCost ?? 0);
+    const rushBuyReason = gameState.uiActions?.cityRushBuyReason ?? null;
+    const rushBuyText = nextSlot
+      ? rushBuyEnabled
+        ? `Rush buy ${rushBuyCost}g`
+        : `Rush buy blocked: ${rushBuyReason ?? "Unavailable"}`
+      : "Rush buy unavailable (queue empty)";
     const nextCompletion = !nextSlot
       ? "Queue is empty."
       : nextSlot.etaTurns === 0
@@ -3000,9 +3077,9 @@ export class UIScene extends Phaser.Scene {
     return {
       primary: `${formatCityName(selectedCity.id)} | Population ${selectedCity.population} | Identity ${selectedCity.identity}`,
       secondary: scienceBreakdown
-        ? `Local Food ${localYield.food} | Local Production ${localYield.production} | ${scienceBreakdown}`
-        : `Local Food ${localYield.food} | Local Production ${localYield.production} | Local Science ${localYield.science}`,
-      tertiary: `Production stock ${productionStock} | Local production per turn +${localProduction} | Next completion: ${nextCompletion}`,
+        ? `Local Food ${localYield.food} | Local Production ${localYield.production} | Local Gold ${localYield.gold ?? 0} | ${scienceBreakdown}`
+        : `Local Food ${localYield.food} | Local Production ${localYield.production} | Local Gold ${localYield.gold ?? 0} | Local Science ${localYield.science}`,
+      tertiary: `Production progress ${progressText} | Local production per turn +${localProduction} | ${rushBuyText} | Next completion: ${nextCompletion}`,
     };
   }
 
@@ -3984,6 +4061,15 @@ export class UIScene extends Phaser.Scene {
         detailsPrimary: this.cityQueueRailDetailsPrimary.text,
         detailsSecondary: this.cityQueueRailDetailsSecondary.visible ? this.cityQueueRailDetailsSecondary.text : "",
         detailsTertiary: this.cityQueueRailDetailsTertiary.visible ? this.cityQueueRailDetailsTertiary.text : "",
+        rushBuy: {
+          label: this.cityQueueRushBuyButton.label.text,
+          visible: this.cityQueueRushBuyButton.rectangle.visible && this.cityQueueRushBuyButton.label.visible,
+          enabled: this.cityQueueRushBuyButton.enabled,
+          x: this.cityQueueRushBuyButton.rectangle.x,
+          y: this.cityQueueRushBuyButton.rectangle.y,
+          width: this.cityQueueRushBuyButton.width,
+          height: this.cityQueueRushBuyButton.height,
+        },
         x: this.cityQueueRailPanel.x,
         y: this.cityQueueRailPanel.y,
         width: this.cityQueueRailPanel.displayWidth,
@@ -4492,6 +4578,68 @@ function scaledToScience(value) {
 
 function formatSigned(value) {
   return `${value >= 0 ? "+" : ""}${formatMetric(value)}`;
+}
+
+function buildGrowthSummary(gameState) {
+  const playerOwner = gameState?.factions?.playerOwner ?? "player";
+  const playerCities = (gameState?.cities ?? []).filter((city) => city.owner === playerOwner);
+  if (playerCities.length === 0) {
+    return "No cities";
+  }
+
+  let growingCities = 0;
+  let nextGrowthTurns = null;
+  for (const city of playerCities) {
+    const foodPerTurn = Math.max(0, city.yieldLastTurn?.food ?? 0);
+    if (foodPerTurn <= 0) {
+      continue;
+    }
+    growingCities += 1;
+    const threshold = Math.max(1, 8 + (Math.max(1, city.population ?? 1) - 1) * 4);
+    const progress = Math.max(0, city.growthProgress ?? 0);
+    const remaining = Math.max(0, threshold - progress);
+    const turnsToGrowth = Math.ceil(remaining / foodPerTurn);
+    if (nextGrowthTurns === null || turnsToGrowth < nextGrowthTurns) {
+      nextGrowthTurns = turnsToGrowth;
+    }
+  }
+
+  if (growingCities === 0) {
+    return `${playerCities.length} stalled`;
+  }
+
+  if (nextGrowthTurns === 0) {
+    return `${growingCities}/${playerCities.length} growing, next pop ready`;
+  }
+
+  return `${growingCities}/${playerCities.length} growing, next pop in ${formatTurns(nextGrowthTurns ?? 0)}`;
+}
+
+function buildQueueSummary(gameState) {
+  const playerOwner = gameState?.factions?.playerOwner ?? "player";
+  const playerCities = (gameState?.cities ?? []).filter((city) => city.owner === playerOwner);
+  if (playerCities.length === 0) {
+    return "No cities";
+  }
+
+  let activeQueues = 0;
+  let emptyQueues = 0;
+  let totalQueuedItems = 0;
+  for (const city of playerCities) {
+    const queue = Array.isArray(city.queue) ? city.queue : [];
+    totalQueuedItems += queue.length;
+    if (queue.length === 0) {
+      emptyQueues += 1;
+    } else {
+      activeQueues += 1;
+    }
+  }
+
+  if (activeQueues === 0) {
+    return `${emptyQueues} empty queues`;
+  }
+
+  return `${activeQueues} active, ${emptyQueues} empty (${totalQueuedItems} queued)`;
 }
 
 function formatCityScienceBreakdown(cityId, gameState) {

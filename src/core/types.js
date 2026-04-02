@@ -28,6 +28,7 @@
  * @typedef {Object} YieldBundle
  * @property {number} food
  * @property {number} production
+ * @property {number} gold
  * @property {number} science
  */
 
@@ -70,6 +71,7 @@
  * @property {number} movementRemaining
  * @property {number} maxMovement
  * @property {boolean} hasActed
+ * @property {boolean} disabled
  */
 
 /**
@@ -88,6 +90,7 @@
  * @property {"agricultural"|"industrial"|"scholarly"|"balanced"} identity
  * @property {"agricultural"|"industrial"|"scholarly"|"balanced"} specialization
  * @property {number} growthProgress
+ * @property {number} productionProgress
  * @property {number} health
  * @property {number} maxHealth
  * @property {"units"|"buildings"} productionTab
@@ -106,10 +109,13 @@
 
 /**
  * @typedef {Object} EmpireEconomy
- * @property {number} foodStock
- * @property {number} productionStock
+ * @property {number} goldBalance
+ * @property {number} goldIncomeLastTurn
+ * @property {number} goldUpkeepLastTurn
+ * @property {number} goldNetLastTurn
+ * @property {string[]} disabledUnitIds
+ * @property {{ food: number, production: number, gold: number }} outputLastTurn
  * @property {number} sciencePerTurn
- * @property {YieldBundle} lastTurnIncome
  */
 
 /**

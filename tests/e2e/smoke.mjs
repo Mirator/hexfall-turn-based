@@ -259,22 +259,33 @@ async function run() {
     assert.ok(initialState.uiStats, "stats payload should be present");
     assert.ok(initialState.mapWorldBounds, "map world bounds payload should exist");
     assert.ok(initialState.cameraViewportWorld, "camera viewport payload should exist");
-      assert.ok(initialState.hudTopLeft?.resources?.food, "top-left food resource display should exist");
-      assert.ok(initialState.hudTopLeft?.resources?.production, "top-left production resource display should exist");
-      assert.ok(initialState.hudTopLeft?.resources?.science, "top-left science resource display should exist");
-      assert.equal(
-        Object.keys(initialState.research?.progressByTech ?? {}).length,
-        14,
-        "research tree should expose 14-tech progress map"
-      );
-      assert.ok(initialState.research?.boostProgressByTech?.writing, "research payload should expose boost progress details");
-      assert.ok(
-        !("scienceStock" in (initialState.economy?.player ?? {})),
-        "player economy should no longer expose science stockpile field"
-      );
-      assert.equal(initialState.devVisionEnabled, false, "dev vision should default to off");
-      assert.ok(initialState.ai?.enemy?.personality, "enemy AI personality payload should exist");
-      assert.ok(initialState.ai?.purple?.personality, "purple AI personality payload should exist");
+    assert.ok(initialState.hudTopLeft?.resources?.food, "top-left food resource display should exist");
+    assert.ok(initialState.hudTopLeft?.resources?.production, "top-left production resource display should exist");
+    assert.ok(initialState.hudTopLeft?.resources?.gold, "top-left gold resource display should exist");
+    assert.equal(
+      Object.keys(initialState.research?.progressByTech ?? {}).length,
+      14,
+      "research tree should expose 14-tech progress map"
+    );
+    assert.ok(initialState.research?.boostProgressByTech?.writing, "research payload should expose boost progress details");
+    assert.ok(
+      !("scienceStock" in (initialState.economy?.player ?? {})),
+      "player economy should no longer expose science stockpile field"
+    );
+    assert.ok(
+      !("foodStock" in (initialState.economy?.player ?? {})) && !("productionStock" in (initialState.economy?.player ?? {})),
+      "player economy should no longer expose food/production stockpile fields"
+    );
+    assert.ok(Number.isFinite(initialState.economy?.player?.goldBalance), "player economy should expose goldBalance");
+    assert.ok(Number.isFinite(initialState.economy?.player?.goldIncomeLastTurn), "player economy should expose gold income");
+    assert.ok(Number.isFinite(initialState.economy?.player?.goldUpkeepLastTurn), "player economy should expose gold upkeep");
+    assert.ok(Number.isFinite(initialState.economy?.player?.goldNetLastTurn), "player economy should expose gold net");
+    assert.ok(Array.isArray(initialState.economy?.player?.disabledUnitIds), "player economy should expose disabled unit ids");
+    assert.ok(initialState.economy?.player?.outputLastTurn, "player economy should expose outputLastTurn");
+    assert.ok(typeof initialState.uiActions?.canRushBuyCityQueueFront === "boolean", "ui actions should expose rush-buy state");
+    assert.equal(initialState.devVisionEnabled, false, "dev vision should default to off");
+    assert.ok(initialState.ai?.enemy?.personality, "enemy AI personality payload should exist");
+    assert.ok(initialState.ai?.purple?.personality, "purple AI personality payload should exist");
     assert.ok(initialState.visibility?.byOwner?.player, "player visibility payload should exist");
 
     const playerVisibleSet = new Set(initialState.visibility.byOwner.player.visibleHexes ?? []);

@@ -3,6 +3,7 @@ import { getAllUnitTypes, getUnitDefinition } from "../core/unitData.js";
 import {
   CITY_QUEUE_MAX,
   canFoundCity,
+  canRushBuyCityQueueFront,
   getAllProductionBuildings,
   getBuildingDefinition,
   getFoundCityReasonText,
@@ -38,7 +39,7 @@ import { canSkipUnit, getSkipUnitReasonText } from "./unitActionSystem.js";
  *     cityQueueReason: string|null,
  *     cityProductionTab: "units"|"buildings",
  *     cityQueueItems: QueueItem[],
- *     cityProductionStock: number,
+ *     cityProductionProgress: number,
  *     cityLocalProduction: number,
  *     cityQueueSlots: Array<{
  *       index: number,
@@ -107,15 +108,25 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
   const queuedBuildingIds = new Set(queueItems.filter((item) => item.kind === "building").map((item) => item.id));
   const builtBuildingIds = new Set(selectedPlayerCity ? selectedCity.buildings ?? [] : []);
   const isQueueFull = selectedPlayerCity ? queueItems.length >= CITY_QUEUE_MAX : false;
-  const productionStock = cityEconomyBucket.productionStock ?? 0;
+  const productionProgress = selectedPlayerCity ? Math.max(0, selectedCity.productionProgress ?? 0) : 0;
   const localProduction = selectedPlayerCity ? Math.max(0, selectedCity.yieldLastTurn?.production ?? 0) : 0;
+  const localFood = selectedPlayerCity ? Math.max(0, selectedCity.yieldLastTurn?.food ?? 0) : 0;
+  const growthThreshold = selectedPlayerCity ? Math.max(1, 8 + (Math.max(1, selectedCity.population) - 1) * 4) : 1;
+  const growthRemaining = selectedPlayerCity ? Math.max(0, growthThreshold - Math.max(0, selectedCity.growthProgress ?? 0)) : 0;
+  const goldBalance = cityEconomyBucket?.goldBalance ?? 0;
   const productionRate = Math.max(1, localProduction);
+  const rushBuyCheck = selectedPlayerCity ? canRushBuyCityQueueFront(selectedCity.id, gameState) : { ok: false, reason: "city-not-selected" };
+  const disabledUnitIds = new Set(cityEconomyBucket?.disabledUnitIds ?? []);
+  const selectedUnitDisabled = !!selectedUnit && disabledUnitIds.has(selectedUnit.id);
+  const queueFront = queueItems[0] ?? null;
+  const queueFrontCost = queueFront ? getQueueItemCost(queueFront) : 0;
+  const queueFrontRemaining = queueFront ? Math.max(0, queueFrontCost - productionProgress) : 0;
 
   const cityProductionChoices = getAllUnitTypes().map((type) => {
     const definition = getUnitDefinition(/** @type {any} */ (type));
     const cost = definition.productionCost;
     const unlocked = unlockedUnits.has(type);
-    const affordable = productionStock >= cost;
+    const affordable = productionProgress >= cost;
     const queueable = selectedPlayerCity && !isQueueFull && unlocked;
     const reason = getUnitQueueReason({
       selectedPlayerCity,
@@ -123,7 +134,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
       unlocked,
       unlockTechId: definition.unlockedByTech ?? null,
     });
-    const etaTurns = computeEtaTurns(cost, productionStock, productionRate);
+    const etaTurns = computeEtaTurns(cost, 0, productionRate);
     return {
       type,
       cost,
@@ -140,7 +151,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
         label: capitalizeLabel(type),
         cost,
         etaTurns,
-        productionStock,
+        productionProgress,
         localProduction,
         reasonText: reason.text,
       }),
@@ -156,7 +167,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
     const missingCampus = !!definition?.requiresCampus && !builtBuildingIds.has("campus");
     const missingRequiredBuilding =
       (definition?.requiredBuildings ?? []).find((required) => !builtBuildingIds.has(required)) ?? null;
-    const affordable = productionStock >= cost;
+    const affordable = productionProgress >= cost;
     const queueable =
       selectedPlayerCity &&
       !isQueueFull &&
@@ -175,7 +186,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
       missingRequiredBuilding,
       unlockTechId: definition?.unlockedByTech ?? null,
     });
-    const etaTurns = computeEtaTurns(cost, productionStock, productionRate);
+    const etaTurns = computeEtaTurns(cost, 0, productionRate);
     return {
       id,
       cost,
@@ -194,7 +205,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
         label: capitalizeLabel(id),
         cost,
         etaTurns,
-        productionStock,
+        productionProgress,
         localProduction,
         reasonText: reason.text,
       }),
@@ -225,7 +236,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
 
   const cityQueueSlots = buildQueueSlots({
     queueItems,
-    productionStock,
+    productionProgress,
     productionRate,
     selectedPlayerCity,
   });
@@ -237,6 +248,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
     cityProductionChoices,
     cityBuildingChoices,
     cityQueueSlots,
+    rushBuyReason: rushBuyCheck.ok ? null : getRushBuyReasonText(rushBuyCheck.reason),
   });
 
   /** @type {{ primary: string|null, secondary: string|null, level: "info"|"warning"|null }} */
@@ -274,6 +286,10 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
       ? "Hover unit/building buttons to inspect production cost, estimated turns, and requirements."
       : (cityQueueReason ?? "Use the city production panel and right-side city queue to manage this city.");
     uiHints.level = "info";
+  } else if (selectedUnitDisabled) {
+    uiHints.primary = "Selected unit is disabled by gold deficit.";
+    uiHints.secondary = "Increase gold balance to reactivate disabled units.";
+    uiHints.level = "warning";
   } else if (selectedUnit && attackableCities.length > 0) {
     uiHints.primary = "Hostile city in range: click city to assault.";
     uiHints.level = "info";
@@ -299,11 +315,22 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
       cityQueueReason,
       cityProductionTab,
       cityQueueItems: queueItems,
-      cityProductionStock: productionStock,
+      cityProductionProgress: productionProgress,
       cityLocalProduction: localProduction,
+      cityLocalFood: localFood,
+      cityGrowthProgress: selectedPlayerCity ? Math.max(0, selectedCity.growthProgress ?? 0) : 0,
+      cityGrowthThreshold: growthThreshold,
+      cityGrowthRemaining: growthRemaining,
+      cityQueueFrontRemainingProduction: queueFrontRemaining,
+      cityGoldBalance: goldBalance,
+      canRushBuyCityQueueFront: !!rushBuyCheck.ok,
+      cityRushBuyCost: rushBuyCheck.ok ? rushBuyCheck.goldCost ?? 0 : 0,
+      cityRushBuyRemainingProduction: rushBuyCheck.ok ? rushBuyCheck.remainingProduction ?? 0 : queueFrontRemaining,
+      cityRushBuyReason: rushBuyCheck.ok ? null : getRushBuyReasonText(rushBuyCheck.reason),
       cityQueueSlots,
       cityProductionChoices,
       cityBuildingChoices,
+      disabledUnitIds: [...disabledUnitIds],
       disabledActionHints,
     },
   };
@@ -426,9 +453,9 @@ function getBuildingQueueReason({
   return { code: null, text: null, tag: null };
 }
 
-function buildQueueSlots({ queueItems, productionStock, productionRate, selectedPlayerCity }) {
+function buildQueueSlots({ queueItems, productionProgress, productionRate, selectedPlayerCity }) {
   const slots = [];
-  let runningStock = Math.max(0, productionStock);
+  let runningProgress = Math.max(0, productionProgress);
 
   for (let index = 0; index < CITY_QUEUE_MAX; index += 1) {
     const queueItem = queueItems[index] ?? null;
@@ -452,14 +479,9 @@ function buildQueueSlots({ queueItems, productionStock, productionRate, selected
     }
 
     const cost = getQueueItemCost(queueItem);
-    const etaTurns = computeEtaTurns(cost, runningStock, productionRate);
-    const buildableNow = runningStock >= cost;
-    if (buildableNow) {
-      runningStock -= cost;
-    } else {
-      const requiredTurns = etaTurns;
-      runningStock = runningStock + requiredTurns * productionRate - cost;
-    }
+    const etaTurns = computeEtaTurns(cost, runningProgress, productionRate);
+    const requiredTurns = etaTurns;
+    runningProgress = Math.max(0, runningProgress + requiredTurns * productionRate - cost);
 
     const label = formatQueueItemLabel(queueItem);
     slots.push({
@@ -469,6 +491,7 @@ function buildQueueSlots({ queueItems, productionStock, productionRate, selected
       id: queueItem.id,
       label,
       cost,
+      progress: index === 0 ? productionProgress : 0,
       etaTurns,
       statusTag: etaTurns === 0 ? "Ready" : formatTurnsLabel(etaTurns),
       blocked: false,
@@ -488,6 +511,7 @@ function buildDisabledActionHints({
   cityProductionChoices,
   cityBuildingChoices,
   cityQueueSlots,
+  rushBuyReason,
 }) {
   /** @type {Record<string, string>} */
   const hints = {};
@@ -502,8 +526,6 @@ function buildDisabledActionHints({
     const actionId = `city-enqueue-${choice.type}`;
     if (choice.reasonText) {
       hints[actionId] = choice.reasonText;
-    } else if (!choice.affordable) {
-      hints[actionId] = "Not enough production stock yet. You can still queue it.";
     }
   }
 
@@ -511,9 +533,11 @@ function buildDisabledActionHints({
     const actionId = `city-enqueue-building-${choice.id}`;
     if (choice.reasonText) {
       hints[actionId] = choice.reasonText;
-    } else if (!choice.affordable) {
-      hints[actionId] = "Not enough production stock yet. You can still queue it.";
     }
+  }
+
+  if (rushBuyReason) {
+    hints["city-rush-buy"] = rushBuyReason;
   }
 
   for (const slot of cityQueueSlots) {
@@ -541,11 +565,30 @@ function computeEtaTurns(cost, stock, productionRate) {
   return Math.max(0, Math.ceil(Math.max(0, cost - stock) / Math.max(1, productionRate)));
 }
 
-function buildProductionChoiceHoverText({ label, cost, etaTurns, productionStock, localProduction, reasonText }) {
+function getRushBuyReasonText(reason) {
+  if (!reason) {
+    return null;
+  }
+  if (reason === "city-not-found" || reason === "city-not-selected") {
+    return "Select one of your cities to rush-buy the front queue item.";
+  }
+  if (reason === "queue-empty") {
+    return "Queue is empty. Add an item before rush-buying.";
+  }
+  if (reason === "not-enough-gold") {
+    return "Not enough gold to rush-buy this item.";
+  }
+  if (reason === "no-spawn-hex") {
+    return "No valid spawn hex available for this unit.";
+  }
+  return "Rush-buy is unavailable right now.";
+}
+
+function buildProductionChoiceHoverText({ label, cost, etaTurns, productionProgress, localProduction, reasonText }) {
   const lines = [
     `${label}`,
     `Production Cost: ${cost} | Estimated Turns: ${formatTurnsLabel(etaTurns)}`,
-    `Current Production Stock: ${productionStock} | Local Production Per Turn: +${localProduction}`,
+    `Current Production Progress: ${productionProgress} | Local Production Per Turn: +${localProduction}`,
   ];
   if (reasonText) {
     lines.push(reasonText);

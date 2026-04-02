@@ -581,3 +581,40 @@ Viewport support note (2026-03-27): legacy mentions of mobile checks/artifacts i
   - `npm run build -- --base=/hexfall-turn-based/` (pass)
   - `npm test` (pass, 15 files / 86 tests)
   - `npm run test:e2e` (pass)
+## 2026-04-01 (Resource rework MVP: Food/Production/Gold separation)
+- Continued implementation of the approved MVP resource rework plan.
+- Core systems finalized around city-local growth and city-local production progress:
+  - `processTurn` now applies food growth per city and production progress per city front-queue item.
+  - queue completion carries production overflow to the next front item.
+  - queue front reset behavior on remove/reorder/cycle is normalized to prevent stale progress carry.
+- Gold economy and deficit penalties finalized:
+  - per-owner `goldIncomeLastTurn`, `goldUpkeepLastTurn`, `goldNetLastTurn`, `goldBalance` now drive upkeep outcomes.
+  - deterministic unit disable on deficit implemented and enforced each turn.
+  - automatic reactivation when economy recovers confirmed.
+- Action gating finalized for disabled units:
+  - movement/combat/found-city/skip all reject disabled units with explicit `unit-disabled` reason paths.
+  - AI/unit readiness filters now ignore disabled units.
+- Rush-buy flow completed end-to-end:
+  - city-system APIs `canRushBuyCityQueueFront` and `rushBuyCityQueueFront` use `remainingProduction * 3`.
+  - world event wiring handles `city-queue-rush-buy-requested` and posts success/failure notifications.
+  - UI surface exposes rush-buy availability/cost/reason.
+- HUD/UI updates completed:
+  - top bar now reads Food/Production/Gold (science removed from top bar; retained in stats/tech tree surfaces).
+  - added empire-level growth summary and queue summary strings for top bar deltas.
+  - right-rail city queue details now show production progress (not stockpile semantics), local gold context, rush-buy state.
+  - added right-rail rush-buy button with disabled hint wiring.
+- Public payload/type contract alignment completed:
+  - tile/city yields include gold.
+  - economy payload shape is gold-centric (no food/production stock fields).
+  - `uiActions` now uses `cityProductionProgress` and includes rush-buy/disabled-unit fields.
+  - render payload includes unit `disabled` and city `productionProgress` details.
+- Tests updated:
+  - rewrote `tests/integration/citySystem.test.js` for city-local growth/production, upkeep/deficit disable-reactivate, and rush-buy.
+  - updated `tests/integration/uiSurface.test.js` for production-progress field + rush-buy action state.
+  - updated `tests/integration/enemyTurn.test.js` with disabled-unit action gating case and stabilized adjacent-attack setup.
+  - updated `tests/e2e/smoke.mjs` top-bar resource assertions to Food/Production/Gold and economy payload assertions for gold fields/rush-buy state.
+- Verification completed:
+  - `npm run lint` passed.
+  - `npm test` passed (15 files, 88 tests).
+  - `npm run test:e2e` passed.
+  - `npm run build` passed.

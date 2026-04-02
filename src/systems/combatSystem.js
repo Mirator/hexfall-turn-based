@@ -17,7 +17,7 @@ const DEFENSE_TERRAIN_TYPES = new Set(["forest", "hill"]);
  */
 export function getAttackableTargets(attackerId, gameState) {
   const attacker = getUnitById(gameState, attackerId);
-  if (!attacker || attacker.hasActed || attacker.health <= 0) {
+  if (!attacker || attacker.hasActed || attacker.disabled || attacker.health <= 0) {
     return [];
   }
 
@@ -36,7 +36,7 @@ export function getAttackableTargets(attackerId, gameState) {
  */
 export function getAttackableCities(attackerId, gameState) {
   const attacker = getUnitById(gameState, attackerId);
-  if (!attacker || attacker.hasActed || attacker.health <= 0) {
+  if (!attacker || attacker.hasActed || attacker.disabled || attacker.health <= 0) {
     return [];
   }
 
@@ -73,6 +73,10 @@ export function canAttack(attackerId, targetId, gameState) {
     return { ok: false, reason: "unit-already-acted" };
   }
 
+  if (attacker.disabled) {
+    return { ok: false, reason: "unit-disabled" };
+  }
+
   if (!isTargetInAttackRange(attacker, target)) {
     return { ok: false, reason: "out-of-range" };
   }
@@ -103,6 +107,10 @@ export function canAttackCity(attackerId, cityId, gameState) {
 
   if (attacker.hasActed) {
     return { ok: false, reason: "unit-already-acted" };
+  }
+
+  if (attacker.disabled) {
+    return { ok: false, reason: "unit-disabled" };
   }
 
   if (!isTargetInAttackRange(attacker, city)) {

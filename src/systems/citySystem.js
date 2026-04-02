@@ -5,11 +5,15 @@ import { getCityScienceBreakdown } from "./researchSystem.js";
 
 export const CITY_MAX_HEALTH = 12;
 export const CITY_QUEUE_MAX = 3;
+export const UNIT_GOLD_UPKEEP = 1;
+export const BUILDING_GOLD_UPKEEP = 1;
+export const RUSH_BUY_MULTIPLIER = 3;
 
 const FOUND_CITY_REASON_TEXT = {
   "unit-not-found": "Select a settler to found a city.",
   "requires-settler": "Only settlers can found a city.",
   "unit-already-acted": "This settler already acted this turn.",
+  "unit-disabled": "This settler is disabled by gold deficit.",
   "city-already-present": "A city already occupies this tile.",
   "invalid-tile": "City cannot be founded on blocked terrain.",
 };
@@ -20,6 +24,7 @@ const BUILDING_DEFINITIONS = {
   granary: {
     id: "granary",
     productionCost: 9,
+    goldUpkeep: 1,
     unlockedByDefault: true,
     unlockedByTech: null,
     requiredBuildings: [],
@@ -28,12 +33,14 @@ const BUILDING_DEFINITIONS = {
     yields: {
       food: 1,
       production: 0,
+      gold: 0,
       science: 0,
     },
   },
   workshop: {
     id: "workshop",
     productionCost: 10,
+    goldUpkeep: 1,
     unlockedByDefault: false,
     unlockedByTech: "bronzeWorking",
     requiredBuildings: [],
@@ -42,12 +49,14 @@ const BUILDING_DEFINITIONS = {
     yields: {
       food: 0,
       production: 1,
+      gold: 0,
       science: 0,
     },
   },
   monument: {
     id: "monument",
     productionCost: 8,
+    goldUpkeep: 1,
     unlockedByDefault: false,
     unlockedByTech: "masonry",
     requiredBuildings: [],
@@ -56,12 +65,14 @@ const BUILDING_DEFINITIONS = {
     yields: {
       food: 0,
       production: 0,
+      gold: 0,
       science: 0,
     },
   },
   campus: {
     id: "campus",
     productionCost: 12,
+    goldUpkeep: 1,
     unlockedByDefault: false,
     unlockedByTech: "writing",
     requiredBuildings: [],
@@ -70,12 +81,14 @@ const BUILDING_DEFINITIONS = {
     yields: {
       food: 0,
       production: 0,
+      gold: 0,
       science: 0,
     },
   },
   library: {
     id: "library",
     productionCost: 11,
+    goldUpkeep: 1,
     unlockedByDefault: false,
     unlockedByTech: "writing",
     requiredBuildings: ["campus"],
@@ -84,12 +97,14 @@ const BUILDING_DEFINITIONS = {
     yields: {
       food: 0,
       production: 0,
+      gold: 0,
       science: 0,
     },
   },
   university: {
     id: "university",
     productionCost: 16,
+    goldUpkeep: 1,
     unlockedByDefault: false,
     unlockedByTech: "education",
     requiredBuildings: ["library"],
@@ -98,12 +113,14 @@ const BUILDING_DEFINITIONS = {
     yields: {
       food: 0,
       production: 0,
+      gold: 0,
       science: 0,
     },
   },
   researchLab: {
     id: "researchLab",
     productionCost: 18,
+    goldUpkeep: 1,
     unlockedByDefault: false,
     unlockedByTech: "chemistry",
     requiredBuildings: ["university"],
@@ -112,6 +129,7 @@ const BUILDING_DEFINITIONS = {
     yields: {
       food: 0,
       production: 0,
+      gold: 0,
       science: 0,
     },
   },
@@ -140,6 +158,10 @@ export function canFoundCity(unitId, gameState) {
 
   if (unit.hasActed) {
     return { ok: false, reason: "unit-already-acted" };
+  }
+
+  if (unit.disabled) {
+    return { ok: false, reason: "unit-disabled" };
   }
 
   if (getCityAt(gameState, unit.q, unit.r)) {
@@ -193,6 +215,7 @@ export function foundCity(unitId, gameState) {
     identity: "balanced",
     specialization: "balanced",
     growthProgress: 0,
+    productionProgress: 0,
     health: CITY_MAX_HEALTH,
     maxHealth: CITY_MAX_HEALTH,
     productionTab: "units",
@@ -239,6 +262,7 @@ export function cycleCityQueue(cityId, gameState) {
   const currentIndex = availableTypes.indexOf(current);
   const nextType = availableTypes[(currentIndex + 1 + availableTypes.length) % availableTypes.length];
   city.queue = [createQueueItem("unit", nextType)];
+  city.productionProgress = 0;
   return { ok: true, queue: cloneQueue(city.queue) };
 }
 
@@ -365,6 +389,12 @@ export function removeCityQueueAt(cityId, index, gameState) {
   }
 
   city.queue.splice(index, 1);
+  if (index === 0) {
+    city.productionProgress = 0;
+  }
+  if (city.queue.length === 0) {
+    city.productionProgress = 0;
+  }
   return { ok: true, queue: cloneQueue(city.queue) };
 }
 
@@ -400,6 +430,9 @@ export function moveCityQueueItem(cityId, index, direction, gameState) {
   reordered[index] = reordered[targetIndex];
   reordered[targetIndex] = current;
   city.queue = reordered;
+  if (index === 0 || targetIndex === 0) {
+    city.productionProgress = 0;
+  }
   return { ok: true, queue: cloneQueue(city.queue) };
 }
 
@@ -471,86 +504,165 @@ export function computeCityYield(cityId, gameState) {
 /**
  * @param {import("../core/types.js").GameState} gameState
  * @param {import("../core/types.js").Owner} owner
- * @returns {{ produced: string[], grew: string[], researchIncome: number }}
+ * @returns {{ produced: string[], grew: string[], researchIncome: number, output: import("../core/types.js").YieldBundle }}
  */
 export function processTurn(gameState, owner) {
   const produced = [];
   const grew = [];
   const ownerCities = gameState.cities.filter((city) => city.owner === owner).sort((a, b) => a.id.localeCompare(b.id));
   const economyBucket = gameState.economy[owner];
-  const aggregatedIncome = createEmptyYield();
+  const aggregatedOutput = createEmptyYield();
+
+  if (!economyBucket) {
+    return {
+      produced,
+      grew,
+      researchIncome: 0,
+      output: aggregatedOutput,
+    };
+  }
 
   for (const city of ownerCities) {
     ensureCityEconomyFields(city);
     assignWorkedHexes(city.id, gameState);
     const cityYield = computeCityYield(city.id, gameState);
-    city.yieldLastTurn = cityYield;
-    city.identity = deriveCityIdentity(cityYield);
-    city.specialization = deriveCitySpecialization(city.buildings ?? []);
-    addYield(aggregatedIncome, cityYield);
-  }
+    addYield(aggregatedOutput, cityYield);
 
-  economyBucket.lastTurnIncome = { ...aggregatedIncome };
-  economyBucket.foodStock += aggregatedIncome.food;
-  economyBucket.productionStock += aggregatedIncome.production;
-  economyBucket.sciencePerTurn = aggregatedIncome.science;
-
-  const growthOrder = [...ownerCities];
-
-  for (const city of growthOrder) {
-    let threshold = getGrowthThreshold(city.population);
-    while (economyBucket.foodStock > 0) {
-      const needed = threshold - city.growthProgress;
-      const spent = Math.min(needed, economyBucket.foodStock);
-      city.growthProgress += spent;
-      economyBucket.foodStock -= spent;
-
-      if (city.growthProgress < threshold) {
-        break;
-      }
-
-      city.growthProgress -= threshold;
+    city.growthProgress += Math.max(0, cityYield.food);
+    let growthThreshold = getGrowthThreshold(city.population);
+    while (city.growthProgress >= growthThreshold) {
+      city.growthProgress -= growthThreshold;
       city.population += 1;
       grew.push(city.id);
+      growthThreshold = getGrowthThreshold(city.population);
       assignWorkedHexes(city.id, gameState);
-      city.yieldLastTurn = computeCityYield(city.id, gameState);
-      city.identity = deriveCityIdentity(city.yieldLastTurn);
-      city.specialization = deriveCitySpecialization(city.buildings ?? []);
-      threshold = getGrowthThreshold(city.population);
     }
+
+    applyCityProductionProgress(city, owner, Math.max(0, cityYield.production), gameState, produced);
+    city.yieldLastTurn = computeCityYield(city.id, gameState);
+    city.identity = deriveCityIdentity(city.yieldLastTurn);
+    city.specialization = deriveCitySpecialization(city.buildings ?? []);
   }
 
-  for (const city of ownerCities) {
-    const currentQueueItem = normalizeQueueItem(city.queue[0]);
-    if (!currentQueueItem) {
-      if (city.queue.length > 0) {
-        city.queue.shift();
-      }
+  applyOwnerGoldEconomy(owner, gameState, aggregatedOutput);
+
+  return {
+    produced,
+    grew,
+    researchIncome: aggregatedOutput.science,
+    output: aggregatedOutput,
+  };
+}
+
+/**
+ * @param {string} cityId
+ * @param {import("../core/types.js").GameState} gameState
+ * @returns {{ ok: boolean, reason?: string, goldCost?: number, remainingProduction?: number }}
+ */
+export function canRushBuyCityQueueFront(cityId, gameState) {
+  const city = getCityById(gameState, cityId);
+  if (!city) {
+    return { ok: false, reason: "city-not-found" };
+  }
+
+  ensureCityEconomyFields(city);
+  const queueItem = normalizeQueueItem(city.queue[0]);
+  if (!queueItem) {
+    return { ok: false, reason: "queue-empty" };
+  }
+
+  const productionCost = getQueueItemProductionCost(queueItem, city, gameState);
+  if (!Number.isFinite(productionCost) || productionCost <= 0) {
+    return { ok: false, reason: "invalid-queue-item" };
+  }
+
+  if (queueItem.kind === "unit" && !findSpawnHex(city, gameState)) {
+    return { ok: false, reason: "no-spawn-hex" };
+  }
+
+  const remainingProduction = Math.max(0, productionCost - city.productionProgress);
+  const goldCost = remainingProduction * RUSH_BUY_MULTIPLIER;
+  const economyBucket = gameState.economy[city.owner];
+  if (!economyBucket) {
+    return { ok: false, reason: "economy-not-found" };
+  }
+  if (economyBucket.goldBalance < goldCost) {
+    return { ok: false, reason: "not-enough-gold", goldCost, remainingProduction };
+  }
+
+  return { ok: true, goldCost, remainingProduction };
+}
+
+/**
+ * @param {string} cityId
+ * @param {import("../core/types.js").GameState} gameState
+ * @returns {{ ok: boolean, reason?: string, produced?: string[], goldCost?: number, remainingProduction?: number }}
+ */
+export function rushBuyCityQueueFront(cityId, gameState) {
+  const check = canRushBuyCityQueueFront(cityId, gameState);
+  if (!check.ok) {
+    return check;
+  }
+
+  const city = getCityById(gameState, cityId);
+  if (!city) {
+    return { ok: false, reason: "city-not-found" };
+  }
+  const economyBucket = gameState.economy[city.owner];
+  if (!economyBucket) {
+    return { ok: false, reason: "economy-not-found" };
+  }
+
+  const goldCost = check.goldCost ?? 0;
+  const remainingProduction = check.remainingProduction ?? 0;
+  economyBucket.goldBalance -= goldCost;
+  city.productionProgress += remainingProduction;
+
+  /** @type {string[]} */
+  const produced = [];
+  applyCityProductionProgress(city, city.owner, 0, gameState, produced);
+
+  return {
+    ok: true,
+    produced,
+    goldCost,
+    remainingProduction,
+  };
+}
+
+function applyCityProductionProgress(city, owner, productionIncome, gameState, produced) {
+  city.productionProgress += Math.max(0, productionIncome);
+
+  let guard = 0;
+  while (city.queue.length > 0 && guard < 20) {
+    guard += 1;
+    const queueItem = normalizeQueueItem(city.queue[0]);
+    if (!queueItem) {
+      city.queue.shift();
       continue;
     }
 
-    if (currentQueueItem.kind === "unit") {
-      const definition = getUnitDefinition(/** @type {any} */ (currentQueueItem.id));
-      if (!definition) {
-        city.queue.shift();
-        continue;
-      }
+    const productionCost = getQueueItemProductionCost(queueItem, city, gameState);
+    if (!Number.isFinite(productionCost) || productionCost <= 0) {
+      city.queue.shift();
+      continue;
+    }
 
-      if (economyBucket.productionStock < definition.productionCost) {
-        continue;
-      }
+    if (city.productionProgress < productionCost) {
+      break;
+    }
 
+    if (queueItem.kind === "unit") {
       const spawnHex = findSpawnHex(city, gameState);
       if (!spawnHex) {
-        continue;
+        break;
       }
 
-      economyBucket.productionStock -= definition.productionCost;
       const newUnitId = allocateEntityId(gameState, "unit", owner);
       const unit = createUnit({
         id: newUnitId,
         owner,
-        type: /** @type {any} */ (currentQueueItem.id),
+        type: /** @type {any} */ (queueItem.id),
         q: spawnHex.q,
         r: spawnHex.r,
       });
@@ -558,47 +670,108 @@ export function processTurn(gameState, owner) {
       unit.movementRemaining = 0;
       gameState.units.push(unit);
       produced.push(unit.id);
-      city.queue.shift();
     } else {
-      const buildingDefinition = BUILDING_DEFINITIONS[currentQueueItem.id];
-      if (!buildingDefinition) {
-        city.queue.shift();
-        continue;
-      }
-
-      const requirementCheck = canBuildBuildingInCity(city, currentQueueItem.id);
+      const requirementCheck = canBuildBuildingInCity(city, queueItem.id);
       if (!requirementCheck.ok) {
+        break;
+      }
+      if ((city.buildings ?? []).includes(queueItem.id)) {
         city.queue.shift();
         continue;
       }
 
-      if ((city.buildings ?? []).includes(currentQueueItem.id)) {
-        city.queue.shift();
-        continue;
-      }
-
-      if (economyBucket.productionStock < buildingDefinition.productionCost) {
-        continue;
-      }
-
-      economyBucket.productionStock -= buildingDefinition.productionCost;
-      city.buildings.push(currentQueueItem.id);
-      if (currentQueueItem.id === "campus") {
+      city.buildings.push(queueItem.id);
+      if (queueItem.id === "campus") {
         city.campus = computeCampusSnapshot(city, gameState);
       }
-      city.specialization = deriveCitySpecialization(city.buildings ?? []);
-      city.queue.shift();
-      city.yieldLastTurn = computeCityYield(city.id, gameState);
-      city.identity = deriveCityIdentity(city.yieldLastTurn);
-      produced.push(`${city.id}:building:${currentQueueItem.id}`);
+      produced.push(`${city.id}:building:${queueItem.id}`);
+    }
+
+    city.productionProgress = Math.max(0, city.productionProgress - productionCost);
+    city.queue.shift();
+    if (city.queue.length === 0) {
+      city.productionProgress = 0;
     }
   }
+}
 
-  return {
-    produced,
-    grew,
-    researchIncome: aggregatedIncome.science,
+function getQueueItemProductionCost(queueItem, city, gameState) {
+  if (queueItem.kind === "unit") {
+    const definition = getUnitDefinition(/** @type {any} */ (queueItem.id));
+    return definition?.productionCost ?? 0;
+  }
+
+  const buildingDefinition = BUILDING_DEFINITIONS[queueItem.id];
+  if (!buildingDefinition) {
+    return 0;
+  }
+  if (!isBuildingUnlocked(queueItem.id, gameState)) {
+    return 0;
+  }
+  if ((city.buildings ?? []).includes(queueItem.id)) {
+    return 0;
+  }
+  return buildingDefinition.productionCost;
+}
+
+function applyOwnerGoldEconomy(owner, gameState, aggregatedOutput) {
+  const economyBucket = gameState.economy[owner];
+  if (!economyBucket) {
+    return;
+  }
+
+  const income = Math.max(0, aggregatedOutput.gold);
+  const ownerUnits = gameState.units
+    .filter((unit) => unit.owner === owner && unit.health > 0)
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const ownerCities = gameState.cities.filter((city) => city.owner === owner);
+
+  const baseUnitUpkeep = ownerUnits.reduce((sum, unit) => {
+    const upkeep = getUnitDefinition(unit.type)?.goldUpkeep ?? UNIT_GOLD_UPKEEP;
+    return sum + upkeep;
+  }, 0);
+  const buildingUpkeep = ownerCities.reduce((sum, city) => {
+    let cityUpkeep = 0;
+    for (const buildingId of city.buildings ?? []) {
+      cityUpkeep += BUILDING_DEFINITIONS[buildingId]?.goldUpkeep ?? BUILDING_GOLD_UPKEEP;
+    }
+    return sum + cityUpkeep;
+  }, 0);
+
+  const availableBeforeUpkeep = economyBucket.goldBalance + income;
+  let payableUpkeep = baseUnitUpkeep + buildingUpkeep;
+
+  /** @type {string[]} */
+  const disabledUnitIds = [];
+  for (let index = ownerUnits.length - 1; index >= 0 && availableBeforeUpkeep < payableUpkeep; index -= 1) {
+    const unit = ownerUnits[index];
+    const upkeep = getUnitDefinition(unit.type)?.goldUpkeep ?? UNIT_GOLD_UPKEEP;
+    payableUpkeep = Math.max(buildingUpkeep, payableUpkeep - upkeep);
+    disabledUnitIds.push(unit.id);
+  }
+
+  const net = income - payableUpkeep;
+  economyBucket.goldIncomeLastTurn = income;
+  economyBucket.goldUpkeepLastTurn = payableUpkeep;
+  economyBucket.goldNetLastTurn = net;
+  economyBucket.goldBalance += net;
+  economyBucket.outputLastTurn = {
+    food: aggregatedOutput.food,
+    production: aggregatedOutput.production,
+    gold: aggregatedOutput.gold,
   };
+  economyBucket.sciencePerTurn = aggregatedOutput.science;
+  economyBucket.disabledUnitIds = [...disabledUnitIds].sort();
+
+  const disabledSet = new Set(economyBucket.disabledUnitIds);
+  for (const unit of ownerUnits) {
+    const disabled = disabledSet.has(unit.id);
+    unit.disabled = disabled;
+    if (disabled) {
+      unit.hasActed = true;
+      unit.movementRemaining = 0;
+    }
+  }
 }
 
 /**
@@ -622,7 +795,7 @@ export function getAvailableProductionBuildings(gameState) {
 
 /**
  * @param {"granary"|"workshop"|"monument"|"campus"|"library"|"university"|"researchLab"} buildingId
- * @returns {{ id: string, productionCost: number, unlockedByDefault: boolean, unlockedByTech: string|null, yields: import("../core/types.js").YieldBundle } | null}
+ * @returns {{ id: string, productionCost: number, goldUpkeep: number, unlockedByDefault: boolean, unlockedByTech: string|null, yields: import("../core/types.js").YieldBundle } | null}
  */
 export function getBuildingDefinition(buildingId) {
   return BUILDING_DEFINITIONS[buildingId] ?? null;
@@ -771,6 +944,7 @@ function computeCityYieldForWorkedHexes(city, workedHexes, gameState) {
     }
     total.food += tile.yields.food;
     total.production += tile.yields.production;
+    total.gold += tile.yields.gold ?? 0;
   }
   addYield(total, getCityBuildingYieldBonus(city));
   total.science = getCityScienceBreakdown(city, gameState).totalScience;
@@ -782,8 +956,8 @@ function compareHexesForWorkedPriority(a, b, gameState) {
   const tileB = getTileAt(gameState.map, b.q, b.r);
   const yieldsA = tileA?.yields ?? createEmptyYield();
   const yieldsB = tileB?.yields ?? createEmptyYield();
-  const totalA = yieldsA.food + yieldsA.production;
-  const totalB = yieldsB.food + yieldsB.production;
+  const totalA = yieldsA.food + yieldsA.production + (yieldsA.gold ?? 0);
+  const totalB = yieldsB.food + yieldsB.production + (yieldsB.gold ?? 0);
   if (totalA !== totalB) {
     return totalB - totalA;
   }
@@ -792,6 +966,9 @@ function compareHexesForWorkedPriority(a, b, gameState) {
   }
   if (yieldsA.production !== yieldsB.production) {
     return yieldsB.production - yieldsA.production;
+  }
+  if ((yieldsA.gold ?? 0) !== (yieldsB.gold ?? 0)) {
+    return (yieldsB.gold ?? 0) - (yieldsA.gold ?? 0);
   }
 
   return a.q - b.q || a.r - b.r;
@@ -837,6 +1014,16 @@ function ensureCityEconomyFields(city) {
 
   if (!city.specialization) {
     city.specialization = deriveCitySpecialization(city.buildings);
+  }
+
+  if (!Number.isFinite(city.productionProgress)) {
+    city.productionProgress = 0;
+  }
+  if (city.productionProgress < 0) {
+    city.productionProgress = 0;
+  }
+  if (city.queue.length === 0) {
+    city.productionProgress = 0;
   }
 }
 
@@ -916,6 +1103,7 @@ function getCityBuildingYieldBonus(city) {
     }
     yields.food += definition.yields.food;
     yields.production += definition.yields.production;
+    yields.gold += definition.yields.gold ?? 0;
   }
   return yields;
 }
@@ -923,6 +1111,7 @@ function getCityBuildingYieldBonus(city) {
 function addYield(target, source) {
   target.food += source.food;
   target.production += source.production;
+  target.gold += source.gold ?? 0;
   target.science += source.science;
 }
 
@@ -930,6 +1119,7 @@ function createEmptyYield() {
   return {
     food: 0,
     production: 0,
+    gold: 0,
     science: 0,
   };
 }

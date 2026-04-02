@@ -3,6 +3,7 @@ import { getUnitById } from "../core/gameState.js";
 const SKIP_UNIT_REASON_TEXT = {
   "unit-not-found": "Select a unit to issue commands.",
   "unit-already-acted": "This unit already acted this turn.",
+  "unit-disabled": "This unit is disabled by gold deficit.",
   "unit-not-player-owned": "Only your units can be commanded.",
 };
 
@@ -18,6 +19,9 @@ export function canSkipUnit(unitId, gameState) {
   }
   if (unit.owner !== "player") {
     return { ok: false, reason: "unit-not-player-owned" };
+  }
+  if (unit.disabled) {
+    return { ok: false, reason: "unit-disabled" };
   }
   if (unit.hasActed || unit.movementRemaining <= 0) {
     return { ok: false, reason: "unit-already-acted" };

@@ -89,11 +89,35 @@ describe("UI surface hints/actions", () => {
     expect(ui.uiActions.cityQueueItems).toEqual([]);
     expect(ui.uiActions.cityQueueSlots.length).toBe(3);
     expect(ui.uiActions.cityQueueSlots[0].empty).toBe(true);
-    expect(typeof ui.uiActions.cityProductionStock).toBe("number");
+    expect(typeof ui.uiActions.cityProductionProgress).toBe("number");
     expect(typeof ui.uiActions.cityLocalProduction).toBe("number");
+    expect(typeof ui.uiActions.cityGoldBalance).toBe("number");
     expect(ui.uiActions.cityProductionChoices[0].hoverText).toContain("Production Cost");
     expect(ui.uiActions.cityBuildingChoices[0].hoverText).toContain("Estimated Turns");
+    expect(ui.uiActions.canRushBuyCityQueueFront).toBe(false);
+    expect(ui.uiActions.cityRushBuyReason).toContain("Queue is empty");
     expect(ui.uiHints.primary).toContain("City selected");
+  });
+
+  it("enables rush-buy for front queue item when city has enough gold", () => {
+    const gameState = createInitialGameState({ seed: 1211 });
+    const settler = gameState.units.find((unit) => unit.owner === "player" && unit.type === "settler");
+    expect(settler).toBeTruthy();
+    if (!settler) {
+      return;
+    }
+
+    expect(foundCity(settler.id, gameState).ok).toBe(true);
+    const city = gameState.cities[0];
+    city.queue = [{ kind: "unit", id: "warrior" }];
+    city.productionProgress = 2;
+    gameState.economy.player.goldBalance = 20;
+
+    const ui = deriveUiSurface(gameState, null, city, [], []);
+    expect(ui.uiActions.canRushBuyCityQueueFront).toBe(true);
+    expect(ui.uiActions.cityRushBuyCost).toBe(12);
+    expect(ui.uiActions.cityRushBuyRemainingProduction).toBe(4);
+    expect(ui.uiActions.disabledActionHints["city-rush-buy"]).toBeUndefined();
   });
 
   it("exposes unit context actions for selected player units", () => {

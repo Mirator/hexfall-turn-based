@@ -379,10 +379,6 @@ export function resolveResearchTurn(gameState, owner) {
   gameState.research.boostsAppliedLastTurn = [];
 
   economy.sciencePerTurn = science.sciencePerTurn;
-  economy.lastTurnIncome = {
-    ...economy.lastTurnIncome,
-    science: science.baseScience,
-  };
 
   if (!gameState.research.currentTechId && !gameState.research.activeTechId) {
     const firstSelectable = getSelectableTechIds(gameState)[0] ?? null;

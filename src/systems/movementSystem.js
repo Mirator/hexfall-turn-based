@@ -21,7 +21,7 @@ export function getReachable(unitId, gameState) {
  */
 export function getReachableAnalysis(unitId, gameState) {
   const unit = getUnitById(gameState, unitId);
-  if (!unit || unit.movementRemaining <= 0 || unit.hasActed) {
+  if (!unit || unit.movementRemaining <= 0 || unit.hasActed || unit.disabled) {
     return {
       hexes: [],
       costByHex: new Map(),
@@ -70,6 +70,10 @@ export function canMoveUnitTo(unitId, destination, gameState) {
     return { ok: false, reason: "unit-not-found" };
   }
 
+  if (unit.disabled) {
+    return { ok: false, reason: "unit-disabled" };
+  }
+
   if (unit.hasActed) {
     return { ok: false, reason: "unit-already-acted" };
   }
@@ -111,6 +115,10 @@ export function getPathTo(unitId, destination, gameState) {
   const unit = getUnitById(gameState, unitId);
   if (!unit) {
     return { ok: false, reason: "unit-not-found" };
+  }
+
+  if (unit.disabled) {
+    return { ok: false, reason: "unit-disabled" };
   }
 
   if (unit.hasActed) {

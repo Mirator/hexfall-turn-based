@@ -32,6 +32,7 @@ import {
   getFoundCityReasonText,
   moveCityQueueItem,
   removeCityQueueAt,
+  rushBuyCityQueueFront,
   setCityProductionTab,
   processTurn as processCityTurn,
 } from "../systems/citySystem.js";
@@ -332,8 +333,8 @@ export class WorldScene extends Phaser.Scene {
     this.visibilityRevision = 0;
     this.cachedMapWorldBounds = null;
     this.cachedMapWorldBoundsDirty = true;
-    this.cachedProjectedIncome = { food: 0, production: 0, science: 0 };
-    this.cachedProjectedNetIncome = { food: 0, production: 0, science: 0 };
+    this.cachedProjectedIncome = { food: 0, production: 0, gold: 0, science: 0 };
+    this.cachedProjectedNetIncome = { food: 0, production: 0, gold: 0, science: 0 };
     this.projectedEconomyDirty = true;
     this.mapVisualDirty = true;
     this.cachedUiSurface = null;
@@ -419,6 +420,7 @@ export class WorldScene extends Phaser.Scene {
     gameEvents.on("unit-action-requested", this.handleUnitActionRequested, this);
     gameEvents.on("city-production-tab-set-requested", this.handleCityProductionTabSetRequested, this);
     gameEvents.on("city-queue-enqueue-requested", this.handleCityQueueEnqueueRequested, this);
+    gameEvents.on("city-queue-rush-buy-requested", this.handleCityQueueRushBuyRequested, this);
     gameEvents.on("city-queue-move-requested", this.handleCityQueueMoveRequested, this);
     gameEvents.on("city-queue-remove-requested", this.handleCityQueueRemoveRequested, this);
     gameEvents.on("city-outcome-requested", this.handleCityOutcomeRequested, this);
@@ -445,6 +447,7 @@ export class WorldScene extends Phaser.Scene {
       gameEvents.off("unit-action-requested", this.handleUnitActionRequested, this);
       gameEvents.off("city-production-tab-set-requested", this.handleCityProductionTabSetRequested, this);
       gameEvents.off("city-queue-enqueue-requested", this.handleCityQueueEnqueueRequested, this);
+      gameEvents.off("city-queue-rush-buy-requested", this.handleCityQueueRushBuyRequested, this);
       gameEvents.off("city-queue-move-requested", this.handleCityQueueMoveRequested, this);
       gameEvents.off("city-queue-remove-requested", this.handleCityQueueRemoveRequested, this);
       gameEvents.off("city-outcome-requested", this.handleCityOutcomeRequested, this);
@@ -826,6 +829,36 @@ export class WorldScene extends Phaser.Scene {
     this.evaluateAndPublish();
   };
 
+  handleCityQueueRushBuyRequested = () => {
+    if (!this.canAcceptPlayerCommands() || !this.gameState.selectedCityId) {
+      return;
+    }
+
+    const result = rushBuyCityQueueFront(this.gameState.selectedCityId, this.gameState);
+    if (!result.ok) {
+      this.emitNotification(this.getRushBuyFailureMessage(result.reason), {
+        level: "warning",
+        category: "City",
+        focus: this.buildSelectionFocusPayload(),
+      });
+      this.evaluateAndPublish();
+      return;
+    }
+
+    this.evaluateAndPublish();
+    const producedSummary = (result.produced ?? []).join(", ");
+    this.emitNotification(
+      result.goldCost && result.goldCost > 0
+        ? `Rush-buy spent ${result.goldCost} gold.${producedSummary ? ` Completed: ${producedSummary}.` : ""}`
+        : "Rush-buy completed.",
+      {
+        level: "info",
+        category: "City",
+        focus: this.buildSelectionFocusPayload(),
+      }
+    );
+  };
+
   handleCityQueueMoveRequested = (payload) => {
     if (!this.canAcceptPlayerCommands() || !this.gameState.selectedCityId) {
       return;
@@ -968,6 +1001,22 @@ export class WorldScene extends Phaser.Scene {
       return "Select a city first.";
     }
     return "Could not add item to queue.";
+  }
+
+  getRushBuyFailureMessage(reason) {
+    if (reason === "queue-empty") {
+      return "Queue is empty. Add an item first.";
+    }
+    if (reason === "not-enough-gold") {
+      return "Not enough gold to rush-buy this item.";
+    }
+    if (reason === "no-spawn-hex") {
+      return "No valid spawn tile available for this unit.";
+    }
+    if (reason === "city-not-found") {
+      return "Select a city first.";
+    }
+    return "Could not rush-buy this queue item.";
   }
 
   getQueueMoveFailureMessage(reason, direction) {
@@ -2516,10 +2565,13 @@ export class WorldScene extends Phaser.Scene {
     const playerEconomy =
       this.gameState.economy[playerOwner] ??
       ({
-        foodStock: 0,
-        productionStock: 0,
+        goldBalance: 0,
+        goldIncomeLastTurn: 0,
+        goldUpkeepLastTurn: 0,
+        goldNetLastTurn: 0,
+        disabledUnitIds: [],
+        outputLastTurn: { food: 0, production: 0, gold: 0 },
         sciencePerTurn: 0,
-        lastTurnIncome: { food: 0, production: 0, science: 0 },
       });
     return {
       eventReason: reason,
@@ -2563,6 +2615,7 @@ export class WorldScene extends Phaser.Scene {
         movementRemaining: unit.movementRemaining,
         maxMovement: unit.maxMovement,
         hasActed: unit.hasActed,
+        disabled: !!unit.disabled,
       })),
       cities: this.gameState.cities.map((city) => ({
         id: city.id,
@@ -2573,6 +2626,7 @@ export class WorldScene extends Phaser.Scene {
         identity: city.identity,
         specialization: city.specialization,
         growthProgress: city.growthProgress,
+        productionProgress: city.productionProgress ?? 0,
         health: city.health,
         maxHealth: city.maxHealth,
         productionTab: city.productionTab,
@@ -2610,10 +2664,13 @@ export class WorldScene extends Phaser.Scene {
       },
       economy: {
         player: {
-          foodStock: playerEconomy.foodStock,
-          productionStock: playerEconomy.productionStock,
+          goldBalance: playerEconomy.goldBalance ?? 0,
+          goldIncomeLastTurn: playerEconomy.goldIncomeLastTurn ?? 0,
+          goldUpkeepLastTurn: playerEconomy.goldUpkeepLastTurn ?? 0,
+          goldNetLastTurn: playerEconomy.goldNetLastTurn ?? 0,
+          disabledUnitIds: [...(playerEconomy.disabledUnitIds ?? [])],
+          outputLastTurn: playerEconomy.outputLastTurn ? { ...playerEconomy.outputLastTurn } : null,
           sciencePerTurn: playerEconomy.sciencePerTurn ?? 0,
-          lastTurnIncome: playerEconomy.lastTurnIncome ? { ...playerEconomy.lastTurnIncome } : null,
         },
       },
       visibility: {
@@ -3146,10 +3203,13 @@ export class WorldScene extends Phaser.Scene {
     const playerEconomy =
       this.gameState.economy[playerOwner] ??
       ({
-        foodStock: 0,
-        productionStock: 0,
+        goldBalance: 0,
+        goldIncomeLastTurn: 0,
+        goldUpkeepLastTurn: 0,
+        goldNetLastTurn: 0,
+        disabledUnitIds: [],
+        outputLastTurn: { food: 0, production: 0, gold: 0 },
         sciencePerTurn: 0,
-        lastTurnIncome: { food: 0, production: 0, science: 0 },
       });
     const economyByOwner = Object.fromEntries(ownerOrder.map((owner) => [owner, this.gameState.economy[owner] ?? null]));
     const aiByOwner = this.gameState.ai?.byOwner ? structuredClone(this.gameState.ai.byOwner) : {};
@@ -3281,16 +3341,20 @@ export class WorldScene extends Phaser.Scene {
         turnLabel: `Turn ${this.gameState.turnState.turn} - ${this.gameState.turnState.phase === "enemy" ? "AI" : "Player"}`,
         devVisionEnabled: isPlayerDevVisionEnabled(this.gameState),
         resources: {
-          food: { current: playerEconomy.foodStock, delta: projectedNetIncome.food, grossDelta: projectedIncome.food },
+          food: {
+            current: playerEconomy.outputLastTurn?.food ?? projectedIncome.food,
+            delta: projectedNetIncome.food,
+            grossDelta: projectedIncome.food,
+          },
           production: {
-            current: playerEconomy.productionStock,
+            current: playerEconomy.outputLastTurn?.production ?? projectedIncome.production,
             delta: projectedNetIncome.production,
             grossDelta: projectedIncome.production,
           },
-          science: {
-            current: playerEconomy.sciencePerTurn ?? this.gameState.research.lastSciencePerTurn ?? 0,
-            delta: projectedNetIncome.science,
-            grossDelta: projectedIncome.science,
+          gold: {
+            current: playerEconomy.goldBalance ?? 0,
+            delta: projectedNetIncome.gold ?? 0,
+            grossDelta: projectedIncome.gold ?? 0,
           },
         },
       },
@@ -3338,6 +3402,7 @@ export class WorldScene extends Phaser.Scene {
     const projected = {
       food: 0,
       production: 0,
+      gold: 0,
       science: 0,
     };
     for (const city of this.gameState.cities) {
@@ -3347,6 +3412,7 @@ export class WorldScene extends Phaser.Scene {
       const cityYield = computeCityYield(city.id, this.gameState);
       projected.food += cityYield.food;
       projected.production += cityYield.production;
+      projected.gold += cityYield.gold ?? 0;
       projected.science += cityYield.science;
     }
     const projectedScience = computeOwnerSciencePerTurn(playerOwner, this.gameState);
@@ -3355,12 +3421,11 @@ export class WorldScene extends Phaser.Scene {
     const before = simulation.economy[playerOwner];
     if (!before) {
       this.cachedProjectedIncome = projected;
-      this.cachedProjectedNetIncome = { food: 0, production: 0, science: 0 };
+      this.cachedProjectedNetIncome = { food: 0, production: 0, gold: 0, science: 0 };
       this.projectedEconomyDirty = false;
       return;
     }
-    const beforeFood = before.foodStock;
-    const beforeProduction = before.productionStock;
+    const beforeGold = before.goldBalance ?? 0;
 
     processCityTurn(simulation, playerOwner);
     const projectedResearch = resolveResearchTurn(simulation, playerOwner);
@@ -3368,8 +3433,9 @@ export class WorldScene extends Phaser.Scene {
     const after = simulation.economy[playerOwner] ?? before;
     this.cachedProjectedIncome = projected;
     this.cachedProjectedNetIncome = {
-      food: after.foodStock - beforeFood,
-      production: after.productionStock - beforeProduction,
+      food: projected.food,
+      production: projected.production,
+      gold: (after.goldBalance ?? beforeGold) - beforeGold,
       science: projectedResearch.sciencePerTurn,
     };
     this.projectedEconomyDirty = false;
@@ -3390,6 +3456,7 @@ export class WorldScene extends Phaser.Scene {
       net: {
         food: projectedNetIncome?.food ?? 0,
         production: projectedNetIncome?.production ?? 0,
+        gold: projectedNetIncome?.gold ?? 0,
         science: projectedNetIncome?.science ?? 0,
       },
       pending: {
@@ -3434,6 +3501,7 @@ export class WorldScene extends Phaser.Scene {
         movementRemaining: selectedUnit.movementRemaining,
         maxMovement: selectedUnit.maxMovement,
         hasActed: selectedUnit.hasActed,
+        disabled: !!selectedUnit.disabled,
         attack: selectedUnit.attack,
         armor: selectedUnit.armor,
         minAttackRange: selectedUnit.minAttackRange,
@@ -3451,6 +3519,7 @@ export class WorldScene extends Phaser.Scene {
         maxHealth: selectedCity.maxHealth,
         identity: selectedCity.identity,
         specialization: selectedCity.specialization,
+        productionProgress: selectedCity.productionProgress ?? 0,
         productionTab: selectedCity.productionTab,
         buildings: [...(selectedCity.buildings ?? [])],
         campus: selectedCity.campus ? structuredClone(selectedCity.campus) : null,
@@ -3474,14 +3543,25 @@ export class WorldScene extends Phaser.Scene {
           typeof item === "string" ? { kind: "unit", id: item } : { kind: item.kind, id: item.id }
         ),
         cityProductionTab: uiSurface.uiActions.cityProductionTab,
-        cityProductionStock: uiSurface.uiActions.cityProductionStock,
+        cityProductionProgress: uiSurface.uiActions.cityProductionProgress,
         cityLocalProduction: uiSurface.uiActions.cityLocalProduction,
+        cityLocalFood: uiSurface.uiActions.cityLocalFood,
+        cityGrowthProgress: uiSurface.uiActions.cityGrowthProgress,
+        cityGrowthThreshold: uiSurface.uiActions.cityGrowthThreshold,
+        cityGrowthRemaining: uiSurface.uiActions.cityGrowthRemaining,
+        cityQueueFrontRemainingProduction: uiSurface.uiActions.cityQueueFrontRemainingProduction,
+        cityGoldBalance: uiSurface.uiActions.cityGoldBalance,
+        canRushBuyCityQueueFront: uiSurface.uiActions.canRushBuyCityQueueFront,
+        cityRushBuyCost: uiSurface.uiActions.cityRushBuyCost,
+        cityRushBuyRemainingProduction: uiSurface.uiActions.cityRushBuyRemainingProduction,
+        cityRushBuyReason: uiSurface.uiActions.cityRushBuyReason,
         canSetCityProductionTab: uiSurface.uiActions.canSetCityProductionTab,
         canQueueProduction: uiSurface.uiActions.canQueueProduction,
         cityQueueReason: uiSurface.uiActions.cityQueueReason,
         cityQueueSlots: uiSurface.uiActions.cityQueueSlots,
         cityProductionChoices: uiSurface.uiActions.cityProductionChoices,
         cityBuildingChoices: uiSurface.uiActions.cityBuildingChoices,
+        disabledUnitIds: uiSurface.uiActions.disabledUnitIds,
         disabledActionHints: uiSurface.uiActions.disabledActionHints,
       };
     }
@@ -3921,7 +4001,9 @@ export class WorldScene extends Phaser.Scene {
 
   getReadyPlayerUnits() {
     return this.gameState.units
-      .filter((unit) => unit.owner === "player" && unit.health > 0 && !unit.hasActed && unit.movementRemaining > 0)
+      .filter(
+        (unit) => unit.owner === "player" && unit.health > 0 && !unit.disabled && !unit.hasActed && unit.movementRemaining > 0
+      )
       .sort((a, b) => a.id.localeCompare(b.id));
   }
 

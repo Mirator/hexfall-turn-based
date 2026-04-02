@@ -1304,7 +1304,7 @@ function getVisibleHostileCities(gameState, owner) {
 }
 
 function getAliveUnits(gameState, owner) {
-  return gameState.units.filter((unit) => unit.owner === owner && unit.health > 0);
+  return gameState.units.filter((unit) => unit.owner === owner && unit.health > 0 && !unit.disabled);
 }
 
 function getAliveCities(gameState, owner) {
