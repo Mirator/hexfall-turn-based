@@ -97,6 +97,8 @@ const UI_SFX_ACTIONS = new Set([
 const SEMANTIC_COLORS = HUD_THEME.semanticColors;
 const PANEL_STROKE_WIDTH = HUD_THEME.panelStrokeWidth;
 const BUTTON_STROKE_WIDTH = HUD_THEME.buttonStrokeWidth;
+const DELTA_NEGATIVE_TEXT_COLOR = "#b3261e";
+const DELTA_TOOLTIP_DEFAULT_TEXT_COLOR = "#f5e8ca";
 
 const UNIT_LABELS = {
   warrior: "Warrior",
@@ -127,6 +129,11 @@ export class UIScene extends Phaser.Scene {
     this.latestState = null;
     this.hoverHint = null;
     this.disabledHoverText = null;
+    this.resourceDeltaBreakdowns = {
+      food: null,
+      production: null,
+      gold: null,
+    };
     this.pauseMenuOpen = false;
     this.restartConfirmOpen = false;
     this.techTreeModalOpen = false;
@@ -218,6 +225,9 @@ export class UIScene extends Phaser.Scene {
     this.productionDeltaLabel = this.createLabel("", 24, 78, "16px", SEMANTIC_COLORS.textPositive, 10);
     this.scienceLabel = this.createLabel("", 24, 104, "19px", "#22170d", 10);
     this.scienceDeltaLabel = this.createLabel("", 24, 106, "16px", SEMANTIC_COLORS.textPositive, 10);
+    this.configureResourceDeltaHover(this.foodDeltaLabel, "food");
+    this.configureResourceDeltaHover(this.productionDeltaLabel, "production");
+    this.configureResourceDeltaHover(this.scienceDeltaLabel, "gold");
     this.devVisionLabel = this.createLabel("", 24, 132, "16px", "#46331e", 10);
     this.menuButton = this.createButton("Menu", "open-menu", () => this.openPauseMenu(), {
       variant: "chip",
@@ -507,7 +517,7 @@ export class UIScene extends Phaser.Scene {
     this.previewDetails.setOrigin(0.5).setVisible(false);
     this.disabledTooltipPanel = this.add.rectangle(0, 0, 10, 10, SEMANTIC_COLORS.panelDarkBg, 0.94).setDepth(31).setVisible(false);
     this.disabledTooltipPanel.setStrokeStyle(1, 0xe3d4b2, 0.95);
-    this.disabledTooltipLabel = this.createLabel("", 0, 0, "12px", "#f5e8ca", 32).setVisible(false);
+    this.disabledTooltipLabel = this.createLabel("", 0, 0, "12px", DELTA_TOOLTIP_DEFAULT_TEXT_COLOR, 32).setVisible(false);
 
     this.notificationPanel = this.add.rectangle(0, 0, 360, 236, SEMANTIC_COLORS.panelSoftBg, 0.97).setDepth(16);
     this.notificationPanel.setStrokeStyle(PANEL_STROKE_WIDTH, SEMANTIC_COLORS.panelBorder, 0.9);
@@ -804,6 +814,46 @@ export class UIScene extends Phaser.Scene {
       ...(stroke ? { stroke, strokeThickness } : {}),
     };
     return this.add.text(x, y, text, config).setDepth(depth);
+  }
+
+  configureResourceDeltaHover(label, resourceKey) {
+    if (!label) {
+      return;
+    }
+    label.setInteractive({ useHandCursor: true });
+    label.on("pointerover", (pointer) => this.handleResourceDeltaHover(resourceKey, true, pointer));
+    label.on("pointerout", () => this.handleResourceDeltaHover(resourceKey, false));
+  }
+
+  refreshLabelHitArea(label) {
+    const hitArea = label?.input?.hitArea;
+    if (!hitArea || typeof hitArea.setTo !== "function") {
+      return;
+    }
+    hitArea.setTo(0, 0, Math.max(1, label.width), Math.max(1, label.height));
+  }
+
+  handleResourceDeltaHover(resourceKey, isEntering, pointer) {
+    if (!isEntering) {
+      this.hoverHint = null;
+      this.updateContextualHint();
+      this.hideDisabledTooltip();
+      return;
+    }
+    const breakdown = this.resourceDeltaBreakdowns?.[resourceKey] ?? null;
+    if (!breakdown || !breakdown.tooltip) {
+      return;
+    }
+    this.hoverHint = {
+      primary: truncateText(breakdown.hint, 160),
+      secondary: null,
+      level: "info",
+    };
+    this.updateContextualHint();
+    this.showDisabledTooltip(breakdown.tooltip, { textColor: breakdown.textColor });
+    if (pointer) {
+      this.updateDisabledTooltipPosition(pointer);
+    }
   }
 
   createButton(label, actionId, onClick, options = {}) {
@@ -2459,8 +2509,61 @@ export class UIScene extends Phaser.Scene {
     const pendingOrders = readyUnits + pendingQueues;
     const projected = gameState.projectedNetIncome ?? gameState.projectedIncome ?? { food: 0, production: 0, gold: 0, science: 0 };
     const economy = gameState.economy?.player ?? { goldBalance: 0, goldNetLastTurn: 0 };
-    const growthSummary = buildGrowthSummary(gameState);
-    const queueSummary = buildQueueSummary(gameState);
+    const foodResource = gameState.hudTopLeft?.resources?.food ?? { current: projected.food ?? 0, delta: projected.food ?? 0 };
+    const productionResource = gameState.hudTopLeft?.resources?.production ?? {
+      current: projected.production ?? 0,
+      delta: projected.production ?? 0,
+    };
+    const goldResource = gameState.hudTopLeft?.resources?.gold ?? {
+      current: economy.goldBalance ?? 0,
+      delta: projected.gold ?? economy.goldNetLastTurn ?? 0,
+    };
+    const foodCurrent = Number.isFinite(foodResource.current) ? foodResource.current : 0;
+    const foodDelta = Number.isFinite(foodResource.delta) ? foodResource.delta : projected.food ?? 0;
+    const productionCurrent = Number.isFinite(productionResource.current) ? productionResource.current : 0;
+    const productionDelta = Number.isFinite(productionResource.delta) ? productionResource.delta : projected.production ?? 0;
+    const goldCurrent = Number.isFinite(goldResource.current) ? goldResource.current : economy.goldBalance ?? 0;
+    const goldDelta = Number.isFinite(goldResource.delta) ? goldResource.delta : projected.gold ?? economy.goldNetLastTurn ?? 0;
+    const foodGrossDelta = Number.isFinite(foodResource.grossDelta) ? foodResource.grossDelta : projected.food ?? foodDelta;
+    const productionGrossDelta = Number.isFinite(productionResource.grossDelta)
+      ? productionResource.grossDelta
+      : projected.production ?? productionDelta;
+    const goldGrossDelta = Number.isFinite(goldResource.grossDelta) ? goldResource.grossDelta : projected.gold ?? goldDelta;
+    const foodAdjustments = foodDelta - foodGrossDelta;
+    const productionAdjustments = productionDelta - productionGrossDelta;
+    const goldAdjustments = goldDelta - goldGrossDelta;
+    const goldIncomeLastTurn = Number.isFinite(economy.goldIncomeLastTurn) ? economy.goldIncomeLastTurn : 0;
+    const goldUpkeepLastTurn = Number.isFinite(economy.goldUpkeepLastTurn) ? economy.goldUpkeepLastTurn : 0;
+    const goldNetLastTurn = Number.isFinite(economy.goldNetLastTurn)
+      ? economy.goldNetLastTurn
+      : goldIncomeLastTurn - goldUpkeepLastTurn;
+    this.resourceDeltaBreakdowns = {
+      food: {
+        hint: `Food delta ${formatSigned(foodDelta)} = gross ${formatSigned(foodGrossDelta)} + adjustments ${formatSigned(foodAdjustments)}`,
+        tooltip: `Net food delta = gross food + adjustments\nGross food (worked tiles): ${formatSigned(
+          foodGrossDelta
+        )}\nAdjustments: ${formatSigned(foodAdjustments)}\nNet food delta: ${formatSigned(foodDelta)}`,
+        textColor: getDeltaColor(foodDelta),
+      },
+      production: {
+        hint: `Production delta ${formatSigned(productionDelta)} = gross ${formatSigned(productionGrossDelta)} + adjustments ${formatSigned(productionAdjustments)}`,
+        tooltip: `Net production delta = gross production + adjustments\nGross production (worked tiles): ${formatSigned(
+          productionGrossDelta
+        )}\nAdjustments: ${formatSigned(productionAdjustments)}\nNet production delta: ${formatSigned(productionDelta)}`,
+        textColor: getDeltaColor(productionDelta),
+      },
+      gold: {
+        hint: `Gold delta ${formatSigned(goldDelta)} = gross ${formatSigned(goldGrossDelta)} + adjustments ${formatSigned(goldAdjustments)}`,
+        tooltip: `Projected net gold = gross gold + adjustments\nGross gold (worked tiles): ${formatSigned(
+          goldGrossDelta
+        )}\nAdjustments (upkeep/penalties): ${formatSigned(goldAdjustments)}\nProjected net gold: ${formatSigned(
+          goldDelta
+        )}\nLast resolved turn: income ${formatSigned(goldIncomeLastTurn)} - upkeep ${formatMetric(
+          goldUpkeepLastTurn
+        )} = ${formatSigned(goldNetLastTurn)}`,
+        textColor: getDeltaColor(goldDelta),
+      },
+    };
 
     if (!this.contextPanelPinned && selectionKey !== this.lastContextSelectionKey && selectionKey !== "none") {
       this.contextPanelExpanded = true;
@@ -2472,15 +2575,15 @@ export class UIScene extends Phaser.Scene {
     const turnMinFontSize = this.scale.width < TABLET_LAYOUT_BREAKPOINT ? 17 : 19;
     const turnMaxWidth = Math.max(140, this.topHudPanel.displayWidth - 24);
     this.fitTextSizeToWidth(this.turnLabel, turnPreferredFontSize, turnMinFontSize, turnMaxWidth);
-    this.foodLabel.setText(`Food: ${formatSigned(projected.food)}/turn`);
-    this.foodDeltaLabel.setText(`(${growthSummary})`);
-    this.foodDeltaLabel.setColor(SEMANTIC_COLORS.textMuted);
-    this.productionLabel.setText(`Production: ${formatSigned(projected.production)}/turn`);
-    this.productionDeltaLabel.setText(`(${queueSummary})`);
-    this.productionDeltaLabel.setColor(SEMANTIC_COLORS.textMuted);
-    this.scienceLabel.setText(`Gold: ${formatMetric(economy.goldBalance ?? 0)}`);
-    this.scienceDeltaLabel.setText(`(${formatSigned(projected.gold ?? economy.goldNetLastTurn ?? 0)})`);
-    this.scienceDeltaLabel.setColor(getDeltaColor(projected.gold ?? economy.goldNetLastTurn ?? 0));
+    this.foodLabel.setText(`Food: ${formatMetric(foodCurrent)}`);
+    this.foodDeltaLabel.setText(`(${formatSigned(foodDelta)})`);
+    this.foodDeltaLabel.setColor(getDeltaColor(foodDelta));
+    this.productionLabel.setText(`Production: ${formatMetric(productionCurrent)}`);
+    this.productionDeltaLabel.setText(`(${formatSigned(productionDelta)})`);
+    this.productionDeltaLabel.setColor(getDeltaColor(productionDelta));
+    this.scienceLabel.setText(`Gold: ${formatMetric(goldCurrent)}`);
+    this.scienceDeltaLabel.setText(`(${formatSigned(goldDelta)})`);
+    this.scienceDeltaLabel.setColor(getDeltaColor(goldDelta));
     this.devVisionLabel.setText(`Dev Vision: ${gameState.devVisionEnabled ? "ON (V)" : "OFF (V)"}`);
     this.devVisionLabel.setColor(gameState.devVisionEnabled ? "#2f7a41" : "#5a4224");
     this.setSfxMuted(this.uiSfxMuted);
@@ -3498,14 +3601,16 @@ export class UIScene extends Phaser.Scene {
     }
   }
 
-  showDisabledTooltip(message) {
+  showDisabledTooltip(message, options = {}) {
     if (!message) {
       this.hideDisabledTooltip();
       return;
     }
     this.disabledHoverText = message;
     const pointer = this.input.activePointer;
+    const textColor = typeof options.textColor === "string" ? options.textColor : DELTA_TOOLTIP_DEFAULT_TEXT_COLOR;
     this.disabledTooltipLabel.setText(message);
+    this.disabledTooltipLabel.setColor(textColor);
     const width = Math.min(320, Math.max(110, this.disabledTooltipLabel.width + 14));
     const height = Math.max(24, this.disabledTooltipLabel.height + 10);
     this.disabledTooltipPanel.setSize(width, height);
@@ -3880,6 +3985,9 @@ export class UIScene extends Phaser.Scene {
     this.foodDeltaLabel.setPosition(this.foodLabel.x + this.foodLabel.width + 6, this.foodLabel.y + 2);
     this.productionDeltaLabel.setPosition(this.productionLabel.x + this.productionLabel.width + 6, this.productionLabel.y + 2);
     this.scienceDeltaLabel.setPosition(this.scienceLabel.x + this.scienceLabel.width + 6, this.scienceLabel.y + 2);
+    this.refreshLabelHitArea(this.foodDeltaLabel);
+    this.refreshLabelHitArea(this.productionDeltaLabel);
+    this.refreshLabelHitArea(this.scienceDeltaLabel);
   }
 
   testOpenPauseMenu() {
@@ -4160,6 +4268,22 @@ export class UIScene extends Phaser.Scene {
       return false;
     }
     this.showDisabledTooltip(message);
+    return true;
+  }
+
+  testShowResourceDeltaTooltip(resourceKey) {
+    if (typeof resourceKey !== "string") {
+      return false;
+    }
+    const normalizedKey = resourceKey.toLowerCase();
+    if (!["food", "production", "gold"].includes(normalizedKey)) {
+      return false;
+    }
+    const breakdown = this.resourceDeltaBreakdowns?.[normalizedKey] ?? null;
+    if (!breakdown?.tooltip) {
+      return false;
+    }
+    this.showDisabledTooltip(breakdown.tooltip, { textColor: breakdown.textColor });
     return true;
   }
 
@@ -4580,68 +4704,6 @@ function formatSigned(value) {
   return `${value >= 0 ? "+" : ""}${formatMetric(value)}`;
 }
 
-function buildGrowthSummary(gameState) {
-  const playerOwner = gameState?.factions?.playerOwner ?? "player";
-  const playerCities = (gameState?.cities ?? []).filter((city) => city.owner === playerOwner);
-  if (playerCities.length === 0) {
-    return "No cities";
-  }
-
-  let growingCities = 0;
-  let nextGrowthTurns = null;
-  for (const city of playerCities) {
-    const foodPerTurn = Math.max(0, city.yieldLastTurn?.food ?? 0);
-    if (foodPerTurn <= 0) {
-      continue;
-    }
-    growingCities += 1;
-    const threshold = Math.max(1, 8 + (Math.max(1, city.population ?? 1) - 1) * 4);
-    const progress = Math.max(0, city.growthProgress ?? 0);
-    const remaining = Math.max(0, threshold - progress);
-    const turnsToGrowth = Math.ceil(remaining / foodPerTurn);
-    if (nextGrowthTurns === null || turnsToGrowth < nextGrowthTurns) {
-      nextGrowthTurns = turnsToGrowth;
-    }
-  }
-
-  if (growingCities === 0) {
-    return `${playerCities.length} stalled`;
-  }
-
-  if (nextGrowthTurns === 0) {
-    return `${growingCities}/${playerCities.length} growing, next pop ready`;
-  }
-
-  return `${growingCities}/${playerCities.length} growing, next pop in ${formatTurns(nextGrowthTurns ?? 0)}`;
-}
-
-function buildQueueSummary(gameState) {
-  const playerOwner = gameState?.factions?.playerOwner ?? "player";
-  const playerCities = (gameState?.cities ?? []).filter((city) => city.owner === playerOwner);
-  if (playerCities.length === 0) {
-    return "No cities";
-  }
-
-  let activeQueues = 0;
-  let emptyQueues = 0;
-  let totalQueuedItems = 0;
-  for (const city of playerCities) {
-    const queue = Array.isArray(city.queue) ? city.queue : [];
-    totalQueuedItems += queue.length;
-    if (queue.length === 0) {
-      emptyQueues += 1;
-    } else {
-      activeQueues += 1;
-    }
-  }
-
-  if (activeQueues === 0) {
-    return `${emptyQueues} empty queues`;
-  }
-
-  return `${activeQueues} active, ${emptyQueues} empty (${totalQueuedItems} queued)`;
-}
-
 function formatCityScienceBreakdown(cityId, gameState) {
   if (!cityId) {
     return null;
@@ -4666,7 +4728,7 @@ function getDeltaColor(value) {
     return SEMANTIC_COLORS.textPositive;
   }
   if (value < 0) {
-    return SEMANTIC_COLORS.textWarning;
+    return DELTA_NEGATIVE_TEXT_COLOR;
   }
   return SEMANTIC_COLORS.textMuted;
 }
