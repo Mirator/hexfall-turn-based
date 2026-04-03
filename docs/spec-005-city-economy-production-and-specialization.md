@@ -78,6 +78,7 @@
   - city yields aggregate from worked hexes plus building yield bonuses
   - growth increments `growthProgress` and can trigger multiple population gains if threshold is exceeded
   - production increments `productionProgress`; front queue item completes when progress meets cost
+  - UI ETA values are dynamic snapshots (not fixed promises) and can change as growth updates population/worked-hex yields
   - queue-front completion consumes only required progress and carries overflow to subsequent queue items
   - queue-front unit completion requires valid spawn hex
   - queue-front building completion requires unlocks/prerequisites and updates city building state

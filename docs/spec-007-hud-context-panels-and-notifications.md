@@ -63,6 +63,7 @@
   - `uiActions.cityProductionTab`
   - `uiActions.cityProductionChoices`
   - `uiActions.cityBuildingChoices`
+  - `uiActions.cityEtaHint` (dynamic ETA hint string, growth-aware when near growth)
   - `uiActions.canRushBuyCityQueueFront`
   - `uiActions.cityRushBuyCost`
   - `uiActions.cityRushBuyReason`
@@ -107,6 +108,7 @@
 - City queue context behavior:
   - city queue rail is visible only when a player city is selected
   - queue card exposes per-slot labels/ETA/reorder/remove controls
+  - dynamic ETA hint is visible in city queue rail details, expanded city context secondary metadata, and production hover tooltip text
   - rush-buy button state is deterministic and mirrors `canRushBuyCityQueueFront` + reason/cost payloads
 - Notification behavior:
   - research completion and boost-trigger notifications use `Research` category

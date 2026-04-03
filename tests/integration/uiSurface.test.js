@@ -91,9 +91,14 @@ describe("UI surface hints/actions", () => {
     expect(ui.uiActions.cityQueueSlots[0].empty).toBe(true);
     expect(typeof ui.uiActions.cityProductionProgress).toBe("number");
     expect(typeof ui.uiActions.cityLocalProduction).toBe("number");
+    expect(typeof ui.uiActions.cityEtaHint).toBe("string");
+    expect(ui.uiActions.cityEtaHint).toContain("ETA is dynamic");
     expect(typeof ui.uiActions.cityGoldBalance).toBe("number");
     expect(ui.uiActions.cityProductionChoices[0].hoverText).toContain("Production Cost");
+    expect(ui.uiActions.cityProductionChoices[0].hoverText).toContain("ETA Note:");
+    expect(ui.uiActions.cityProductionChoices[0].hoverText).toContain("ETA is dynamic");
     expect(ui.uiActions.cityBuildingChoices[0].hoverText).toContain("Estimated Turns");
+    expect(ui.uiActions.cityBuildingChoices[0].hoverText).toContain("ETA Note:");
     expect(ui.uiActions.canRushBuyCityQueueFront).toBe(false);
     expect(ui.uiActions.cityRushBuyReason).toContain("Queue is empty");
     expect(ui.uiHints.primary).toContain("City selected");

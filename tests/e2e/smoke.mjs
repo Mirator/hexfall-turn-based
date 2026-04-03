@@ -904,14 +904,19 @@ async function run() {
       if (
         !hoverPanel?.disabledTooltip?.visible ||
         !String(hoverText).includes("Production Cost") ||
-        !String(hoverText).includes("Estimated Turns")
+        !String(hoverText).includes("Estimated Turns") ||
+        !String(hoverText).includes("ETA is dynamic")
       ) {
-        return { ok: false, reason: "city-action-tooltip-missing-cost-eta" };
+        return { ok: false, reason: "city-action-tooltip-missing-dynamic-eta" };
       }
       window.__hexfallTest.hideCityActionTooltip();
       const firstChoiceHover = getState().uiActions?.cityProductionChoices?.[0]?.hoverText ?? "";
-      if (!String(firstChoiceHover).includes("Production Cost") || !String(firstChoiceHover).includes("Estimated Turns")) {
-        return { ok: false, reason: "production-hover-text-missing-cost-eta" };
+      if (
+        !String(firstChoiceHover).includes("Production Cost") ||
+        !String(firstChoiceHover).includes("Estimated Turns") ||
+        !String(firstChoiceHover).includes("ETA is dynamic")
+      ) {
+        return { ok: false, reason: "production-hover-text-missing-dynamic-eta" };
       }
       const cityPanelAfterQueue = window.__hexfallTest.getCityPanelState();
       const firstProductionLabel = cityPanelAfterQueue?.cityProductionButtons?.[0]?.label ?? "";

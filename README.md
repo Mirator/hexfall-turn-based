@@ -68,6 +68,7 @@ npm run dev
 - Select a settler and press `Found City` (or key `F`)
 - Use city context panel `Units|Buildings` tabs to enqueue production
 - Use the right-rail `City Queue` card (when a city is selected) to reorder/remove queue slots and `Rush Buy` front item
+- Production `Estimated Turns` is dynamic and can change as city growth updates worked yields
 - Click `Stats` to open progress details and manage diplomacy (`Offer Peace` / `Declare War`) for met factions
 - Click `Tech Tree` (next to `Stats`) to open the read-only horizontal technology graph modal
 - Use minimap click/focus controls to jump camera

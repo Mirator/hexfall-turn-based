@@ -3101,14 +3101,21 @@ export class UIScene extends Phaser.Scene {
             : `Rush buy blocked: ${rushBuyReason ?? "Unavailable"}`
           : "Rush buy unavailable (queue empty)";
         const progressText = queueHasFront ? `${productionProgress}/${queueFrontCost}` : "0 (queue empty)";
+        const cityEtaHint = gameState.uiActions?.cityEtaHint ?? null;
+        const secondaryParts = [];
+        if (scienceBreakdown) {
+          secondaryParts.push(scienceBreakdown);
+        }
+        secondaryParts.push(`Production progress ${progressText}`);
+        secondaryParts.push(`Local production per turn +${localProduction}`);
+        secondaryParts.push(rushBuyText);
+        if (cityEtaHint) {
+          secondaryParts.push(cityEtaHint);
+        }
         this.contextPanelMetaPrimary.setText(
           `Local Food ${localYield.food} | Local Production ${localYield.production} | Local Gold ${localYield.gold ?? 0} | Local Science ${localYield.science} | Identity ${selectedCity.identity}`
         );
-        this.contextPanelMetaSecondary.setText(
-          scienceBreakdown
-            ? `${scienceBreakdown} | Production progress ${progressText} | Local production per turn +${localProduction} | ${rushBuyText}`
-            : `Production progress ${progressText} | Local production per turn +${localProduction} | ${rushBuyText}`
-        );
+        this.contextPanelMetaSecondary.setText(secondaryParts.join(" | "));
       }
 
       const productionTab = gameState.uiActions?.cityProductionTab ?? "units";
@@ -3282,12 +3289,22 @@ export class UIScene extends Phaser.Scene {
       : nextSlot.etaTurns === 0
         ? `${nextSlot.label} is ready now.`
         : `${nextSlot.label} in ${formatTurns(nextSlot.etaTurns)}.`;
+    const cityEtaHint = gameState.uiActions?.cityEtaHint ?? null;
+    const tertiaryParts = [
+      `Production progress ${progressText}`,
+      `Local production per turn +${localProduction}`,
+      rushBuyText,
+      `Next completion: ${nextCompletion}`,
+    ];
+    if (cityEtaHint) {
+      tertiaryParts.push(cityEtaHint);
+    }
     return {
       primary: `${formatCityName(selectedCity.id)} | Population ${selectedCity.population} | Identity ${selectedCity.identity}`,
       secondary: scienceBreakdown
         ? `Local Food ${localYield.food} | Local Production ${localYield.production} | Local Gold ${localYield.gold ?? 0} | ${scienceBreakdown}`
         : `Local Food ${localYield.food} | Local Production ${localYield.production} | Local Gold ${localYield.gold ?? 0} | Local Science ${localYield.science}`,
-      tertiary: `Production progress ${progressText} | Local production per turn +${localProduction} | ${rushBuyText} | Next completion: ${nextCompletion}`,
+      tertiary: tertiaryParts.join(" | "),
     };
   }
 

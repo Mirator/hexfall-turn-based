@@ -685,3 +685,23 @@ Viewport support note (2026-03-27): legacy mentions of mobile checks/artifacts i
     - documented diplomacy-aware hostile targeting (AI attacks `war` relations only).
   - `docs/spec-011-science-overhaul.md`:
     - clarified current tech-tree modal scope in known gaps.
+## 2026-04-03 (Dynamic ETA visibility + docs UX clarity)
+- Implemented dynamic ETA hint plumbing in `src/systems/uiSurfaceSystem.js`:
+  - added `uiActions.cityEtaHint: string | null` to the derived UI payload/JSDoc contract,
+  - introduced growth-aware hint generation using city simulation (`growth next turn` / `growth in ~N turns`) with generic fallback when timing is unclear,
+  - appended the dynamic ETA note as the final line in production hover text for both unit and building choices.
+- Updated city UI surfaces in `src/scenes/UIScene.js`:
+  - expanded city context secondary metadata now includes `cityEtaHint`,
+  - right-rail city queue tertiary details now include `cityEtaHint`.
+- Updated docs for player-facing expectation alignment:
+  - `docs/spec-005-city-economy-production-and-specialization.md` now states ETA values are dynamic snapshots that can change with growth/worked-yield shifts,
+  - `docs/spec-007-hud-context-panels-and-notifications.md` now documents `uiActions.cityEtaHint` and its visibility contract across queue/context/hover surfaces,
+  - `README.md` controls now note that production `Estimated Turns` can change as cities grow.
+- Updated automated checks:
+  - `tests/integration/uiSurface.test.js` now asserts `cityEtaHint` exists for selected player cities and that hover text includes dynamic ETA wording,
+  - `tests/e2e/smoke.mjs` tooltip expectations now require dynamic ETA wording alongside cost/turns lines.
+- Verification completed:
+  - `npm run lint` passed.
+  - `npm test -- tests/integration/uiSurface.test.js` passed.
+  - `npm test` passed (16 files, 97 tests).
+  - `npm run test:e2e` passed.

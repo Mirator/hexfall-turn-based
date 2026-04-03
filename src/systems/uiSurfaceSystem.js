@@ -56,6 +56,7 @@ const ETA_SIM_MAX_TURNS = 24;
  *     cityQueueItems: QueueItem[],
  *     cityProductionProgress: number,
  *     cityLocalProduction: number,
+ *     cityEtaHint: string|null,
  *     cityQueueSlots: Array<{
  *       index: number,
  *       empty: boolean,
@@ -160,6 +161,13 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
   const localFood = selectedPlayerCity ? Math.max(0, selectedCity.yieldLastTurn?.food ?? 0) : 0;
   const growthThreshold = selectedPlayerCity ? Math.max(1, 8 + (Math.max(1, selectedCity.population) - 1) * 4) : 1;
   const growthRemaining = selectedPlayerCity ? Math.max(0, growthThreshold - Math.max(0, selectedCity.growthProgress ?? 0)) : 0;
+  const cityEtaHint = buildCityEtaHint({
+    gameState,
+    city: selectedCity,
+    selectedPlayerCity,
+    localFood,
+    growthRemaining,
+  });
   const goldBalance = cityEconomyBucket?.goldBalance ?? 0;
   const productionRate = Math.max(1, localProduction);
   const estimateChoiceEtaTurns =
@@ -206,6 +214,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
         productionProgress,
         localProduction,
         reasonText: reason.text,
+        cityEtaHint,
       }),
     };
   });
@@ -260,6 +269,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
         productionProgress,
         localProduction,
         reasonText: reason.text,
+        cityEtaHint,
       }),
     };
   });
@@ -377,6 +387,7 @@ export function deriveUiSurface(gameState, selectedUnit, selectedCity, attackabl
       cityGrowthProgress: selectedPlayerCity ? Math.max(0, selectedCity.growthProgress ?? 0) : 0,
       cityGrowthThreshold: growthThreshold,
       cityGrowthRemaining: growthRemaining,
+      cityEtaHint,
       cityQueueFrontRemainingProduction: queueFrontRemaining,
       cityGoldBalance: goldBalance,
       canRushBuyCityQueueFront: !!rushBuyCheck.ok,
@@ -728,6 +739,43 @@ function getGrowthThreshold(population) {
   return 8 + (Math.max(1, Number(population) || 1) - 1) * 4;
 }
 
+function buildCityEtaHint({ gameState, city, selectedPlayerCity, localFood, growthRemaining }) {
+  if (!selectedPlayerCity || !city) {
+    return null;
+  }
+  const growthTurns = estimateGrowthTurnsWithSimulation(gameState, city.id, localFood, growthRemaining);
+  if (growthTurns === 1) {
+    return "ETA is dynamic: growth next turn may increase production.";
+  }
+  if (Number.isFinite(growthTurns) && growthTurns > 1 && growthTurns <= 4) {
+    return `ETA is dynamic: growth in ~${growthTurns} turns may increase production.`;
+  }
+  return "ETA is dynamic and can change as population growth shifts worked yields.";
+}
+
+function estimateGrowthTurnsWithSimulation(gameState, cityId, localFood, growthRemaining) {
+  const simulation = createCityEtaSimulation(gameState, cityId);
+  if (simulation?.city) {
+    const initialPopulation = Math.max(1, Math.round(Number(simulation.city.population) || 1));
+    for (let turn = 1; turn <= ETA_SIM_MAX_TURNS; turn += 1) {
+      advanceCityEtaSimulationTurn(simulation);
+      const simulatedPopulation = Math.max(1, Math.round(Number(simulation.city.population) || 1));
+      if (simulatedPopulation > initialPopulation) {
+        return turn;
+      }
+    }
+  }
+  const normalizedGrowthRemaining = Math.max(0, Number(growthRemaining) || 0);
+  const normalizedFood = Math.max(0, Number(localFood) || 0);
+  if (normalizedGrowthRemaining <= 0) {
+    return 1;
+  }
+  if (normalizedFood <= 0) {
+    return null;
+  }
+  return Math.max(1, Math.ceil(normalizedGrowthRemaining / normalizedFood));
+}
+
 function getRushBuyReasonText(reason) {
   if (!reason) {
     return null;
@@ -747,7 +795,7 @@ function getRushBuyReasonText(reason) {
   return "Rush-buy is unavailable right now.";
 }
 
-function buildProductionChoiceHoverText({ label, cost, etaTurns, productionProgress, localProduction, reasonText }) {
+function buildProductionChoiceHoverText({ label, cost, etaTurns, productionProgress, localProduction, reasonText, cityEtaHint }) {
   const lines = [
     `${label}`,
     `Production Cost: ${cost} | Estimated Turns: ${formatTurnsLabel(etaTurns)}`,
@@ -755,6 +803,9 @@ function buildProductionChoiceHoverText({ label, cost, etaTurns, productionProgr
   ];
   if (reasonText) {
     lines.push(reasonText);
+  }
+  if (cityEtaHint) {
+    lines.push(`ETA Note: ${cityEtaHint}`);
   }
   return lines.join("\n");
 }
